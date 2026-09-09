@@ -8260,14 +8260,46 @@ def chat_scenario(driver: WindowDriver, workspace: Path) -> None:
     chat = next(root.glob("*/metadata.json")).parent
     driver.wait_for_stable_frame("empty chat", crop=(260, 40, 960, 500), stable_for=0.2)
     shutil.copyfile(driver.capture("chat-empty"), Path("/workspace/dist/chat-empty.png"))
+    composer_crop = (280, 620, 900, 105)
+    unfocused = driver.wait_for_stable_frame("unfocused placeholder has no blinking caret",
+                                             crop=composer_crop, stable_for=1.2)
+    driver.click_point(480, 670)
+    focused = driver.wait_for_visual_change("empty composer caret starts before placeholder",
+                                            unfocused, crop=(283, 625, 5, 40),
+                                            minimum_pixels=10, timeout=2)
+    driver.wait_for_visual_change("focused composer caret blinks", focused,
+                                  crop=(283, 625, 5, 40), minimum_pixels=10, timeout=2)
+    driver.xdotool("windowfocus", "0")
+    inactive = driver.wait_for_stable_frame("inactive window hides composer caret",
+                                           crop=composer_crop, stable_for=1.2)
+    if image_difference(unfocused, inactive, crop=composer_crop) != 0:
+        raise AcceptanceFailure("inactive window retained the composer caret")
+    driver.xdotool("windowfocus", "--sync", driver.window_id)
+    # Giving the toolbar keyboard focus must hide the caret without changing the draft.
+    driver.click_point(1052, 36)
+    driver.click_point(520, 80)
+    driver.wait_for_stable_frame("composer loses focus to rename input",
+                                 crop=composer_crop, stable_for=1.2)
+    driver.click_point(1052, 36)
     driver.click_point(480, 670)
     driver.type_text("First line")
     driver.key("shift+Return")
     driver.type_text("second line")
     wait_until("multiline chat draft persisted", lambda: json.loads((chat / "draft.json").read_text())["data"]["text"] == "First line\nsecond line", timeout=10)
+    set_clipboard_text(driver.environment, " pasted")
+    driver.key("ctrl+v")
+    wait_until("composer paste", lambda: json.loads((chat / "draft.json").read_text())["data"]["text"] == "First line\nsecond line pasted")
+    driver.key("ctrl+z")
+    wait_until("composer Undo", lambda: json.loads((chat / "draft.json").read_text())["data"]["text"] == "First line\nsecond line")
+    driver.key("ctrl+shift+z")
+    wait_until("composer Redo", lambda: json.loads((chat / "draft.json").read_text())["data"]["text"] == "First line\nsecond line pasted")
+    driver.key("ctrl+z")
+    wait_until("composer restores original draft", lambda: json.loads((chat / "draft.json").read_text())["data"]["text"] == "First line\nsecond line")
     driver.close_app()
     driver.start_app(workspace, "chat-restored", environment_overrides=fixture)
     driver.wait_for_stable_frame("restored chat composer", crop=(260, 540, 960, 60), stable_for=0.2)
+    driver.wait_for_stable_frame("restored draft has no unfocused caret",
+                                 crop=composer_crop, stable_for=1.2)
     state = json.loads((workspace / ".stillus" / "settings.json").read_text())
     if state.get("selected_chat") != chat.name:
         raise AcceptanceFailure("chat selection was not restored")
@@ -8304,12 +8336,15 @@ def chat_scenario(driver: WindowDriver, workspace: Path) -> None:
     driver.key("Return")
     wait_until("chat generation completed", lambda: (chat / "run.json").exists() and json.loads((chat / "run.json").read_text())["data"]["status"] == "completed", timeout=15)
     driver.wait_for_stable_frame("native streamed reply", crop=(260, 70, 960, 460), stable_for=0.2)
+    driver.wait_for_stable_frame("empty composer after sending has no unfocused caret",
+                                 crop=(280, 615, 900, 105), stable_for=1.2)
     response_frame = driver.capture("chat-response")
     shutil.copyfile(response_frame, Path("/workspace/dist/chat-preview.png"))
-    copy_rows = shaded_row_runs(response_frame, x=1219, y=100, height=450,
-                                max_luminance=AI_CARD_BORDER_LUMINANCE)
-    if len([(start, end) for start, end in copy_rows if end - start >= 20]) < 2:
-        raise AcceptanceFailure("chat exchanges are not arranged as a vertical history")
+    # A 75%-width user bubble starts at x=512; assistant prose stays at x=276.
+    if near_color_pixel_count(response_frame, (246, 247, 248), crop=(520, 70, 650, 70), tolerance=1) < 20000:
+        raise AcceptanceFailure("user message does not have a right-aligned bubble")
+    if dark_pixel_count(response_frame, crop=(276, 70, 200, 70)) > 0:
+        raise AcceptanceFailure("user message escaped the right-hand bubble")
     history = [json.loads(path.read_text())["data"] for path in sorted((chat / "messages").glob("*.json"))]
     if [message["role"] for message in history] != ["user", "assistant"]:
         raise AcceptanceFailure("chat did not preserve the linear exchange")
@@ -8375,8 +8410,12 @@ def chat_scenario(driver: WindowDriver, workspace: Path) -> None:
     driver.type_text("Reading")
     driver.key("Return")
     wait_until("chat categorized", lambda: json.loads((stopped / "metadata.json").read_text())["data"]["common"]["categories"] == ["Reading"])
+    before_pin = driver.capture("chat-before-pin")
     driver.click_point(1128, 36)
     wait_until("chat pinned", lambda: json.loads((stopped / "metadata.json").read_text())["data"]["common"]["pinned"])
+    driver.wait_for_visual_change("pinned metadata applied to toolbar", before_pin,
+                                  crop=(1112, 20, 32, 32), minimum_pixels=30)
+    driver.wait_for_stable_frame("pinned toolbar", crop=(1112, 20, 32, 32), stable_for=0.2)
     driver.click_point(1166, 36)
     wait_until("chat favorited", lambda: json.loads((stopped / "metadata.json").read_text())["data"]["common"]["favorited"])
     if json.loads((stopped / "metadata.json").read_text())["data"]["automatic_title"]:
@@ -8384,9 +8423,128 @@ def chat_scenario(driver: WindowDriver, workspace: Path) -> None:
     if {path.name: path.read_bytes() for path in (stopped / "messages").glob("*.json")} != conversation:
         raise AcceptanceFailure("organizing a chat rewrote its conversation")
     shutil.copyfile(driver.capture("chat-background"), Path("/workspace/dist/chat-background.png"))
+    layout = create_and_send("layout fixture")
+    driver.click_point(480, 670)
+    driver.type_text("next draft")
+    wait_until("streamed history grows beyond its viewport", lambda: sum(
+        end - start for start, end in shaded_row_runs(driver.capture("chat-growing"),
+                                                     x=1215, y=100, height=450,
+                                                     max_luminance=160)) > 30, timeout=15)
+    driver.xdotool("mousemove", "--window", driver.window_id, "700", "250", "click", "--repeat", "10", "--delay", "30", "4")
+    reading = driver.wait_for_stable_frame("reading earlier text during streaming",
+                                          crop=(280, 80, 920, 180), stable_for=0.2)
+    wait_until("long streamed response completed", lambda: json.loads((layout / "run.json").read_text())["data"]["status"] == "completed", timeout=20)
+    # A streamed update must not replace the editor or take away its focus.
+    driver.type_text(" still focused")
+    wait_until("draft retains focus during streaming", lambda: json.loads((layout / "draft.json").read_text())["data"]["text"] == "next draft still focused")
+    if image_difference(reading, driver.capture("chat-reading-after-stream"), crop=(280, 80, 920, 180)) != 0:
+        raise AcceptanceFailure("streaming pulled the reader away from earlier text")
+    driver.click_point(1014, 36)
+    driver.click_point(1052, 36)
+    driver.click_point(520, 80)
+    driver.click_point(1052, 36)
+    long_frame = driver.wait_for_stable_frame("bounded long streamed answer", crop=(276, 65, 940, 500), stable_for=0.2)
+    if dark_pixel_count(long_frame, crop=(1192, 24, 24, 24)) < 10:
+        raise AcceptanceFailure("long answer pushed the toolbar off screen")
+    if dark_pixel_count(long_frame, crop=(284, 618, 250, 35)) < 20:
+        raise AcceptanceFailure("long answer pushed the composer off screen")
+    shutil.copyfile(long_frame, Path("/workspace/dist/chat-long.png"))
     driver.close_app()
+    chat_paging_layout_scenario(driver, workspace, layout, fixture)
     if {path: path.read_bytes() for path in original} != original:
         raise AcceptanceFailure("ordinary chat modified workspace notes")
+
+
+def chat_paging_layout_scenario(driver: WindowDriver, workspace: Path, chat: Path,
+                                fixture: dict[str, str]) -> None:
+    """Seed only the closed, disposable workspace with a multi-page conversation."""
+    for path in (chat / "messages").glob("*.json"):
+        path.unlink()
+    for index in range(64):
+        message_id = f"{index + 1:032x}"
+        message = {"id": message_id, "run": "fixture", "role": "assistant" if index % 2 else "user",
+                   "text": f"Message {index:02d}: a distinct history anchor.\nSecond line {index:02d}.",
+                   "delivery": "complete", "created_ms": index, "tool": None}
+        if index == 63:
+            message["role"] = "tool"
+            message["tool"] = {"id": "fixture/tool", "name": "search/query", "arguments": {"query": "topic"},
+                               "state": "completed", "result": {"text": "bounded result " * 100}}
+        (chat / "messages" / f"{message_id}.json").write_text(json.dumps({"version": 1, "data": message}))
+    metadata = json.loads((chat / "metadata.json").read_text())
+    metadata["data"]["common"]["title"] = "Long chat title " * 15
+    (chat / "metadata.json").write_text(json.dumps(metadata))
+    driver.start_app(workspace, "chat-pages", environment_overrides=fixture)
+    history_crop = (280, 90, 910, 450)
+
+    def navigation_ready(earlier: bool, newest: bool) -> None:
+        driver.move_to("sidebar_blank")
+
+        def matches() -> bool:
+            frame = driver.capture("chat-navigation-state")
+            up = sum(value < 160 for value in crop_luminances(frame, (970, 28, 12, 16)).values())
+            down = sum(value < 160 for value in crop_luminances(frame, (1008, 28, 12, 16)).values())
+            return (up >= 5) == earlier and (down >= 5) == newest
+
+        wait_until("chat page load finishes and navigation availability updates", matches)
+
+    navigation_ready(True, False)
+    latest = driver.wait_for_stable_frame("latest conversation page", crop=history_crop, stable_for=0.3)
+    driver.click_point(976, 36)
+    # Loading a preceding page must leave the currently visible message stationary.
+    driver.wait_for_visual_change("earlier page changes toolbar availability", latest,
+                                  crop=(960, 20, 70, 32), minimum_pixels=10)
+    navigation_ready(False, True)
+    previous = driver.wait_for_stable_frame("history anchor after loading earlier page", crop=history_crop, stable_for=0.3)
+    if image_difference(latest, previous, crop=history_crop) != 0:
+        raise AcceptanceFailure("loading earlier messages moved the visible history anchor")
+    driver.click_point(976, 36)
+    driver.move_to("sidebar_blank")
+    unchanged = driver.wait_for_stable_frame("earlier icon is disabled at oldest page", crop=history_crop, stable_for=0.3)
+    if image_difference(previous, unchanged, crop=history_crop) != 0:
+        raise AcceptanceFailure("disabled earlier icon changed the history")
+    driver.xdotool("mousemove", "--window", driver.window_id, "700", "250", "click", "--repeat", "10", "--delay", "50", "4")
+    scrolled = driver.wait_for_visual_change("history scrolls independently", unchanged,
+                                            crop=history_crop, minimum_pixels=200)
+    if image_difference(unchanged, scrolled, crop=(920, 20, 300, 32)) != 0:
+        raise AcceptanceFailure("scrolling history moved the toolbar")
+    driver.click_point(1014, 36)
+    navigation_ready(True, False)
+    newest = driver.wait_for_stable_frame("down arrow returns to newest messages", crop=history_crop, stable_for=0.3)
+    if image_difference(latest, newest, crop=history_crop) != 0:
+        raise AcceptanceFailure("down arrow did not return to the latest messages")
+    driver.click_point(1180, 420)
+    wait_until("copy a message after paging", lambda: clipboard_text(driver.environment) == "Message 62: a distinct history anchor.\nSecond line 62.")
+    # The last card has just one compact header; clicking expands its bounded result.
+    driver.click_point(350, 552)
+    driver.xdotool("mousemove", "--window", driver.window_id, "700", "250", "click", "--repeat", "10", "--delay", "30", "5")
+    expanded = driver.wait_for_visual_change("tool card expands without a journal row", newest,
+                                            crop=(300, 430, 750, 100), minimum_pixels=200)
+    expanded = driver.wait_for_stable_frame("expanded tool arguments and result",
+                                           crop=(300, 430, 750, 100), stable_for=0.3)
+    shutil.copyfile(expanded, Path("/workspace/dist/chat-tool.png"))
+    driver.resize_window(860, 560)
+    driver.xdotool("mousemove", "--window", driver.window_id, "255", "300", "mousedown", "1",
+                    "mousemove", "--sync", "--window", driver.window_id, "480", "300", "mouseup", "1")
+    driver.wait_for_stable_frame("minimum window with widest sidebar", stable_for=0.3)
+    driver.click_point(592, 75)
+    narrow = driver.wait_for_stable_frame("expanded result inside narrow history", stable_for=0.3)
+    if abs(sidebar_boundary_x(narrow, y=530) - 480) > 1:
+        raise AcceptanceFailure("chat sidebar did not resize to its maximum")
+    if dark_pixel_count(narrow, crop=(782, 60, 45, 36)) < 15:
+        raise AcceptanceFailure("wrapped toolbar buttons are outside the minimum window")
+    if dark_pixel_count(narrow, crop=(505, 335, 250, 90)) < 20:
+        raise AcceptanceFailure("composer is outside the minimum window")
+    shutil.copyfile(narrow, Path("/workspace/dist/chat-narrow.png"))
+    # Journal remains available in the wrapped toolbar and Back returns to this chat.
+    driver.click_point(516, 78)
+    driver.wait_for_visual_change("journal opens from wrapped toolbar", narrow,
+                                  crop=(500, 100, 330, 200), minimum_pixels=100)
+    driver.click_point(560, 45)
+    returned = driver.wait_for_stable_frame("journal Back restores narrow chat",
+                                           crop=(500, 333, 340, 115), stable_for=0.3)
+    if image_difference(narrow, returned, crop=(500, 333, 340, 115)) != 0:
+        raise AcceptanceFailure("journal Back did not restore the chat composer")
+    driver.close_app()
 
 
 SCENARIOS: dict[str, Callable[[WindowDriver, Path], None]] = {

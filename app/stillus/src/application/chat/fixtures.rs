@@ -56,6 +56,14 @@ impl ResponsesTransport for Transport {
             .collect::<Vec<_>>();
         let task = instruction.contains("summary") || instruction.contains("итог");
         let mut text="Готово. Ответ сохранён в чате.\n\n- История остаётся локальной.\n- Можно продолжить разговор.\n\n```rust\nlet answer = 42;\n```".to_string();
+        if instruction.contains("layout fixture") {
+            text = format!(
+                "{}\n\n[Long link](https://example.invalid/{})\n\n```text\n{}\n```\n\nОтвет сохранён. Конец длинного ответа.",
+                "Длинный ответ должен переноситься внутри истории и не сдвигать элементы управления.\n\n".repeat(24),
+                "longpath".repeat(100),
+                "0123456789abcdef".repeat(120),
+            );
+        }
         let call = if instruction.contains("request limit") && outputs.len() < 22 {
             Some(("chats/list", json!({})))
         } else if task {
@@ -98,12 +106,12 @@ impl ResponsesTransport for Transport {
         events.push_str(&format!("data: {}\n\n",json!({"type":"response.completed","response":{"output":output,"usage":{"input_tokens":123,"output_tokens":45}}})));
         struct Stream {
             bytes: std::io::Cursor<Vec<u8>>,
-            slow: bool,
+            delay_ms: u64,
         }
         impl Read for Stream {
             fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
-                if self.slow {
-                    thread::sleep(Duration::from_millis(400));
+                if self.delay_ms > 0 {
+                    thread::sleep(Duration::from_millis(self.delay_ms));
                 }
                 let n = buffer.len().min(80);
                 self.bytes.read(&mut buffer[..n])
@@ -113,7 +121,13 @@ impl ResponsesTransport for Transport {
             200,
             &mut Stream {
                 bytes: std::io::Cursor::new(events.into_bytes()),
-                slow: instruction.contains("slow"),
+                delay_ms: if instruction.contains("slow") {
+                    400
+                } else if instruction.contains("layout fixture") {
+                    10
+                } else {
+                    0
+                },
             },
         )
     }

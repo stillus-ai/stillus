@@ -228,8 +228,15 @@ a title of up to 64 characters, unless you renamed the chat. A running indicator
 and unread badge help track background replies. Opening and viewing the latest
 reply marks it read. Up to two tasks run concurrently, with six waiting.
 
-Replies render Markdown and copyable code blocks. Expand an action card to see its
-arguments and result, and open its linked request journal record. The assistant
+Your messages appear in shaded bubbles on the right. Replies render Markdown and
+copyable code blocks; long code lines scroll inside their block. Only the history
+scrolls, keeping the toolbar and composer visible. The toolbar's up arrow loads
+earlier messages without moving the message you are reading, and the down arrow
+returns to the latest messages. New replies scroll into view only while you are
+at the bottom. The document/list icon opens the request journal; Back returns to
+the chat. Hover over an icon to see its label.
+
+Expand an action card to see its arguments and result. The assistant
 can use permitted application actions; existing confirmations and protected-note
 restrictions still apply. A save operation is awaited before its result is given
 to the model. Unknown outcomes after a crash require your decision and are never

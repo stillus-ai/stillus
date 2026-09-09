@@ -3,6 +3,10 @@
 #![forbid(unsafe_code)]
 //! Native chat presentation. Drafts, requests and metadata go through Application.
 use crate::*;
+use floem::kurbo::Rect;
+mod composer;
+
+const ICON_JOURNAL: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.8" stroke-linecap="round"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>"##;
 use application::{
     api::{Caller, Command as AppCommand, Query as AppQuery},
     chat::{Command, Query},
@@ -98,6 +102,13 @@ pub(super) fn panel(
     let content_height = create_rw_signal(0.0);
     let viewport_height = create_rw_signal(0.0);
     let scroll_to = create_rw_signal(None::<Point>);
+    let history_width = create_rw_signal(1.0f64);
+    let scroll_y = create_rw_signal(0.0);
+    let paging = create_rw_signal(false);
+    let anchor = create_rw_signal(None::<(String, f64)>);
+    let row_bounds = Rc::new(RefCell::new(
+        std::collections::BTreeMap::<String, Rect>::new(),
+    ));
     let read_model = model.clone();
     let read_id = id.clone();
     let read_once = Rc::new(RefCell::new(None::<String>));
@@ -156,6 +167,7 @@ pub(super) fn panel(
     })
     .style(move |s| {
         s.font_size(20.0)
+            .font_family(UI_FONT_FAMILY.to_owned())
             .font_weight(floem::text::Weight::SEMIBOLD)
             .min_width(0.0)
             .flex_grow(1.0)
@@ -281,11 +293,11 @@ pub(super) fn panel(
         },
     );
     let journal_model = model.clone();
-    let journal_button = action_button(
+    let journal_button = icon_button(
+        ICON_JOURNAL,
         || tr!(AiJournal),
         IconButtonTone::Secondary,
         palette,
-        || true,
         move || {
             journal_selected.set(
                 journal_model
@@ -297,13 +309,6 @@ pub(super) fn panel(
             journal_open.set(true);
         },
     );
-    let header = h_stack((
-        svg(ICON_CHAT).style(move |s| s.size(20.0, 20.0).color(palette.accent)),
-        title,
-        journal_button,
-        toolbar,
-    ))
-    .style(|s| s.width_full().items_center().gap(12.0));
     let rename_model = model.clone();
     let rename_id = id.clone();
     let rename_bar = toolbar_edit_bar(rename, palette, move || {
@@ -346,15 +351,21 @@ pub(super) fn panel(
     let rows_model = model.clone();
     let row_model = model.clone();
     let rows_id = id.clone();
+    let bounds_for_rows = row_bounds.clone();
+    let bounds_for_views = row_bounds.clone();
     let rows = dyn_stack(
         move || {
             revision.get();
-            rows_model
+            let entries = rows_model
                 .borrow()
                 .chat_view()
                 .filter(|v| v.id == rows_id.as_str())
                 .map(|v| v.history.entries.clone())
-                .unwrap_or_default()
+                .unwrap_or_default();
+            bounds_for_rows
+                .borrow_mut()
+                .retain(|id, _| entries.iter().any(|entry| &entry.id == id));
+            entries
         },
         |e| {
             let signature = e
@@ -364,112 +375,174 @@ pub(super) fn panel(
             (e.id.clone(), signature)
         },
         move |entry| {
-            message_view(
-                entry,
-                row_model.clone(),
-                journal_open,
-                journal_selected,
-                revision,
-                palette,
+            let id = entry.id.clone();
+            let bounds = bounds_for_views.clone();
+            message_view(entry, row_model.clone(), revision, history_width, palette).on_resize(
+                move |rect| {
+                    bounds.borrow_mut().insert(id.clone(), rect);
+                    if let Some((target, offset)) = anchor.get_untracked() {
+                        if target == id {
+                            scroll_to.set(Some(Point::new(0.0, (rect.y0 + offset).max(0.0))));
+                        }
+                    }
+                },
             )
         },
     )
-    .style(|s| s.width_full().flex_col().gap(18.0));
+    .style(move |s| {
+        s.width(history_width.get())
+            .min_width(0.0)
+            .flex_col()
+            .gap(18.0)
+    });
     let earlier_model = model.clone();
     let earlier_id = id.clone();
     let earlier_state = model.clone();
     let earlier_state_id = id.clone();
-    let earlier = action_button(
+    let earlier = chat_icon_button(
+        ICON_ARROW_UP,
         || tr!(ChatLoadEarlier),
         IconButtonTone::Secondary,
         palette,
         move || {
             revision.get();
-            earlier_state
-                .borrow()
-                .chat_view()
-                .filter(|v| v.id == earlier_state_id.as_str())
-                .is_some_and(|v| v.history.next.is_some())
+            !paging.get()
+                && earlier_state
+                    .borrow()
+                    .chat_view()
+                    .filter(|v| v.id == earlier_state_id.as_str())
+                    .is_some_and(|v| v.history.next.is_some())
         },
         move || {
             let before = earlier_model
                 .borrow()
                 .chat_view()
                 .and_then(|v| v.history.next.clone());
-            let _ = earlier_model.borrow_mut().query(
-                Caller::Ui,
-                AppQuery::Chat(Query::Read {
-                    id: earlier_id.to_string(),
-                    before,
-                    limit: 32,
-                }),
+            let y = scroll_y.get_untracked();
+            anchor.set(
+                row_bounds
+                    .borrow()
+                    .iter()
+                    .filter(|(_, rect)| rect.y1 > y)
+                    .min_by(|a, b| a.1.y0.total_cmp(&b.1.y0))
+                    .map(|(id, rect)| (id.clone(), y - rect.y0)),
             );
             follow.set(false);
+            load_history(
+                earlier_model.clone(),
+                earlier_id.to_string(),
+                before,
+                paging,
+                revision,
+            );
         },
     );
     let newest_state = model.clone();
     let newest_model = model.clone();
     let newest_id = id.clone();
-    let newest = action_button(
+    let newest = chat_icon_button(
+        ICON_ARROW_DOWN,
         || tr!(AiJournalNewest),
         IconButtonTone::Secondary,
         palette,
-        || true,
         move || {
-            let _ = newest_model.borrow_mut().query(
-                Caller::Ui,
-                AppQuery::Chat(Query::Read {
-                    id: newest_id.to_string(),
-                    before: None,
-                    limit: 32,
-                }),
-            );
-            follow.set(true);
+            revision.get();
+            !paging.get()
+                && (!follow.get()
+                    || newest_state
+                        .borrow()
+                        .chat_view()
+                        .is_some_and(|v| v.before.is_some()))
         },
-    )
-    .style(move |s| {
-        revision.get();
-        s.apply_if(
-            newest_state
-                .borrow()
-                .chat_view()
-                .is_none_or(|v| v.before.is_none()),
-            |s| s.hide(),
-        )
+        move || {
+            anchor.set(None);
+            follow.set(true);
+            scroll_to.set(Some(Point::new(0.0, content_height.get_untracked())));
+            load_history(
+                newest_model.clone(),
+                newest_id.to_string(),
+                None,
+                paging,
+                revision,
+            );
+        },
+    );
+    let header = h_stack((
+        h_stack((
+            svg(ICON_CHAT)
+                .style(move |s| s.size(20.0, 20.0).flex_shrink(0.0).color(palette.accent)),
+            title,
+        ))
+        .style(|s| {
+            s.min_width(0.0)
+                .flex_basis(140.0)
+                .flex_grow(1.0)
+                .items_center()
+                .gap(12.0)
+        }),
+        h_stack((journal_button, earlier, newest, toolbar))
+            .style(|s| s.flex_shrink(0.0).items_center().gap(TOOLBAR_ACTION_GAP_PX)),
+    ))
+    .style(|s| {
+        s.width_full()
+            .min_width(0.0)
+            .flex_shrink(0.0)
+            .items_center()
+            .flex_wrap(floem::style::FlexWrap::Wrap)
+            .gap(12.0)
     });
     let empty_state = model.clone();
     let empty_hint = label(|| tr!(ChatEmpty)).style(move |s| {
         revision.get();
-        s.width_full().padding(20.0).color(palette.muted).apply_if(
-            empty_state
-                .borrow()
-                .chat_view()
-                .is_some_and(|v| !v.history.entries.is_empty()),
-            |s| s.hide(),
-        )
+        s.width_full()
+            .min_width(0.0)
+            .padding(20.0)
+            .color(palette.muted)
+            .apply_if(
+                empty_state
+                    .borrow()
+                    .chat_view()
+                    .is_some_and(|v| !v.history.entries.is_empty()),
+                |s| s.hide(),
+            )
     });
-    let history_content = v_stack((
-        h_stack((earlier, newest)).style(|s| s.width_full().gap(8.0)),
-        empty_hint,
-        rows,
-    ))
-    .style(|s| s.width_full().gap(12.0))
-    .on_resize(move |r| {
-        content_height.set(r.height());
-        if follow.get_untracked() {
-            scroll_to.set(Some(Point::new(
-                0.0,
-                (r.height() - viewport_height.get_untracked()).max(0.0),
-            )));
-        }
-    });
+    let history_content = v_stack((empty_hint, rows))
+        .style(move |s| s.width(history_width.get()).min_width(0.0).gap(12.0))
+        .on_resize(move |r| {
+            content_height.set(r.height());
+            // Scroll clamps its viewport before this callback when a page shrinks.
+            // Reconcile against the new height, not the preceding page's height.
+            let at_bottom =
+                scroll_y.get_untracked() + viewport_height.get_untracked() >= r.height() - 40.0;
+            if follow.get_untracked() || at_bottom {
+                follow.set(true);
+                scroll_to.set(Some(Point::new(
+                    0.0,
+                    (r.height() - viewport_height.get_untracked()).max(0.0),
+                )));
+            }
+        });
     let history = scroll(history_content)
+        .on_resize(move |rect| {
+            // Leave the history scrollbar beside text, including long links.
+            history_width.set((rect.width() - 12.0).max(1.0));
+            viewport_height.set(rect.height());
+        })
+        .on_event_cont(EventListener::PointerWheel, move |_| anchor.set(None))
+        .on_event_cont(EventListener::PointerDown, move |_| anchor.set(None))
         .on_scroll(move |viewport| {
+            scroll_y.set(viewport.y0);
             viewport_height.set(viewport.height());
             follow.set(viewport.y1 >= content_height.get_untracked() - 40.0);
         })
         .scroll_to(move || scroll_to.get())
-        .style(|s| s.width_full().min_height(0.0).flex_grow(1.0));
+        .style(|s| {
+            s.width_full()
+                .min_width(0.0)
+                .min_height(0.0)
+                .flex_basis(0.0)
+                .flex_grow(1.0)
+        });
     let alias_state = model.clone();
     let alias_model = model.clone();
     let alias_id = id.clone();
@@ -576,59 +649,25 @@ pub(super) fn panel(
             let submit = composer_submit.clone();
             let model = composer_model.clone();
             let id = composer_id.clone();
-            floem::views::text_editor::text_editor(draft.get_untracked())
-                .placeholder(tr!(ChatPlaceholder))
-                .pre_command(move |event| {
-                    use floem::views::editor::command::CommandExecuted;
-                    if event.cmd.str() == "insert_new_line" && !event.mods.shift() {
-                        submit();
-                        CommandExecuted::Yes
-                    } else {
-                        CommandExecuted::No
-                    }
-                })
-                .update(move |event| {
-                    if loaded.try_get_untracked().is_none()
-                        || settings.open.get_untracked()
-                        || journal_open.get_untracked()
-                        || model.borrow().session_id() != session
-                    {
-                        return;
-                    }
-                    if let Some(editor) = event.editor {
-                        let value = editor.text().to_string();
-                        draft.set(value);
-                        dispatch(
-                            &model,
-                            revision,
-                            Command::Compose {
-                                id: id.to_string(),
-                                version: draft_version.get_untracked(),
-                                text: draft.get_untracked(),
-                            },
-                        );
-                    }
-                })
-                .disabled(move || sending.get())
-                .editor_style(move |s| {
-                    s.hide_gutter(true)
-                        .scroll_beyond_last_line(false)
-                        .current_line_color(Color::TRANSPARENT)
-                        .cursor_color(palette.accent)
-                        .selection_color(palette.accent_soft)
-                })
-                .style(move |s| {
-                    s.width_full()
-                        .height(116.0)
-                        .padding(8.0)
-                        .border(1.0)
-                        .border_color(palette.divider)
-                        .border_radius(8.0)
-                        .background(palette.paper)
-                        .color(palette.ink)
-                        .font_size(14.0)
-                })
-                .into_any()
+            composer::view(draft, sending, palette, submit, move |value| {
+                if loaded.try_get_untracked().is_none()
+                    || settings.open.get_untracked()
+                    || journal_open.get_untracked()
+                    || model.borrow().session_id() != session
+                {
+                    return;
+                }
+                draft.set(value.clone());
+                dispatch(
+                    &model,
+                    revision,
+                    Command::Compose {
+                        id: id.to_string(),
+                        version: draft_version.get_untracked(),
+                        text: value,
+                    },
+                );
+            })
         },
     );
     let send_model = model.clone();
@@ -741,6 +780,9 @@ pub(super) fn panel(
     ))
     .style(move |s| {
         s.width_full()
+            .min_width(0.0)
+            .flex_shrink(0.0)
+            .flex_wrap(floem::style::FlexWrap::Wrap)
             .gap(8.0)
             .items_center()
             .apply_if(!connected.get(), |s| s.hide())
@@ -786,7 +828,7 @@ pub(super) fn panel(
             }
         }
     })
-    .style(move |s| s.color(palette.muted).font_size(12.0));
+    .style(move |s| s.color(palette.muted).font_size(12.0).flex_shrink(0.0));
     let body = v_stack((
         header,
         rename_bar,
@@ -800,6 +842,7 @@ pub(super) fn panel(
     ))
     .style(move |s| {
         s.width_full()
+            .min_width(0.0)
             .height_full()
             .min_height(0.0)
             .padding(20.0)
@@ -817,16 +860,15 @@ pub(super) fn panel(
         })
         .unwrap_or_else(|| empty().into_any());
     stack((body, journal))
-        .style(|s| s.width_full().height_full())
+        .style(|s| s.width_full().min_width(0.0).height_full().min_height(0.0))
         .into_any()
 }
 
 fn message_view(
     entry: stillus_chat::HistoryEntry,
     model: Rc<RefCell<AppModel>>,
-    journal_open: RwSignal<bool>,
-    journal_selected: RwSignal<Option<String>>,
     revision: RwSignal<u64>,
+    history_width: RwSignal<f64>,
     palette: Palette,
 ) -> AnyView {
     let version = entry
@@ -859,7 +901,6 @@ fn message_view(
             &serde_json::json!({"arguments":tool.arguments,"result":tool.result}),
         )
         .unwrap_or_default();
-        let request = message.request_id.clone();
         let acknowledge = action_button(
             move || {
                 if confirm.get() {
@@ -893,25 +934,18 @@ fn message_view(
         .style(move |s| s.apply_if(!unknown, |s| s.hide()));
         return v_stack((
             acknowledge,
-            reliable_button(text(title), move || open.update(|v| *v = !*v)),
-            text(detail).style(move |s| {
-                s.width_full()
-                    .font_size(12.0)
-                    .apply_if(!open.get(), |s| s.hide())
-            }),
-            action_button(
-                || tr!(AiJournal),
-                IconButtonTone::Secondary,
-                palette,
-                move || request.is_some(),
-                {
-                    let request = message.request_id.clone();
-                    move || {
-                        journal_selected.set(request.clone());
-                        journal_open.set(true);
-                    }
-                },
-            ),
+            reliable_button(
+                text(title).style(move |s| s.color(palette.ink)),
+                move || open.update(|v| *v = !*v),
+            )
+            .style(|s| s.min_width(0.0).width_full()),
+            wrapped_text(
+                detail,
+                move || (history_width.get() - 22.0).max(1.0),
+                palette.ink,
+                12.0,
+            )
+            .style(move |s| s.apply_if(!open.get(), |s| s.hide())),
         ))
         .style(move |s| {
             s.width_full()
@@ -932,7 +966,24 @@ fn message_view(
     } else {
         role
     };
-    let rendered = markdown_blocks(&message.text, palette);
+    let user = message.role == Role::User;
+    let message_width = floem::reactive::create_memo(move |_| {
+        if user {
+            (history_width.get() * 0.75 - 24.0).max(1.0)
+        } else {
+            history_width.get().max(1.0)
+        }
+    });
+    let rendered = if user {
+        wrapped_text(
+            message.text.clone(),
+            move || message_width.get(),
+            palette.ink,
+            18.0,
+        )
+    } else {
+        markdown_blocks(&message.text, message_width, palette)
+    };
     let links = pulldown_cmark::Parser::new(&message.text)
         .filter_map(|event| match event {
             pulldown_cmark::Event::Start(pulldown_cmark::Tag::Link { dest_url, .. }) => {
@@ -947,7 +998,7 @@ fn message_view(
             let model = model.clone();
             let label = url.clone();
             reliable_button(
-                text(label).style(move |s| s.color(palette.accent).font_size(13.0)),
+                wrapped_text(label, move || message_width.get(), palette.accent, 13.0),
                 move || {
                     if let Err(e) = open_rss_original(&url) {
                         model.borrow_mut().error = Some(e.to_string().into());
@@ -967,7 +1018,7 @@ fn message_view(
             let _ = Clipboard::set_contents(content.clone());
         },
     );
-    v_stack((
+    let bubble = v_stack((
         h_stack((
             text(role).style(move |s| s.color(palette.muted).font_size(12.0)),
             empty().style(|s| s.flex_grow(1.0)),
@@ -976,11 +1027,26 @@ fn message_view(
         rendered,
         v_stack_from_iter(link_views).style(|s| s.width_full().gap(4.0)),
     ))
-    .style(|s| s.width_full().gap(6.0))
-    .into_any()
+    .style(move |s| {
+        s.width(message_width.get() + if user { 24.0 } else { 0.0 })
+            .min_width(0.0)
+            .gap(6.0)
+            .apply_if(user, |s| {
+                s.padding(12.0)
+                    .border_radius(10.0)
+                    .background(palette.canvas)
+            })
+    });
+    h_stack((bubble,))
+        .style(move |s| {
+            s.width_full()
+                .min_width(0.0)
+                .apply_if(user, |s| s.justify_end())
+        })
+        .into_any()
 }
 
-fn markdown_blocks(source: &str, palette: Palette) -> AnyView {
+fn markdown_blocks(source: &str, width: floem::reactive::Memo<f64>, palette: Palette) -> AnyView {
     use pulldown_cmark::{Event, Tag, TagEnd};
     let mut blocks = Vec::new();
     let mut cursor = 0;
@@ -996,7 +1062,7 @@ fn markdown_blocks(source: &str, palette: Palette) -> AnyView {
             Event::End(TagEnd::CodeBlock) => {
                 let start = code_start.take().expect("code block");
                 if start > cursor {
-                    blocks.push(markdown_prose(&source[cursor..start], palette));
+                    blocks.push(markdown_prose(&source[cursor..start], width, palette));
                 }
                 let content = code.clone();
                 let copy = action_button(
@@ -1011,12 +1077,14 @@ fn markdown_blocks(source: &str, palette: Palette) -> AnyView {
                 blocks.push(
                     v_stack((
                         h_stack((empty().style(|s| s.flex_grow(1.0)), copy)),
-                        text(code.clone()).style(move |s| {
-                            s.width_full()
+                        scroll(text(code.clone()).style(move |s| {
+                            s.text_clip()
+                                .padding_bottom(8.0)
                                 .font_family("monospace".to_owned())
                                 .font_size(14.0)
                                 .color(palette.ink)
-                        }),
+                        }))
+                        .style(move |s| s.width((width.get() - 24.0).max(1.0)).min_width(0.0)),
                     ))
                     .style(move |s| {
                         s.width_full()
@@ -1033,15 +1101,130 @@ fn markdown_blocks(source: &str, palette: Palette) -> AnyView {
         }
     }
     if cursor < source.len() {
-        blocks.push(markdown_prose(&source[cursor..], palette));
+        blocks.push(markdown_prose(&source[cursor..], width, palette));
     }
     v_stack_from_iter(blocks)
         .style(|s| s.width_full().gap(8.0))
         .into_any()
 }
-fn markdown_prose(source: &str, palette: Palette) -> AnyView {
+fn markdown_prose(source: &str, width: floem::reactive::Memo<f64>, palette: Palette) -> AnyView {
     let layout = rss_card::markdown(source).layout(palette.ink);
-    floem::views::rich_text(move || layout.clone())
-        .style(|s| s.width_full())
-        .into_any()
+    floem::views::rich_text(move || {
+        let mut layout = layout.clone();
+        layout.set_size(width.get().max(1.0) as f32, f32::MAX);
+        layout
+    })
+    .style(move |s| s.width(width.get()).min_width(0.0))
+    .into_any()
+}
+
+fn wrapped_text(
+    text: String,
+    width: impl Fn() -> f64 + Copy + 'static,
+    color: Color,
+    size: f32,
+) -> AnyView {
+    floem::views::rich_text(move || {
+        let mut layout = floem::text::TextLayout::new();
+        let attrs = floem::text::Attrs::new()
+            .font_size(size)
+            .color(color)
+            .line_height(floem::text::LineHeightValue::Normal(1.45));
+        layout.set_text(&text, floem::text::AttrsList::new(attrs));
+        layout.set_size(width().max(1.0) as f32, f32::MAX);
+        layout
+    })
+    .style(move |s| s.width(width()).min_width(0.0))
+    .into_any()
+}
+
+fn chat_icon_button(
+    icon: &'static str,
+    title: impl Fn() -> String + 'static,
+    tone: IconButtonTone,
+    palette: Palette,
+    enabled: impl Fn() -> bool + 'static,
+    action: impl Fn() + 'static,
+) -> AnyView {
+    let enabled = Rc::new(enabled);
+    let click_enabled = enabled.clone();
+    let disabled = enabled.clone();
+    let colors = button_colors(tone, palette);
+    reliable_button(svg(icon).style(|s| s.size(16.0, 16.0)), move || {
+        if click_enabled() {
+            action();
+        }
+    })
+    .disabled(move || !disabled())
+    .style(move |s| {
+        let enabled = enabled();
+        s.size(BUTTON_SIZE_PX, BUTTON_SIZE_PX)
+            .flex_shrink(0.0)
+            .items_center()
+            .justify_center()
+            .background(colors.background)
+            .color(if enabled {
+                colors.foreground
+            } else {
+                palette.divider
+            })
+            .border(1.0)
+            .border_color(colors.border)
+            .border_radius(5.0)
+            .hover(|s| s.background(colors.hover).color(colors.hover_foreground))
+    })
+    .tooltip(move || tooltip_label(title(), palette))
+    .into_any()
+}
+
+fn load_history(
+    model: Rc<RefCell<AppModel>>,
+    id: String,
+    before: Option<String>,
+    busy: RwSignal<bool>,
+    revision: RwSignal<u64>,
+) {
+    if busy.get_untracked() {
+        return;
+    }
+    let result = model.borrow_mut().query(
+        Caller::Ui,
+        AppQuery::Chat(Query::Read {
+            id,
+            before,
+            limit: 32,
+        }),
+    );
+    if let Ok(application::api::QueryResult::Pending { operation }) = result {
+        busy.set(true);
+        poll_history(model, operation, busy, revision);
+    }
+}
+fn poll_history(
+    model: Rc<RefCell<AppModel>>,
+    operation: String,
+    busy: RwSignal<bool>,
+    revision: RwSignal<u64>,
+) {
+    exec_after(Duration::from_millis(50), move |_| {
+        if busy.try_get_untracked().is_none() {
+            return;
+        }
+        let result = model
+            .borrow_mut()
+            .query(Caller::Ui, AppQuery::OperationProgress(operation.clone()));
+        if matches!(
+            result,
+            Ok(application::api::QueryResult::Operation {
+                status: application::actions::OperationStatus::Pending
+                    | application::actions::OperationStatus::Running,
+                ..
+            })
+        ) {
+            poll_history(model, operation, busy, revision);
+        } else {
+            busy.set(false);
+            revision.update(|r| *r += 1);
+        }
+    });
 }

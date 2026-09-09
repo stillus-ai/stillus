@@ -9265,7 +9265,14 @@ fn main_content_panel(
             .apply_if(!visible, |s| s.hide())
     });
     stack((editor, feed, chat))
-        .style(|style| style.width_full().height_full())
+        .style(|style| {
+            style
+                .flex_basis(0.0)
+                .flex_grow(1.0)
+                .min_width(0.0)
+                .height_full()
+                .min_height(0.0)
+        })
         .into_any()
 }
 
