@@ -8276,6 +8276,44 @@ def ai_journal_scenario(driver: WindowDriver, workspace: Path) -> None:
     if {path: path.read_bytes() for path in original} != original:
         raise AcceptanceFailure("journal changed workspace notes")
 
+CHAT_READING_CROP = (280, 80, 840, 180)
+
+
+def wait_for_chat_reading_position(driver: WindowDriver, *, timeout: float = 10) -> Path:
+    """Wait for painted scroll acknowledgement, not a stable pre-input frame."""
+    previous: Path | None = None
+    stable_since: float | None = None
+
+    def ready() -> bool:
+        nonlocal previous, stable_since
+        frame = driver.capture("chat-reading-position")
+        # The thumb must reach the top of the overflowing history, and Newest
+        # must be enabled: both the wheel input and follow-mode change painted.
+        thumb = shaded_row_runs(frame, x=1215, y=64, height=508, max_luminance=160)
+        newest = sum(value < 160 for value in crop_luminances(frame, (1008, 28, 12, 16)).values())
+        acknowledged = (
+            len(thumb) == 1 and thumb[0][0] <= 66
+            and 30 < thumb[0][1] - thumb[0][0] < 468 and newest >= 5
+            and dark_pixel_count(frame, crop=CHAT_READING_CROP) >= 100
+        )
+        unchanged = previous is not None and image_difference(previous, frame, crop=CHAT_READING_CROP) == 0
+        if previous is not None:
+            previous.unlink(missing_ok=True)
+        previous = frame
+        if not acknowledged or not unchanged:
+            stable_since = None
+            return False
+        now = time.monotonic()
+        if stable_since is None:
+            stable_since = now
+        return now - stable_since >= 0.2
+
+    wait_until("wheel input reaches the top of chat history with following disabled",
+               ready, timeout=timeout, interval=0.05)
+    assert previous is not None
+    return previous
+
+
 def chat_scenario(driver: WindowDriver, workspace: Path) -> None:
     """Native chat creation, composer persistence and provider streaming without network."""
     original = {path: path.read_bytes() for path in (workspace / "notes").glob("*.md")}
@@ -8454,18 +8492,22 @@ def chat_scenario(driver: WindowDriver, workspace: Path) -> None:
     layout = create_and_send("layout fixture")
     driver.click_point(480, 670)
     driver.type_text("next draft")
+    wait_until("draft input processed before testing streamed history",
+               lambda: json.loads((layout / "draft.json").read_text())["data"]["text"] == "next draft")
     wait_until("streamed history grows beyond its viewport", lambda: sum(
         end - start for start, end in shaded_row_runs(driver.capture("chat-growing"),
                                                      x=1215, y=100, height=450,
                                                      max_luminance=160)) > 30, timeout=15)
     driver.xdotool("mousemove", "--window", driver.window_id, "700", "250", "click", "--repeat", "10", "--delay", "30", "4")
-    reading = driver.wait_for_stable_frame("reading earlier text during streaming",
-                                          crop=(280, 80, 920, 180), stable_for=0.2)
+    reading = wait_for_chat_reading_position(driver)
     wait_until("long streamed response completed", lambda: json.loads((layout / "run.json").read_text())["data"]["status"] == "completed", timeout=20)
     # A streamed update must not replace the editor or take away its focus.
     driver.type_text(" still focused")
     wait_until("draft retains focus during streaming", lambda: json.loads((layout / "draft.json").read_text())["data"]["text"] == "next draft still focused")
-    if image_difference(reading, driver.capture("chat-reading-after-stream"), crop=(280, 80, 920, 180)) != 0:
+    after_stream = driver.wait_for_stable_frame("chat reading position after streaming",
+                                               crop=CHAT_READING_CROP, stable_for=0.2,
+                                               minimum_dark_pixels=100, timeout=10)
+    if image_difference(reading, after_stream, crop=CHAT_READING_CROP) != 0:
         raise AcceptanceFailure("streaming pulled the reader away from earlier text")
     driver.click_point(1014, 36)
     driver.click_point(1052, 36)
