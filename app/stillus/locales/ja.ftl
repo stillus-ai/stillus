@@ -1,5 +1,18 @@
 # Copyright 2026 Evgeniy Udodov
 # SPDX-License-Identifier: GPL-3.0-only
+SidebarCollapse = サイドバーを折りたたむ
+SidebarExpand = サイドバーを展開
+EmptyTrash = ゴミ箱は空です
+RssLoading = フィードを読み込み中…
+RssEmpty = このフィードにはまだ記事がありません
+RssChecking = 確認中…
+RenameTitle = 新しいタイトル
+ErrorUnknown = 操作を完了できませんでした。もう一度お試しください。
+ErrorPermission = アクセスが拒否されました。ファイルのアクセス権を確認してください。
+ErrorDiskFull = ディスクの空き容量が不足しています。空き容量を増やして再試行してください。
+ErrorNetwork = 接続できませんでした。接続を確認して再試行してください。
+ErrorInvalidData = データを読み込めませんでした。形式を確認して再試行してください。
+ErrorNotFound = ファイルまたは項目は利用できなくなりました。
 
 UpdateRestart = 再起動
 UpdateRestartWaiting = 保存とバックグラウンド処理の完了を待っています…
@@ -269,7 +282,7 @@ SavingMore = 保存しています… · 新しい変更が保留中です
 SaveError = 保存エラー · { $value }
 Conflict = 競合 · { $value }
 RecoveryError = { " · " }バックアップ エラー
-SelectionSize = { " · " }選択した{ $value }
+SelectionSize = { " · " }選択した{ $value } 文字
 EditorStatus = 行 { $line }、列 { $column }{ $selection } · { $value } · { $save }{ $recovery }
 DiskConflict = 編集の保留中にファイルがディスク上で変更されました。両方のバージョンが保存されます
 Megabytes = { $value } MB
@@ -419,6 +432,3 @@ ChatEmpty = 会話を始めましょう。履歴はこのワークスペース�
 ChatAcknowledge = この操作を繰り返さずに続行
 
 ChatUnsupported = このプロバイダーはまだチャットの応答生成に対応していません。
-
-SidebarCollapse = サイドバーを折りたたむ
-SidebarExpand = サイドバーを展開

@@ -157,12 +157,23 @@ pub(super) fn panel(
     });
     let state_model = model.clone();
     let state_id = id.clone();
-    let title = label(move || {
-        revision.get();
-        item(&state_model, &state_id)
-            .map(|i| i.metadata.title)
-            .unwrap_or_else(|| tr!(ChatNew))
-    })
+    let title_model = model.clone();
+    let title_id = id.clone();
+    let title = anchored_tooltip(
+        label(move || {
+            revision.get();
+            item(&state_model, &state_id)
+                .map(|i| i.metadata.title)
+                .unwrap_or_else(|| tr!(ChatNew))
+        }),
+        Rc::new(move || {
+            revision.get();
+            item(&title_model, &title_id)
+                .map(|i| i.metadata.title)
+                .unwrap_or_else(|| tr!(ChatNew))
+        }),
+        palette,
+    )
     .style(move |s| {
         s.font_size(crate::ui::FONT_SECTION as f32)
             .font_family(crate::ui::HEADING_FONT_FAMILY.to_owned())

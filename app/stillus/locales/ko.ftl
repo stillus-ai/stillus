@@ -1,5 +1,18 @@
 # Copyright 2026 Evgeniy Udodov
 # SPDX-License-Identifier: GPL-3.0-only
+SidebarCollapse = 사이드바 접기
+SidebarExpand = 사이드바 펼치기
+EmptyTrash = 휴지통이 비어 있습니다
+RssLoading = 피드 불러오는 중…
+RssEmpty = 이 피드에는 아직 글이 없습니다
+RssChecking = 확인 중…
+RenameTitle = 새 제목
+ErrorUnknown = 작업을 완료하지 못했습니다. 다시 시도하세요.
+ErrorPermission = 접근이 거부되었습니다. 파일 권한을 확인하세요.
+ErrorDiskFull = 디스크 공간이 부족합니다. 공간을 확보한 후 다시 시도하세요.
+ErrorNetwork = 연결하지 못했습니다. 연결 상태를 확인한 후 다시 시도하세요.
+ErrorInvalidData = 데이터를 읽지 못했습니다. 형식을 확인한 후 다시 시도하세요.
+ErrorNotFound = 파일 또는 항목을 더 이상 사용할 수 없습니다.
 
 UpdateRestart = 다시 시작
 UpdateRestartWaiting = 저장 및 백그라운드 작업이 완료되기를 기다리는 중…
@@ -269,7 +282,7 @@ SavingMore = 저장 중… · 새로운 변경사항 보류 중
 SaveError = 저장 오류 · { $value }
 Conflict = 충돌 · { $value }
 RecoveryError = { " · " }백업 오류
-SelectionSize = { " · " }선택됨 { $value }
+SelectionSize = { " · " }선택됨 { $value } 자
 EditorStatus = { $line }행, 열 { $column }{ $selection } · { $value } · { $save }{ $recovery }
 DiskConflict = 편집이 보류 중인 동안 디스크에서 파일이 변경되었습니다. 두 버전 모두 보존됩니다
 Megabytes = { $value }MB
@@ -419,6 +432,3 @@ ChatEmpty = 대화를 시작하세요. 기록은 이 작업 공간에 저장됩�
 ChatAcknowledge = 이 작업을 반복하지 않고 계속
 
 ChatUnsupported = 이 제공자는 아직 채팅 응답 생성을 지원하지 않습니다.
-
-SidebarCollapse = 사이드바 접기
-SidebarExpand = 사이드바 펼치기

@@ -1,5 +1,18 @@
 # Copyright 2026 Evgeniy Udodov
 # SPDX-License-Identifier: GPL-3.0-only
+SidebarCollapse = Réduire la barre latérale
+SidebarExpand = Développer la barre latérale
+EmptyTrash = La corbeille est vide
+RssLoading = Chargement du flux…
+RssEmpty = Ce flux ne contient pas encore d’articles
+RssChecking = Vérification…
+RenameTitle = Nouveau titre
+ErrorUnknown = L’opération n’a pas pu aboutir. Réessayez.
+ErrorPermission = Accès refusé. Vérifiez les autorisations du fichier.
+ErrorDiskFull = L’espace disque est insuffisant. Libérez de l’espace et réessayez.
+ErrorNetwork = Connexion impossible. Vérifiez votre connexion et réessayez.
+ErrorInvalidData = Impossible de lire les données. Vérifiez leur format et réessayez.
+ErrorNotFound = Le fichier ou l’élément n’est plus disponible.
 
 UpdateRestart = Redémarrer
 UpdateRestartWaiting = En attente de la fin de l’enregistrement et des opérations en arrière-plan…
@@ -269,7 +282,7 @@ SavingMore = Sauvegarde… · nouvelles modifications en attente
 SaveError = Erreur d'enregistrement · { $value }
 Conflict = Conflit · { $value }
 RecoveryError = { " · " }erreur de sauvegarde
-SelectionSize = { " · " }sélectionné { $value }
+SelectionSize = { " · " }sélectionné { $value } caractères
 EditorStatus = Ligne { $line }, colonne { $column }{ $selection } · { $value } · { $save }{ $recovery }
 DiskConflict = Le fichier a été modifié sur le disque alors que des modifications étaient en attente ; les deux versions sont conservées
 Megabytes = { $value } Mo
@@ -420,6 +433,3 @@ ChatEmpty = Commencez une conversation. L’historique est enregistré dans cet 
 ChatAcknowledge = Continuer sans répéter cette action
 
 ChatUnsupported = Ce fournisseur ne prend pas encore en charge les réponses de chat.
-
-SidebarCollapse = Réduire la barre latérale
-SidebarExpand = Développer la barre latérale

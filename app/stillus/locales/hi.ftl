@@ -1,5 +1,18 @@
 # Copyright 2026 Evgeniy Udodov
 # SPDX-License-Identifier: GPL-3.0-only
+SidebarCollapse = साइडबार समेटें
+SidebarExpand = साइडबार फैलाएँ
+EmptyTrash = कचरा खाली है
+RssLoading = फ़ीड लोड हो रही है…
+RssEmpty = इस फ़ीड में अभी कोई लेख नहीं है
+RssChecking = जाँच हो रही है…
+RenameTitle = नया शीर्षक
+ErrorUnknown = कार्य पूरा नहीं हो सका। फिर कोशिश करें।
+ErrorPermission = पहुँच अस्वीकृत है। फ़ाइल की अनुमतियाँ जाँचें।
+ErrorDiskFull = डिस्क में पर्याप्त जगह नहीं है। जगह खाली करके फिर कोशिश करें।
+ErrorNetwork = कनेक्ट नहीं हो सका। कनेक्शन जाँचकर फिर कोशिश करें।
+ErrorInvalidData = डेटा पढ़ा नहीं जा सका। उसका प्रारूप जाँचकर फिर कोशिश करें।
+ErrorNotFound = फ़ाइल या आइटम अब उपलब्ध नहीं है।
 
 UpdateRestart = फिर से शुरू करें
 UpdateRestartWaiting = सहेजने और पृष्ठभूमि की प्रक्रियाओं के पूरा होने की प्रतीक्षा हो रही है…
@@ -269,7 +282,7 @@ SavingMore = सहेजा जा रहा है... · नए परिव�
 SaveError = त्रुटि सहेजें · { $value }
 Conflict = संघर्ष · { $value }
 RecoveryError = { " · " }बैकअप त्रुटि
-SelectionSize = { " · " }चयनित { $value }
+SelectionSize = { " · " }चयनित { $value } अक्षर
 EditorStatus = लाइन { $line }, कॉलम { $column }{ $selection } · { $value } · { $save }{ $recovery }
 DiskConflict = संपादन लंबित होने पर फ़ाइल डिस्क पर बदल गई; दोनों संस्करण सुरक्षित हैं
 Megabytes = { $value } एमबी
@@ -420,6 +433,3 @@ ChatEmpty = बातचीत शुरू करें। इतिहास �
 ChatAcknowledge = इस कार्रवाई को दोहराए बिना जारी रखें
 
 ChatUnsupported = यह प्रदाता अभी चैट के उत्तर बनाने का समर्थन नहीं करता।
-
-SidebarCollapse = साइडबार समेटें
-SidebarExpand = साइडबार फैलाएँ

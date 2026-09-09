@@ -391,35 +391,32 @@ fn connection_summary(controller: Controller, palette: Palette) -> impl IntoView
                     .color(palette.ink)
                     .selectable(false)
             }),
-            label(move || tr!(AiKeySaved))
-                .style(move |style| {
+            anchored_tooltip(
+                label(move || tr!(AiKeySaved)).style(move |style| {
                     style
                         .font_size(crate::ui::FONT_CAPTION as f32)
                         .color(palette.accent)
                         .selectable(false)
-                })
-                .tooltip(move || {
-                    tooltip_label(
-                        settings
-                            .get()
-                            .connection
-                            .map(|connection| {
-                                let date = chrono::DateTime::from_timestamp(
-                                    connection.checked_at as i64,
-                                    0,
-                                )
-                                .map(|time| {
-                                    time.with_timezone(&chrono::Local)
-                                        .format("%Y-%m-%d %H:%M")
-                                        .to_string()
-                                })
-                                .unwrap_or_default();
-                                msg!(AiLastChecked, "value" => date).render()
-                            })
-                            .unwrap_or_default(),
-                        palette,
-                    )
                 }),
+                Rc::new(move || {
+                    settings
+                        .get()
+                        .connection
+                        .map(|connection| {
+                            let date =
+                                chrono::DateTime::from_timestamp(connection.checked_at as i64, 0)
+                                    .map(|time| {
+                                        time.with_timezone(&chrono::Local)
+                                            .format("%Y-%m-%d %H:%M")
+                                            .to_string()
+                                    })
+                                    .unwrap_or_default();
+                            msg!(AiLastChecked, "value" => date).render()
+                        })
+                        .unwrap_or_default()
+                }),
+                palette,
+            ),
         ))
         .style(|style| rtl_column(style).width_full().gap(4.0)),
         actions((

@@ -454,9 +454,9 @@ CONTROLS = {
     # The fixed 390px password card is centered in the 1240x800 client. Setup
     # includes warning/confirmation content and therefore places its primary
     # field lower than the compact unlock card.
-    "password_setup_primary": (760, 402),
+    "password_setup_primary": (760, 411),
     "password_unlock_primary": (760, 405),
-    "password_confirmation": (760, 448),
+    "password_confirmation": (760, 457),
     "password_unlock_cancel": (620, 474),
     "password_unlock_submit": (735, 474),
     "footer_retry": (1_176, 784),
@@ -2437,7 +2437,7 @@ def protect_selected_note(
             driver,
             "empty setup password",
             "password_setup_primary",
-            (105, 112, 121),
+            (97, 104, 112),
             before_text=True,
         )
     # The dialog focuses Primary automatically. Clicking an already focused
@@ -2460,7 +2460,7 @@ def protect_selected_note(
             driver,
             "empty password confirmation",
             "password_confirmation",
-            (105, 112, 121),
+            (97, 104, 112),
             before_text=True,
         )
     driver.type_sensitive_text(password)
@@ -2526,7 +2526,7 @@ def focus_tag_input(driver: WindowDriver, assigned: int, description: str) -> No
         driver,
         f"{description} input",
         tag_input_crop(assigned),
-        (105, 112, 121),
+        (130, 137, 145),
     )
 
 
@@ -3127,7 +3127,7 @@ def tags_scenario(driver: WindowDriver, workspace: Path) -> None:
         driver,
         "tag input",
         tag_input_crop(2),
-        (105, 112, 121),
+        (130, 137, 145),
     )
     open_difference = image_difference(closed, opened, crop=popover_crop)
     if open_difference < 200:
@@ -5498,7 +5498,7 @@ def secure_scenario(
             driver,
             "empty unlock password",
             "password_unlock_primary",
-            (105, 112, 121),
+            (97, 104, 112),
             before_text=True,
         )
     else:
@@ -5584,6 +5584,9 @@ def secure_scenario(
     focus_tag_input(driver, 1, "secure tag popover before lock")
     driver.type_sensitive_text(tag_query)
     ciphertext_before_tag_lock = protected.read_bytes()
+    # The first outside click dismisses the tag layer without click-through.
+    # The explicit second click in the helper opens the protection actions.
+    driver.click("protection")
     lock_selected_note(driver)
     assert_locked_editor_inaccessible(
         driver,
@@ -5668,6 +5671,8 @@ def secure_scenario(
     # Canonical replace happens in the worker before the UI thread consumes
     # its completion event and enables the next secure metadata action.
     time.sleep(0.25)
+    # Submitting a tag keeps its layer open; dismiss it before invoking Pin.
+    driver.click("pin")
     driver.click("pin")
     wait_until(
         "locked protected pin edit",
@@ -6716,7 +6721,7 @@ def find_scenario(driver: WindowDriver, workspace: Path) -> None:
             156,
             32,
         ),
-        (105, 112, 121),
+        (130, 137, 145),
     )
     driver.type_text("needle")
 
@@ -6822,7 +6827,7 @@ def find_scenario(driver: WindowDriver, workspace: Path) -> None:
             156,
             32,
         ),
-        (105, 112, 121),
+        (130, 137, 145),
     )
     driver.type_text("externalneedle")
     driver.key("Return")
@@ -8744,6 +8749,9 @@ def components_scenario(driver: WindowDriver, workspace: Path) -> None:
         baseline = driver.wait_for_stable_frame("no tooltip", crop=(20, 20, 400, 120), stable_for=0.2)
         driver.xdotool("mousemove", "--window", driver.window_id, str(x), "40")
         tip = driver.wait_for_visual_change("icon hover tooltip", baseline, crop=(20, 55, 400, 65), minimum_pixels=50, timeout=3)
+        anchor_bottom = 51 if x == 155 else 56
+        if image_difference(baseline, tip, crop=(x - 15, anchor_bottom + 1, 240, 4)):
+            raise AcceptanceFailure("tooltip overlaps its anchor or the six-pixel gap")
         if x == 40:
             english_tip = tip
     driver.xdotool("mousemove", "--window", driver.window_id, "900", "500")

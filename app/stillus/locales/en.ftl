@@ -1,5 +1,18 @@
 # Copyright 2026 Evgeniy Udodov
 # SPDX-License-Identifier: GPL-3.0-only
+SidebarCollapse = Collapse sidebar
+SidebarExpand = Expand sidebar
+EmptyTrash = Trash is empty
+RssLoading = Loading feed…
+RssEmpty = There are no articles in this feed yet
+RssChecking = Checking…
+RenameTitle = New title
+ErrorUnknown = The operation could not be completed. Please retry.
+ErrorPermission = Access was denied. Check the file permissions.
+ErrorDiskFull = There is not enough disk space. Free some space and retry.
+ErrorNetwork = Could not connect. Check your connection and retry.
+ErrorInvalidData = The data could not be read. Check its format and retry.
+ErrorNotFound = The file or item is no longer available.
 
 UpdateRestart = Restart
 UpdateRestartWaiting = Waiting for saves and background operations to finish…
@@ -272,7 +285,7 @@ SavingMore = Saving… · new changes pending
 SaveError = Save error · { $value }
 Conflict = Conflict · { $value }
 RecoveryError = { " · " }backup error
-SelectionSize = { " · " }selected { $value }
+SelectionSize = { " · " }selected { $value } characters
 EditorStatus = Line { $line }, column { $column }{ $selection } · { $value } · { $save }{ $recovery }
 DiskConflict = The file changed on disk while edits were pending; both versions are preserved
 Megabytes = { $value } MB
@@ -424,6 +437,3 @@ ChatEmpty = Start a conversation. Your history is saved in this workspace.
 ChatAcknowledge = Continue without repeating this action
 
 ChatUnsupported = This provider does not support chat generation yet.
-
-SidebarCollapse = Collapse sidebar
-SidebarExpand = Expand sidebar

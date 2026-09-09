@@ -412,6 +412,26 @@ impl Editor {
         self.selection
     }
 
+    /// Count selected Unicode scalar values without allocating the selection.
+    pub fn selection_character_count(&self) -> usize {
+        let range = self.selection.normalized();
+        let mut offset = 0;
+        let mut count = 0;
+        for chunk in self.chunks() {
+            let end = offset + chunk.len();
+            if end > range.start.0 && offset < range.end.0 {
+                let start = range.start.0.saturating_sub(offset);
+                let finish = range.end.0.saturating_sub(offset).min(chunk.len());
+                count += chunk[start..finish].chars().count();
+            }
+            offset = end;
+            if offset >= range.end.0 {
+                break;
+            }
+        }
+        count
+    }
+
     pub fn set_selection(&mut self, selection: Selection) -> Result<(), EditorError> {
         self.validate_offset(selection.anchor())?;
         self.validate_offset(selection.focus())?;
@@ -998,6 +1018,16 @@ mod tests {
         assert!(editor.redo());
         assert_eq!(text(&editor), "zero мир end");
         assert_eq!(editor.selection(), outcome.selection);
+    }
+
+    #[test]
+    fn selected_character_count_handles_unicode_and_rope_chunks() {
+        let body = format!("{}Ж🦀e\u{301}\nend", "я".repeat(10_000));
+        let mut editor = Editor::new(&body);
+        editor.set_selection(Selection::new(ByteOffset::new(body.len()), ByteOffset::new(2))).unwrap();
+        assert_eq!(editor.selection_character_count(), body.chars().count() - 1);
+        editor.set_selection(Selection::caret(ByteOffset::new(2))).unwrap();
+        assert_eq!(editor.selection_character_count(), 0);
     }
 
     #[test]

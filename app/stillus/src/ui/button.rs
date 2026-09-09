@@ -152,7 +152,6 @@ pub(crate) enum ButtonContext {
 // Icon-only buttons retain a title even when unavailable.
 // Hover and keyboard focus share the same reactive content.
 thread_local! {
-    static BUTTON_FOCUS_TARGETS: RefCell<std::collections::HashMap<ViewId, ViewId>> = RefCell::new(std::collections::HashMap::new());
     static POINTER_FOCUS_RESTORE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
@@ -169,84 +168,24 @@ pub(crate) fn button_request_pointer_focus(id: ViewId) {
 }
 
 pub(crate) fn button_focus_target(id: ViewId) -> ViewId {
-    BUTTON_FOCUS_TARGETS.with(|targets| targets.borrow().get(&id).copied().unwrap_or(id))
+    id
 }
 
 fn titled_button(
     child: impl IntoView + 'static,
     title: Rc<dyn Fn() -> String>,
     palette: Palette,
-) -> floem::views::Tooltip {
-    let child = child.into_view();
-    let focus_target = child.id();
-    let origin = Rc::new(std::cell::Cell::new(Point::ZERO));
-    let moved = origin.clone();
-    let overlay = Rc::new(RefCell::new(None));
-    let opened = overlay.clone();
-    let focus_title = title.clone();
-    let pointer_focus = Rc::new(std::cell::Cell::new(false));
-    let pointer_down = pointer_focus.clone();
-    let pointer_overlay = overlay.clone();
-    let focused = child
-        .on_event_cont(EventListener::PointerDown, move |_| {
-            pointer_down.set(true);
-            close_tooltip(&pointer_overlay);
-            let reset = pointer_down.clone();
-            exec_after(Duration::from_millis(50), move |_| reset.set(false));
-        })
-        .on_move(move |point| moved.set(point))
-        .on_event_cont(EventListener::FocusGained, move |_| {
-            if !pointer_focus.get() && !button_focus_is_pointer() && opened.borrow().is_none() {
-                let title = focus_title.clone();
-                let id = add_overlay(origin.get() + (0.0, BUTTON_SIZE_PX + 6.0), move |_| {
-                    tooltip_content(title.clone(), palette).pointer_events(|| false)
-                });
-                *opened.borrow_mut() = Some(id);
-            }
-        });
-    let lost = overlay.clone();
-    let inactive = overlay.clone();
-    let tooltip = focused
-        .on_event_cont(EventListener::FocusLost, move |_| close_tooltip(&lost))
-        .on_event_cont(EventListener::WindowLostFocus, move |_| {
-            close_tooltip(&inactive)
-        })
-        .on_cleanup(move || close_tooltip(&overlay))
-        .tooltip(move || tooltip_content(title.clone(), palette).pointer_events(|| false));
-    let tooltip_id = tooltip.id();
-    BUTTON_FOCUS_TARGETS.with(|targets| targets.borrow_mut().insert(tooltip_id, focus_target));
-    tooltip.on_cleanup(move || {
-        BUTTON_FOCUS_TARGETS.with(|targets| targets.borrow_mut().remove(&tooltip_id));
-    })
+) -> AnyView {
+    anchored_tooltip(
+        child,
+        Rc::new(move || {
+            let title = title();
+            assert!(!title.trim().is_empty(), "button title must not be empty");
+            title
+        }),
+        palette,
+    )
 }
-fn close_tooltip(overlay: &RefCell<Option<ViewId>>) {
-    if let Some(id) = overlay.borrow_mut().take() {
-        remove_overlay(id);
-    }
-}
-fn tooltip_content(title: Rc<dyn Fn() -> String>, palette: Palette) -> impl IntoView {
-    label(move || {
-        let title = title();
-        assert!(!title.trim().is_empty(), "button title must not be empty");
-        title
-    })
-    .style(move |s| tooltip_style(s, palette))
-}
-pub(crate) fn tooltip_label(title: String, palette: Palette) -> impl IntoView {
-    text(title).style(move |s| tooltip_style(s, palette))
-}
-fn tooltip_style(s: Style, palette: Palette) -> Style {
-    s.padding_vert(6.0)
-        .padding_horiz(9.0)
-        .background(Color::rgb8(28, 33, 40))
-        .color(palette.sidebar_ink)
-        .font_family(UI_FONT_FAMILY.to_owned())
-        .font_size(crate::ui::FONT_CAPTION as f32)
-        .border(1.0)
-        .border_color(Color::rgb8(58, 66, 77))
-        .border_radius(5.0)
-}
-
 struct ButtonStyle {
     labeled: bool,
     tone: IconButtonTone,

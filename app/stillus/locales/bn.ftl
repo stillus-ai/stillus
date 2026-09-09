@@ -1,5 +1,18 @@
 # Copyright 2026 Evgeniy Udodov
 # SPDX-License-Identifier: GPL-3.0-only
+SidebarCollapse = সাইডবার গুটিয়ে নিন
+SidebarExpand = সাইডবার প্রসারিত করুন
+EmptyTrash = ট্র্যাশ খালি
+RssLoading = ফিড লোড হচ্ছে…
+RssEmpty = এই ফিডে এখনও কোনো নিবন্ধ নেই
+RssChecking = যাচাই করা হচ্ছে…
+RenameTitle = নতুন শিরোনাম
+ErrorUnknown = কাজটি সম্পন্ন করা যায়নি। আবার চেষ্টা করুন।
+ErrorPermission = প্রবেশাধিকার নেই। ফাইলের অনুমতি যাচাই করুন।
+ErrorDiskFull = ডিস্কে পর্যাপ্ত স্থান নেই। কিছু স্থান খালি করে আবার চেষ্টা করুন।
+ErrorNetwork = সংযোগ করা যায়নি। সংযোগ যাচাই করে আবার চেষ্টা করুন।
+ErrorInvalidData = ডেটা পড়া যায়নি। বিন্যাস যাচাই করে আবার চেষ্টা করুন।
+ErrorNotFound = ফাইল বা আইটেমটি আর পাওয়া যাচ্ছে না।
 
 UpdateRestart = পুনরায় চালু করুন
 UpdateRestartWaiting = সংরক্ষণ ও পটভূমির কাজ শেষ হওয়ার অপেক্ষা চলছে…
@@ -269,7 +282,7 @@ SavingMore = সংরক্ষণ করা হচ্ছে... · নতুন 
 SaveError = ত্রুটি সংরক্ষণ করুন · { $value }
 Conflict = দ্বন্দ্ব · { $value }
 RecoveryError = { " · " }ব্যাকআপ ত্রুটি
-SelectionSize = { " · " }নির্বাচিত { $value }
+SelectionSize = { " · " }নির্বাচিত { $value } অক্ষর
 EditorStatus = লাইন { $line }, কলাম { $column }{ $selection } · { $value } · { $save }{ $recovery }
 DiskConflict = সম্পাদনা মুলতুবি থাকাকালীন ফাইলটি ডিস্কে পরিবর্তিত হয়; উভয় সংস্করণ সংরক্ষিত হয়
 Megabytes = { $value } এমবি
@@ -420,6 +433,3 @@ ChatEmpty = কথোপকথন শুরু করুন। ইতিহা�
 ChatAcknowledge = এই কাজটি পুনরাবৃত্তি না করে চালিয়ে যান
 
 ChatUnsupported = এই প্রদানকারী এখনও চ্যাটের উত্তর তৈরি করতে পারে না।
-
-SidebarCollapse = সাইডবার গুটিয়ে নিন
-SidebarExpand = সাইডবার প্রসারিত করুন

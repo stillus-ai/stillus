@@ -246,7 +246,7 @@ impl fmt::Display for UiText {
         match self {
             Self::Message(message) => message.fmt(formatter),
             Self::Technical(text) => formatter.write_str(text),
-            Self::Failure { details } => msg!(OperationFailed, "error" => details).fmt(formatter),
+            Self::Failure { details } => user_error_message(details).fmt(formatter),
             Self::Joined(messages) => {
                 for (index, message) in messages.iter().enumerate() {
                     if index > 0 {
@@ -264,12 +264,132 @@ impl From<&UiText> for Argument {
         match value {
             UiText::Message(message) => Self::Message(Box::new(message.clone())),
             UiText::Technical(text) => Self::Text(text.clone()),
-            UiText::Failure { details } => {
-                Self::Message(Box::new(msg!(OperationFailed, "error" => details)))
-            }
+            UiText::Failure { details } => Self::Message(Box::new(user_error_message(details))),
             UiText::Joined(_) => Self::Text(value.to_string()),
         }
     }
+}
+
+fn is_error_argument(key: Key, name: &str) -> bool {
+    name == "error"
+        || name.ends_with("_error")
+        || (name == "value" && matches!(key, Key::SaveError | Key::Conflict))
+}
+
+/// Converts untrusted provider/storage diagnostics to a bounded, local message.
+/// Never interpolate the original: it can contain credentials, paths or note text.
+fn user_error_message(details: &str) -> Message {
+    user_error_message_for(details, current())
+}
+
+fn user_error_message_for(details: &str, locale: Locale) -> Message {
+    // Some legacy surfaces pass rendered messages as arguments. Preserve known
+    // localized reasons without accepting arbitrary diagnostic strings as UI text.
+    for key in [
+        Key::ErrorUnknown,
+        Key::ErrorPermission,
+        Key::ErrorDiskFull,
+        Key::ErrorNetwork,
+        Key::ErrorInvalidData,
+        Key::ErrorNotFound,
+        Key::DiskConflict,
+        Key::WaitSave,
+        Key::ResolveSaveFirst,
+        Key::AuthenticationFailed,
+    ] {
+        if details == key.message().render_for(locale) {
+            return key.message();
+        }
+    }
+    let text = details
+        .chars()
+        .take(4096)
+        .collect::<String>()
+        .to_ascii_lowercase();
+    let key = if text.contains("permission denied")
+        || text.contains("access is denied")
+        || text.contains("os error 13")
+        || (cfg!(windows) && text.contains("os error 5"))
+    {
+        Key::ErrorPermission
+    } else if text.contains("no space left")
+        || text.contains("disk full")
+        || text.contains("os error 28")
+        || text.contains("os error 112")
+    {
+        Key::ErrorDiskFull
+    } else if text.contains("conflict")
+        || text.contains("changed on disk")
+        || text.contains("source changed")
+    {
+        Key::DiskConflict
+    } else if text.contains("unsaved") || text.contains("active save") || text.contains("busy") {
+        Key::WaitSave
+    } else if text.contains("password")
+        || text.contains("authentication")
+        || text.contains("decrypt")
+    {
+        Key::AuthenticationFailed
+    } else if text.contains("timed out")
+        || text.contains("timeout")
+        || text.contains("connection")
+        || text.contains("dns")
+        || text.contains("network")
+        || text.contains("http")
+        || text.contains("tls")
+    {
+        Key::ErrorNetwork
+    } else if text.contains("no such file")
+        || text.contains("not found")
+        || text.contains("os error 2")
+        || text.contains("disappeared")
+    {
+        Key::ErrorNotFound
+    } else if text.contains("invalid")
+        || text.contains("malformed")
+        || text.contains("parse")
+        || text.contains("corrupt")
+    {
+        Key::ErrorInvalidData
+    } else {
+        Key::ErrorUnknown
+    };
+    key.message()
+}
+
+pub(crate) fn user_error_text(error: &UiText) -> String {
+    match error {
+        UiText::Technical(details) | UiText::Failure { details } => {
+            user_error_message(details).render()
+        }
+        UiText::Message(message) => message.render(),
+        UiText::Joined(messages) => messages
+            .iter()
+            .map(user_error_text)
+            .collect::<Vec<_>>()
+            .join(". "),
+    }
+}
+
+/// A details panel may show only recognized diagnostic codes, never arbitrary
+/// exception text. The original remains in memory for its owning operation.
+pub(crate) fn safe_error_details(error: &UiText) -> Option<String> {
+    let details = match error {
+        UiText::Technical(details) | UiText::Failure { details } => details,
+        _ => return None,
+    };
+    for code in [
+        "os error 2",
+        "os error 5",
+        "os error 13",
+        "os error 28",
+        "os error 112",
+    ] {
+        if details.contains(&format!("({code})")) {
+            return Some(code.to_owned());
+        }
+    }
+    None
 }
 
 impl Message {
@@ -285,6 +405,14 @@ impl Message {
             args.set(
                 *name,
                 match value {
+                    Argument::Text(text) if is_error_argument(self.key, name) => {
+                        let message = if self.key == Key::Conflict {
+                            Key::DiskConflict.message()
+                        } else {
+                            user_error_message_for(text, locale)
+                        };
+                        FluentValue::from(message.render_for(locale))
+                    }
                     Argument::Text(text) => FluentValue::from(text.clone()),
                     Argument::Number(number) => FluentValue::from(*number),
                     Argument::Message(message) => FluentValue::from(message.render_for(locale)),
@@ -350,6 +478,72 @@ pub(crate) use tr;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn user_errors_localize_reasons_without_echoing_secret_diagnostics() {
+        for (diagnostic, expected) in [
+            (
+                "permission denied (os error 13): /private/note",
+                Key::ErrorPermission,
+            ),
+            ("no space left on device (os error 28)", Key::ErrorDiskFull),
+            (
+                "connection timed out: https://secret.example/?key=hidden",
+                Key::ErrorNetwork,
+            ),
+            (
+                "unknown failure: synthetic protected body and sk-secret",
+                Key::ErrorUnknown,
+            ),
+        ] {
+            for locale in Locale::ALL {
+                let reason = user_error_message_for(diagnostic, *locale).render_for(*locale);
+                assert_eq!(reason, expected.message().render_for(*locale));
+                assert!(!reason.contains("/private"));
+                assert!(!reason.contains("sk-secret"));
+                assert!(!reason.contains("synthetic protected body"));
+                assert!(!reason.contains("secret.example"));
+            }
+        }
+        let failure = UiText::Failure {
+            details: "permission denied (os error 13): sk-secret".into(),
+        };
+        assert_eq!(safe_error_details(&failure).as_deref(), Some("os error 13"));
+        assert!(
+            safe_error_details(&UiText::Failure {
+                details: "sk-secret".into()
+            })
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn nested_error_arguments_are_localized_but_user_paths_are_preserved() {
+        assert_eq!(UiText::Technical("A Target".into()).to_string(), "A Target");
+        assert_eq!(UiText::Technical("B Other".into()).to_string(), "B Other");
+        let error =
+            msg!(SaveSettingsFailed, "error" => "permission denied (os error 13): /private/note");
+        let russian = error.render_for(Locale::Russian);
+        assert!(russian.contains("Нет доступа"));
+        assert!(!russian.contains("permission denied"));
+        assert!(!russian.contains("/private/note"));
+        let path = msg!(OpenFailed, "value" => "/notes/Work.md").render_for(Locale::Russian);
+        assert!(path.contains("/notes/Work.md"));
+        let nested = msg!(ErrorStatus, "error" => Key::ErrorPermission.message().render_for(Locale::Russian));
+        assert!(nested.render_for(Locale::Russian).contains("Нет доступа"));
+    }
+
+    #[test]
+    fn russian_catalog_uses_workspace_and_recovery_glossary_in_values() {
+        for line in Locale::Russian.resource().lines() {
+            if let Some((_, value)) = line.split_once(" = ") {
+                assert!(!value.contains("workspace"), "{line}");
+                assert!(!value.contains("Recovery"), "{line}");
+                assert!(!value.contains("recovery-"), "{line}");
+            }
+        }
+    }
+
     #[test]
     fn all_catalogs_have_exactly_the_english_keys_and_parameters() {
         fn entries(source: &str) -> std::collections::BTreeMap<&str, String> {

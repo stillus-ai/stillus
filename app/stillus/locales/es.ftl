@@ -1,5 +1,18 @@
 # Copyright 2026 Evgeniy Udodov
 # SPDX-License-Identifier: GPL-3.0-only
+SidebarCollapse = Contraer barra lateral
+SidebarExpand = Expandir barra lateral
+EmptyTrash = La papelera está vacía
+RssLoading = Cargando el canal…
+RssEmpty = Este canal aún no tiene artículos
+RssChecking = Comprobando…
+RenameTitle = Nuevo título
+ErrorUnknown = No se pudo completar la operación. Inténtalo de nuevo.
+ErrorPermission = Acceso denegado. Comprueba los permisos del archivo.
+ErrorDiskFull = No hay suficiente espacio en disco. Libera espacio e inténtalo de nuevo.
+ErrorNetwork = No se pudo conectar. Comprueba la conexión e inténtalo de nuevo.
+ErrorInvalidData = No se pudieron leer los datos. Comprueba el formato e inténtalo de nuevo.
+ErrorNotFound = El archivo o elemento ya no está disponible.
 
 UpdateRestart = Reiniciar
 UpdateRestartWaiting = Esperando a que terminen el guardado y las operaciones en segundo plano…
@@ -269,7 +282,7 @@ SavingMore = Guardando… · nuevos cambios pendientes
 SaveError = Error al guardar · { $value }
 Conflict = Conflicto · { $value }
 RecoveryError = { " · " }error de copia de seguridad
-SelectionSize = { " · " }seleccionado { $value }
+SelectionSize = { " · " }seleccionado { $value } caracteres
 EditorStatus = Línea { $line }, columna { $column }{ $selection } · { $value } · { $save }{ $recovery }
 DiskConflict = El archivo cambió en el disco mientras las ediciones estaban pendientes; ambas versiones se conservan
 Megabytes = { $value } MB
@@ -420,6 +433,3 @@ ChatEmpty = Inicia una conversación. El historial se guarda en este espacio de 
 ChatAcknowledge = Continuar sin repetir esta acción
 
 ChatUnsupported = Este proveedor aún no admite la generación de respuestas de chat.
-
-SidebarCollapse = Contraer barra lateral
-SidebarExpand = Expandir barra lateral

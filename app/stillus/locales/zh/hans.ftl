@@ -1,5 +1,18 @@
 # Copyright 2026 Evgeniy Udodov
 # SPDX-License-Identifier: GPL-3.0-only
+SidebarCollapse = 收起侧边栏
+SidebarExpand = 展开侧边栏
+EmptyTrash = 回收站为空
+RssLoading = 正在加载订阅源…
+RssEmpty = 此订阅源暂无文章
+RssChecking = 正在检查…
+RenameTitle = 新标题
+ErrorUnknown = 无法完成操作，请重试。
+ErrorPermission = 访问被拒绝，请检查文件权限。
+ErrorDiskFull = 磁盘空间不足，请释放空间后重试。
+ErrorNetwork = 无法连接，请检查网络连接后重试。
+ErrorInvalidData = 无法读取数据，请检查格式后重试。
+ErrorNotFound = 文件或项目已不可用。
 
 UpdateRestart = 重新启动
 UpdateRestartWaiting = 正在等待保存和后台操作完成…
@@ -269,7 +282,7 @@ SavingMore = 正在保存……·新更改待定
 SaveError = 保存错误·{ $value }
 Conflict = 冲突·{ $value }
 RecoveryError = { " · " }备份错误
-SelectionSize = { " · " }已选择{ $value }
+SelectionSize = { " · " }已选择{ $value } 个字符
 EditorStatus = 第 { $line } 行，第 { $column }{ $selection } 列 · { $value } · { $save }{ $recovery }
 DiskConflict = 当编辑尚未完成时，文件在磁盘上发生了更改；两个版本都被保留
 Megabytes = { $value } MB
@@ -419,6 +432,3 @@ ChatEmpty = 开始对话。历史记录保存在此工作区。
 ChatAcknowledge = 继续，不重复此操作
 
 ChatUnsupported = 此提供商暂不支持生成聊天回复。
-
-SidebarCollapse = 收起侧边栏
-SidebarExpand = 展开侧边栏

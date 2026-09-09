@@ -1,5 +1,18 @@
 # Copyright 2026 Evgeniy Udodov
 # SPDX-License-Identifier: GPL-3.0-only
+SidebarCollapse = طي الشريط الجانبي
+SidebarExpand = توسيع الشريط الجانبي
+EmptyTrash = سلة المهملات فارغة
+RssLoading = جارٍ تحميل الخلاصة…
+RssEmpty = لا توجد مقالات في هذه الخلاصة بعد
+RssChecking = جارٍ التحقق…
+RenameTitle = عنوان جديد
+ErrorUnknown = تعذر إكمال العملية. حاول مرة أخرى.
+ErrorPermission = تم رفض الوصول. تحقق من أذونات الملف.
+ErrorDiskFull = لا توجد مساحة كافية على القرص. حرر مساحة وحاول مرة أخرى.
+ErrorNetwork = تعذر الاتصال. تحقق من الاتصال وحاول مرة أخرى.
+ErrorInvalidData = تعذرت قراءة البيانات. تحقق من تنسيقها وحاول مرة أخرى.
+ErrorNotFound = الملف أو العنصر لم يعد متاحًا.
 
 UpdateRestart = إعادة التشغيل
 UpdateRestartWaiting = بانتظار اكتمال الحفظ والعمليات في الخلفية…
@@ -269,7 +282,7 @@ SavingMore = جارٍ الحفظ... · التغييرات الجديدة معل�
 SaveError = خطأ في الحفظ · { $value }
 Conflict = الصراع · { $value }
 RecoveryError = { " · " }خطأ في النسخ الاحتياطي
-SelectionSize = { " · " }تم التحديد { $value }
+SelectionSize = { " · " }تم التحديد { $value } حرفًا
 EditorStatus = السطر { $line }، العمود { $column }{ $selection } · { $value } · { $save }{ $recovery }
 DiskConflict = تم تغيير الملف على القرص بينما كانت التعديلات معلقة؛ يتم الحفاظ على كلا الإصدارين
 Megabytes = { $value } ميغابايت
@@ -424,6 +437,3 @@ ChatEmpty = ابدأ محادثة. يتم حفظ السجل في مساحة ال
 ChatAcknowledge = المتابعة دون تكرار هذا الإجراء
 
 ChatUnsupported = هذا المزوّد لا يدعم إنشاء ردود الدردشة بعد.
-
-SidebarCollapse = طي الشريط الجانبي
-SidebarExpand = توسيع الشريط الجانبي

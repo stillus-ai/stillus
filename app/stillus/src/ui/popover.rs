@@ -64,6 +64,7 @@ pub(crate) fn popover_close_top() -> bool {
 
 /// Screen changes dispose their overlays without stealing the new screen's focus.
 pub(crate) fn popover_close_all() {
+    close_button_tooltips();
     let layers = LAYERS.with(|stack| std::mem::take(&mut stack.borrow_mut().layers));
     for layer in layers.into_iter().rev() {
         dismiss(layer, false);

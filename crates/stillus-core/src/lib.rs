@@ -4828,6 +4828,10 @@ impl DocumentSession {
         self.editor.selection()
     }
 
+    pub fn selection_character_count(&self) -> usize {
+        self.editor.selection_character_count()
+    }
+
     pub fn content_revision(&self) -> u64 {
         self.autosave.revision
     }

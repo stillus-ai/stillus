@@ -1,5 +1,18 @@
 # Copyright 2026 Evgeniy Udodov
 # SPDX-License-Identifier: GPL-3.0-only
+SidebarCollapse = Seitenleiste einklappen
+SidebarExpand = Seitenleiste ausklappen
+EmptyTrash = Der Papierkorb ist leer
+RssLoading = Feed wird geladen…
+RssEmpty = Dieser Feed enthält noch keine Artikel
+RssChecking = Wird geprüft…
+RenameTitle = Neuer Titel
+ErrorUnknown = Der Vorgang konnte nicht abgeschlossen werden. Versuchen Sie es erneut.
+ErrorPermission = Zugriff verweigert. Prüfen Sie die Dateiberechtigungen.
+ErrorDiskFull = Nicht genügend Speicherplatz. Geben Sie Speicher frei und versuchen Sie es erneut.
+ErrorNetwork = Verbindung fehlgeschlagen. Prüfen Sie die Verbindung und versuchen Sie es erneut.
+ErrorInvalidData = Die Daten konnten nicht gelesen werden. Prüfen Sie das Format und versuchen Sie es erneut.
+ErrorNotFound = Die Datei oder das Element ist nicht mehr verfügbar.
 
 UpdateRestart = Neu starten
 UpdateRestartWaiting = Warten auf das Ende der Speicher- und Hintergrundvorgänge…
@@ -269,7 +282,7 @@ SavingMore = Speichern… · Neue Änderungen stehen an
 SaveError = Speicherfehler · { $value }
 Conflict = Konflikt · { $value }
 RecoveryError = { " · " }Sicherungsfehler
-SelectionSize = { " · " }ausgewählt { $value }
+SelectionSize = { " · " }ausgewählt { $value } Zeichen
 EditorStatus = Zeile { $line }, Spalte { $column }{ $selection } · { $value } · { $save }{ $recovery }
 DiskConflict = Die Datei wurde auf der Festplatte geändert, während Bearbeitungen ausstanden. beide Versionen sind erhalten
 Megabytes = { $value } MB
@@ -420,6 +433,3 @@ ChatEmpty = Beginne ein Gespräch. Der Verlauf wird in diesem Arbeitsbereich ges
 ChatAcknowledge = Ohne Wiederholung dieser Aktion fortfahren
 
 ChatUnsupported = Dieser Anbieter unterstützt noch keine Chatantworten.
-
-SidebarCollapse = Seitenleiste einklappen
-SidebarExpand = Seitenleiste ausklappen

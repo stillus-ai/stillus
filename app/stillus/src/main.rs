@@ -3370,7 +3370,7 @@ fn encryption_settings_view(
         revision.get();
         let model = status_model.borrow();
         if let Some(error) = &model.password_change_error {
-            return error.to_string();
+            return i18n::user_error_text(error);
         }
         if let Some(progress) = model.secure_progress {
             let message = match progress.phase {
@@ -3654,7 +3654,12 @@ fn password_change_recovery_modal(
         }),
         label(move || {
             revision.get();
-            error_model.borrow().error.clone().unwrap_or_default()
+            error_model
+                .borrow()
+                .error
+                .as_ref()
+                .map(i18n::user_error_text)
+                .unwrap_or_default()
         })
         .style(move |style| {
             style
@@ -3752,7 +3757,12 @@ fn integrity_modal(
             });
             let error = label(move || {
                 revision.get();
-                error_model.borrow().error.clone().unwrap_or_default()
+                error_model
+                    .borrow()
+                    .error
+                    .as_ref()
+                    .map(i18n::user_error_text)
+                    .unwrap_or_default()
             })
             .style(move |style| {
                 revision.get();
@@ -6687,41 +6697,47 @@ fn external_file_row(
             msg!(FileLocked , "value" => file.path.display().to_string()).into()
         }
         stillus_core::ItemAvailability::Invalid(message)
-        | stillus_core::ItemAvailability::Unavailable(message) => {
-            format!("{}\n{message}", file.path.display()).into()
-        }
+        | stillus_core::ItemAvailability::Unavailable(message) => format!(
+            "{}\n{}",
+            file.path.display(),
+            i18n::user_error_text(&UiText::from(message.as_str()))
+        )
+        .into(),
     };
-    let main = selectable_row(
-        h_stack((
-            svg(ICON_NOTE).style(|style| style.size(13.0, 13.0).flex_shrink(0.0)),
-            text(file.title).style(move |style| {
-                style
-                    .font_size(crate::ui::FONT_BODY as f32)
-                    .color(if is_ready {
-                        palette.sidebar_ink
-                    } else {
-                        Color::rgb8(224, 160, 140)
-                    })
+    let main = anchored_tooltip(
+        selectable_row(
+            h_stack((
+                svg(ICON_NOTE).style(|style| style.size(13.0, 13.0).flex_shrink(0.0)),
+                text(file.title).style(move |style| {
+                    style
+                        .font_size(crate::ui::FONT_BODY as f32)
+                        .color(if is_ready {
+                            palette.sidebar_ink
+                        } else {
+                            Color::rgb8(224, 160, 140)
+                        })
+                        .min_width(0.0)
+                        .flex_shrink(1.0)
+                        .text_ellipsis()
+                        .selectable(false)
+                }),
+            ))
+            .style(|style| {
+                rtl_row(style)
                     .min_width(0.0)
-                    .flex_shrink(1.0)
-                    .text_ellipsis()
-                    .selectable(false)
+                    .items_center()
+                    .gap(7.0)
+                    .flex_grow(1.0)
             }),
-        ))
-        .style(|style| {
-            rtl_row(style)
-                .min_width(0.0)
-                .items_center()
-                .gap(7.0)
-                .flex_grow(1.0)
-        }),
-        move || {
-            open_model.borrow_mut().open_external_path(&open_path);
-            revision.update(|value| *value = value.saturating_add(1));
-            schedule_autosave(open_model.clone(), revision);
-        },
+            move || {
+                open_model.borrow_mut().open_external_path(&open_path);
+                revision.update(|value| *value = value.saturating_add(1));
+                schedule_autosave(open_model.clone(), revision);
+            },
+        ),
+        Rc::new(move || tooltip.to_string()),
+        palette,
     )
-    .tooltip(move || tooltip_label(tooltip.to_string(), palette))
     .style(|style| style.min_width(0.0).flex_grow(1.0).height_full());
     let close = compact_icon_button(
         || ButtonAction::Close.icon(),
@@ -8124,7 +8140,11 @@ fn sidebar_panel(
         } else if model.search_error.is_some() {
             tr!(SearchTemporarilyUnavailable)
         } else if search_query.get().trim().is_empty() {
-            tr!(SearchPrompt)
+            format!(
+                "{}\n{}",
+                tr!(SearchPrompt),
+                tr!(SearchShortcut, "modifier" => i18n::shortcut_modifier())
+            )
         } else if model.search_results.is_empty() {
             tr!(NoResults)
         } else {
@@ -8805,7 +8825,12 @@ fn rss_panel(
     let status_style_model = model.clone();
     let status = label(move || {
         revision.get();
-        status_model.borrow().error.clone().unwrap_or_default()
+        status_model
+            .borrow()
+            .error
+            .as_ref()
+            .map(i18n::user_error_text)
+            .unwrap_or_default()
     })
     .style(move |style| {
         revision.get();
@@ -10249,14 +10274,23 @@ fn editor_panel(
         }),
         editor_body,
         h_stack((
-            label(move || {
-                revision.get();
-                editor_status(&status_model.borrow())
-            })
-            .tooltip(move || {
-                revision.get();
-                tooltip_label(editor_status(&status_tooltip_model.borrow()), palette)
-            })
+            anchored_tooltip(
+                label(move || {
+                    revision.get();
+                    editor_status(&status_model.borrow())
+                }),
+                Rc::new(move || {
+                    revision.get();
+                    let model = status_tooltip_model.borrow();
+                    let mut status = editor_status(&model);
+                    if let Some(details) = model.error.as_ref().and_then(i18n::safe_error_details) {
+                        status.push_str("\n");
+                        status.push_str(&details);
+                    }
+                    status
+                }),
+                palette,
+            )
             .style(move |style| {
                 revision.get();
                 let model = status_color_model.borrow();
@@ -11107,7 +11141,7 @@ fn render_editor_line_numbers(model: &AppModel) -> String {
 
 fn editor_status(model: &AppModel) -> String {
     if let Some(error) = &model.error {
-        return tr!(ErrorStatus , "error" => error.to_string());
+        return tr!(ErrorStatus , "error" => i18n::user_error_text(error));
     }
     if model.secure_worker_active {
         return tr!(SecureRunning);
@@ -11131,7 +11165,7 @@ fn editor_status(model: &AppModel) -> String {
     };
     let line = document.cursor_line().unwrap_or(0) + 1;
     let column = document.cursor_byte_column().unwrap_or(0) + 1;
-    let selection = document.selection().normalized().len();
+    let selection = document.selection_character_count();
     let save = match document.save_status() {
         SaveStatus::Clean { .. } => tr!(Saved),
         SaveStatus::Dirty { .. } => tr!(Modified),
@@ -11160,7 +11194,7 @@ fn editor_status(model: &AppModel) -> String {
     let selection = if selection == 0 {
         String::new()
     } else {
-        tr!(SelectionSize , "value" => format_byte_count(selection))
+        tr!(SelectionSize , "value" => selection)
     };
     tr!(EditorStatus , "line" => line, "column" => column, "selection" => selection, "value" => format_byte_count(document.len_bytes()), "save" => save, "recovery" => recovery)
 }
@@ -11170,7 +11204,7 @@ fn localize_storage_message(message: &str) -> String {
         "note changed on disk while local edits were pending; both versions are preserved" => {
             tr!(DiskConflict)
         }
-        other => other.to_owned(),
+        other => i18n::user_error_text(&UiText::from(other)),
     }
 }
 
@@ -11537,7 +11571,11 @@ fn tag_popover_card(
             .border_color(palette.divider)
             .border_radius(7.0)
     });
-    exec_after(Duration::from_millis(10), move |_| input_id.request_focus());
+    exec_after(Duration::from_millis(10), move |_| {
+        if signals.open.try_get_untracked() == Some(true) && input_id.parent().is_some() {
+            input_id.request_focus();
+        }
+    });
     card
 }
 

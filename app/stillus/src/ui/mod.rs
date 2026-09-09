@@ -45,3 +45,6 @@ pub(crate) mod gallery;
 
 mod form;
 pub(crate) use form::*;
+
+mod tooltip;
+pub(crate) use tooltip::{anchored_tooltip, close_button_tooltips};

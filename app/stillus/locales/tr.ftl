@@ -1,5 +1,18 @@
 # Copyright 2026 Evgeniy Udodov
 # SPDX-License-Identifier: GPL-3.0-only
+SidebarCollapse = Kenar çubuğunu daralt
+SidebarExpand = Kenar çubuğunu genişlet
+EmptyTrash = Çöp kutusu boş
+RssLoading = Akış yükleniyor…
+RssEmpty = Bu akışta henüz makale yok
+RssChecking = Kontrol ediliyor…
+RenameTitle = Yeni başlık
+ErrorUnknown = İşlem tamamlanamadı. Lütfen yeniden deneyin.
+ErrorPermission = Erişim reddedildi. Dosya izinlerini kontrol edin.
+ErrorDiskFull = Yeterli disk alanı yok. Yer açıp yeniden deneyin.
+ErrorNetwork = Bağlantı kurulamadı. Bağlantınızı kontrol edip yeniden deneyin.
+ErrorInvalidData = Veriler okunamadı. Biçimi kontrol edip yeniden deneyin.
+ErrorNotFound = Dosya veya öğe artık kullanılamıyor.
 
 UpdateRestart = Yeniden başlat
 UpdateRestartWaiting = Kaydetme ve arka plan işlemlerinin tamamlanması bekleniyor…
@@ -269,7 +282,7 @@ SavingMore = Kaydediliyor... · yeni değişiklikler bekleniyor
 SaveError = Hatayı kaydet · { $value }
 Conflict = Çatışma · { $value }
 RecoveryError = { " · " }yedekleme hatası
-SelectionSize = { " · " }seçildi { $value }
+SelectionSize = { " · " }seçildi { $value } karakter
 EditorStatus = Satır { $line }, sütun { $column }{ $selection } · { $value } · { $save }{ $recovery }
 DiskConflict = Düzenlemeler beklenirken dosya diskte değiştirildi; her iki versiyon da korunur
 Megabytes = { $value } MB
@@ -419,6 +432,3 @@ ChatEmpty = Bir konuşma başlatın. Geçmiş bu çalışma alanında saklanır.
 ChatAcknowledge = Bu eylemi tekrarlamadan devam et
 
 ChatUnsupported = Bu sağlayıcı henüz sohbet yanıtı oluşturmayı desteklemiyor.
-
-SidebarCollapse = Kenar çubuğunu daralt
-SidebarExpand = Kenar çubuğunu genişlet

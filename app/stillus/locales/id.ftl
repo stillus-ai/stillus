@@ -1,5 +1,18 @@
 # Copyright 2026 Evgeniy Udodov
 # SPDX-License-Identifier: GPL-3.0-only
+SidebarCollapse = Ciutkan bilah samping
+SidebarExpand = Perluas bilah samping
+EmptyTrash = Sampah kosong
+RssLoading = Memuat feed…
+RssEmpty = Belum ada artikel dalam feed ini
+RssChecking = Memeriksa…
+RenameTitle = Judul baru
+ErrorUnknown = Operasi tidak dapat diselesaikan. Silakan coba lagi.
+ErrorPermission = Akses ditolak. Periksa izin berkas.
+ErrorDiskFull = Ruang disk tidak cukup. Kosongkan ruang dan coba lagi.
+ErrorNetwork = Tidak dapat terhubung. Periksa koneksi dan coba lagi.
+ErrorInvalidData = Data tidak dapat dibaca. Periksa formatnya dan coba lagi.
+ErrorNotFound = Berkas atau item tidak lagi tersedia.
 
 UpdateRestart = Mulai ulang
 UpdateRestartWaiting = Menunggu penyimpanan dan operasi latar belakang selesai…
@@ -269,7 +282,7 @@ SavingMore = Menyimpan… · perubahan baru menunggu keputusan
 SaveError = Kesalahan penyimpanan · { $value }
 Conflict = Konflik · { $value }
 RecoveryError = { " · " }kesalahan pencadangan
-SelectionSize = { " · " }dipilih { $value }
+SelectionSize = { " · " }dipilih { $value } karakter
 EditorStatus = Baris { $line }, kolom { $column }{ $selection } · { $value } · { $save }{ $recovery }
 DiskConflict = File diubah pada disk saat pengeditan tertunda; kedua versi dipertahankan
 Megabytes = { $value } MB
@@ -419,6 +432,3 @@ ChatEmpty = Mulai percakapan. Riwayat disimpan di ruang kerja ini.
 ChatAcknowledge = Lanjutkan tanpa mengulangi tindakan ini
 
 ChatUnsupported = Penyedia ini belum mendukung pembuatan balasan chat.
-
-SidebarCollapse = Ciutkan bilah samping
-SidebarExpand = Perluas bilah samping

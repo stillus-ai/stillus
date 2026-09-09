@@ -1,5 +1,18 @@
 # Copyright 2026 Evgeniy Udodov
 # SPDX-License-Identifier: GPL-3.0-only
+SidebarCollapse = سائیڈ بار سمیٹیں
+SidebarExpand = سائیڈ بار پھیلائیں
+EmptyTrash = کوڑے دان خالی ہے
+RssLoading = فیڈ لوڈ ہو رہی ہے…
+RssEmpty = اس فیڈ میں ابھی کوئی مضمون نہیں ہے
+RssChecking = جانچ جاری ہے…
+RenameTitle = نیا عنوان
+ErrorUnknown = کارروائی مکمل نہیں ہو سکی۔ دوبارہ کوشش کریں۔
+ErrorPermission = رسائی کی اجازت نہیں ہے۔ فائل کی اجازتیں جانچیں۔
+ErrorDiskFull = ڈسک پر کافی جگہ نہیں ہے۔ جگہ خالی کرکے دوبارہ کوشش کریں۔
+ErrorNetwork = رابطہ قائم نہیں ہو سکا۔ کنکشن جانچ کر دوبارہ کوشش کریں۔
+ErrorInvalidData = ڈیٹا پڑھا نہیں جا سکا۔ اس کا فارمیٹ جانچ کر دوبارہ کوشش کریں۔
+ErrorNotFound = فائل یا آئٹم اب دستیاب نہیں ہے۔
 
 UpdateRestart = دوبارہ شروع کریں
 UpdateRestartWaiting = محفوظ کرنے اور پس منظر کی کارروائیوں کے مکمل ہونے کا انتظار ہے…
@@ -269,7 +282,7 @@ SavingMore = محفوظ ہو رہا ہے... نئی تبدیلیاں زیر ال�
 SaveError = غلطی محفوظ کریں · { $value }
 Conflict = تنازعہ · { $value }
 RecoveryError = { " · " }بیک اپ کی خرابی۔
-SelectionSize = { " · " }منتخب { $value }
+SelectionSize = { " · " }منتخب { $value } حروف
 EditorStatus = لائن { $line }، کالم { $column }{ $selection } · { $value } · { $save }{ $recovery }
 DiskConflict = فائل ڈسک پر تبدیل ہو گئی جبکہ ترامیم زیر التواء تھیں۔ دونوں ورژن محفوظ ہیں۔
 Megabytes = { $value } MB
@@ -420,6 +433,3 @@ ChatEmpty = گفتگو شروع کریں۔ تاریخ اس ورک اسپیس م�
 ChatAcknowledge = اس کارروائی کو دہرائے بغیر جاری رکھیں
 
 ChatUnsupported = یہ فراہم کنندہ ابھی چیٹ کے جوابات تیار کرنے کی سہولت نہیں دیتا۔
-
-SidebarCollapse = سائیڈ بار سمیٹیں
-SidebarExpand = سائیڈ بار پھیلائیں

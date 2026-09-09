@@ -10,7 +10,7 @@ use floem::event::{Event, EventPropagation};
 use floem::keyboard::{Key as LogicalKey, NamedKey};
 use floem::kurbo::{Point, Rect};
 use floem::reactive::{RwSignal, SignalGet, create_effect};
-use floem::style::{FontFamily, FontSize, TextColor};
+use floem::style::{FontFamily, FontSize};
 use floem::text::{Attrs, AttrsList, FamilyOwned, TextLayout};
 use floem::views::{TextInput, text_input};
 use floem::{View, ViewId};
@@ -103,12 +103,7 @@ impl View for LocalizedInput {
             Attrs::new()
                 .family(&[FamilyOwned::Name(family)])
                 .font_size(style.get(FontSize).unwrap_or(crate::ui::FONT_BODY as f32))
-                .color(
-                    style
-                        .get(TextColor)
-                        .unwrap_or(floem::peniko::Color::BLACK)
-                        .multiply_alpha(0.6),
-                ),
+                .color(super::Palette::new().ink3),
         );
     }
     fn layout(&mut self, cx: &mut LayoutCx) -> floem::taffy::tree::NodeId {

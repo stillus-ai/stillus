@@ -1,5 +1,18 @@
 # Copyright 2026 Evgeniy Udodov
 # SPDX-License-Identifier: GPL-3.0-only
+SidebarCollapse = Recolher barra lateral
+SidebarExpand = Expandir barra lateral
+EmptyTrash = O lixo está vazio
+RssLoading = A carregar o feed…
+RssEmpty = Este feed ainda não tem artigos
+RssChecking = A verificar…
+RenameTitle = Novo título
+ErrorUnknown = Não foi possível concluir a operação. Tente novamente.
+ErrorPermission = Acesso negado. Verifique as permissões do ficheiro.
+ErrorDiskFull = Não há espaço suficiente no disco. Liberte espaço e tente novamente.
+ErrorNetwork = Não foi possível estabelecer ligação. Verifique a ligação e tente novamente.
+ErrorInvalidData = Não foi possível ler os dados. Verifique o formato e tente novamente.
+ErrorNotFound = O ficheiro ou item já não está disponível.
 
 UpdateRestart = Reiniciar
 UpdateRestartWaiting = A aguardar a conclusão da gravação e das operações em segundo plano…
@@ -269,7 +282,7 @@ SavingMore = Guardar… · novas alterações pendentes
 SaveError = Erro ao guardar · { $value }
 Conflict = Conflito · { $value }
 RecoveryError = { " · " }erro de cópia de segurança
-SelectionSize = { " · " }selecionou { $value }
+SelectionSize = { " · " }selecionou { $value } caracteres
 EditorStatus = Linha { $line }, coluna { $column }{ $selection } · { $value } · { $save }{ $recovery }
 DiskConflict = O ficheiro foi alterado no disco enquanto as edições estavam pendentes; ambas as versões são preservadas
 Megabytes = { $value }MB
@@ -420,6 +433,3 @@ ChatEmpty = Inicie uma conversa. O histórico é guardado neste espaço de traba
 ChatAcknowledge = Continuar sem repetir esta ação
 
 ChatUnsupported = Este fornecedor ainda não suporta a geração de respostas no chat.
-
-SidebarCollapse = Recolher barra lateral
-SidebarExpand = Expandir barra lateral
