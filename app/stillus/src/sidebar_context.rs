@@ -69,7 +69,7 @@ fn edit_card(
                 palette,
                 move || open.set(false),
             ),
-            dialog_action_button(
+            form_action_button(
                 ButtonAction::Save,
                 || tr!(Save),
                 IconButtonTone::Primary,
@@ -503,7 +503,7 @@ fn confirmation(
         }),
         h_stack((
             cancel,
-            dialog_action_button(
+            form_action_button(
                 ButtonAction::Delete,
                 move || title.to_string(),
                 IconButtonTone::Danger,

@@ -213,7 +213,7 @@ pub(crate) fn prompt_view(updates: Updates, palette: Palette) -> impl IntoView {
             |style| style.hide(),
         )
     });
-    let update_button = action_button(
+    let update_button = form_action_button(
         ButtonAction::Custom(ButtonAction::Download.icon()),
         move || tr!(UpdateInstall),
         IconButtonTone::Primary,
@@ -227,7 +227,7 @@ pub(crate) fn prompt_view(updates: Updates, palette: Palette) -> impl IntoView {
             |style| style.hide(),
         )
     });
-    let dismiss = action_button(
+    let dismiss = form_action_button(
         ButtonAction::Custom(ICON_CANCEL),
         move || tr!(UpdateLater),
         IconButtonTone::Secondary,
@@ -235,7 +235,7 @@ pub(crate) fn prompt_view(updates: Updates, palette: Palette) -> impl IntoView {
         || true,
         move || later.dismiss(),
     );
-    let restart_button = action_button(
+    let restart_button = form_action_button(
         ButtonAction::Custom(ICON_UPDATE),
         move || tr!(UpdateRestart),
         IconButtonTone::Primary,
@@ -338,7 +338,7 @@ pub(crate) fn page(
                 .apply_if(restart_error.get().is_none(), |style| style.hide())
         }),
         actions((
-            action_button(
+            form_action_button(
                 ButtonAction::Custom(ButtonAction::Refresh.icon()),
                 move || tr!(UpdateCheckNow),
                 IconButtonTone::Secondary,
@@ -349,7 +349,7 @@ pub(crate) fn page(
                 },
                 move || check.check(CheckMode::Manual),
             ),
-            action_button(
+            form_action_button(
                 ButtonAction::Custom(ButtonAction::Download.icon()),
                 move || tr!(UpdateInstall),
                 IconButtonTone::Primary,
@@ -366,7 +366,7 @@ pub(crate) fn page(
                     |style| style.hide(),
                 )
             }),
-            action_button(
+            form_action_button(
                 ButtonAction::Custom(ICON_FILE),
                 move || tr!(UpdateOpenPage),
                 IconButtonTone::Secondary,
@@ -377,7 +377,7 @@ pub(crate) fn page(
             .style(move |style| {
                 style.apply_if(stage.get().release().is_none(), |style| style.hide())
             }),
-            action_button(
+            form_action_button(
                 ButtonAction::Custom(ICON_UPDATE),
                 move || tr!(UpdateRestart),
                 IconButtonTone::Primary,
@@ -445,7 +445,7 @@ pub(crate) fn page(
                 .color(palette.muted)
                 .selectable(false)
         }),
-        actions((action_button(
+        actions((form_action_button(
             ButtonAction::Custom(ICON_UPDATE),
             move || {
                 if automatic.get() {

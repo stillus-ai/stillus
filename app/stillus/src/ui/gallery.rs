@@ -22,7 +22,7 @@ pub(crate) fn view() -> AnyView {
     scroll(
         v_stack((
             h_stack((
-                action_button(
+                toolbar_action_button(
                     ButtonAction::Copy,
                     || tr!(Copy),
                     IconButtonTone::Secondary,
@@ -30,7 +30,7 @@ pub(crate) fn view() -> AnyView {
                     move || enabled.get(),
                     move || calls.update(|n| *n += 1),
                 ),
-                action_button(
+                toolbar_action_button(
                     ButtonAction::Send,
                     || tr!(ChatSend),
                     IconButtonTone::Primary,
@@ -60,11 +60,12 @@ pub(crate) fn view() -> AnyView {
                     || true,
                     || {},
                 ),
-                dialog_button(
+                form_action_button(
                     ButtonAction::Save,
-                    crate::i18n::msg!(Save),
+                    || tr!(Save),
                     IconButtonTone::Primary,
                     palette,
+                    || true,
                     move || {
                         first.set(String::new());
                         second.set(String::new());
@@ -207,11 +208,12 @@ pub(crate) fn view() -> AnyView {
                 i18n::Key::Workspace,
                 Some(ICON_FOLDER),
                 Some(i18n::Key::WorkspaceDescription),
-                actions((dialog_button(
+                actions((form_action_button(
                     ButtonAction::Save,
-                    crate::i18n::msg!(Save),
+                    || tr!(Save),
                     IconButtonTone::Secondary,
                     palette,
+                    || true,
                     move || calls.update(|n| *n += 1),
                 ),)),
                 palette,

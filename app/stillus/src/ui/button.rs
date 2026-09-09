@@ -68,7 +68,7 @@ pub(crate) const STATUS_BUTTON_SIZE_PX: f64 = 28.0;
 pub(crate) const PASSWORD_DIALOG_SECONDARY_BUTTON_WIDTH_PX: f64 = 84.0;
 pub(crate) const PASSWORD_DIALOG_PRIMARY_BUTTON_WIDTH_PX: f64 = 134.0;
 
-/// Semantic actions, independent of translated text. Custom actions retain a label.
+/// Semantic actions, independent of translated text. Presentation depends on context.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ButtonAction {
     Copy,
@@ -138,13 +138,13 @@ impl ButtonAction {
         }
     }
     pub(super) fn show_label(self, context: ButtonContext) -> bool {
-        matches!(context, ButtonContext::Dialog) || matches!(self, Self::Custom(_))
+        matches!(context, ButtonContext::Form) || matches!(self, Self::Custom(_))
     }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ButtonContext {
-    Control,
-    Dialog,
+    Toolbar,
+    Form,
 }
 
 // Icon-only buttons retain a title even when unavailable.
@@ -446,7 +446,8 @@ pub(crate) fn sidebar_sort_button(
         });
     titled_button(control, Rc::new(|| tr!(SortNotes)), palette).into_any()
 }
-pub(crate) fn action_button(
+/// Toolbar actions show a caption only when their meaning needs explanation.
+pub(crate) fn toolbar_action_button(
     kind: ButtonAction,
     title: impl Fn() -> String + 'static,
     tone: IconButtonTone,
@@ -458,7 +459,7 @@ pub(crate) fn action_button(
         move || kind.icon(),
         title,
         ButtonStyle {
-            labeled: kind.show_label(ButtonContext::Control),
+            labeled: kind.show_label(ButtonContext::Toolbar),
             tone,
             palette,
             compact_size: None,
@@ -468,7 +469,8 @@ pub(crate) fn action_button(
         action,
     )
 }
-pub(crate) fn dialog_action_button(
+/// Form actions always show both an icon and a localized action caption.
+pub(crate) fn form_action_button(
     kind: ButtonAction,
     title: impl Fn() -> String + 'static,
     tone: IconButtonTone,
@@ -480,7 +482,7 @@ pub(crate) fn dialog_action_button(
         move || kind.icon(),
         title,
         ButtonStyle {
-            labeled: true,
+            labeled: kind.show_label(ButtonContext::Form),
             tone,
             palette,
             compact_size: None,
@@ -502,7 +504,7 @@ pub(crate) fn dialog_button(
         move || kind.icon(),
         move || title.to_string(),
         ButtonStyle {
-            labeled: kind.show_label(ButtonContext::Dialog),
+            labeled: kind.show_label(ButtonContext::Form),
             tone,
             palette,
             compact_size: None,
@@ -672,12 +674,14 @@ pub(crate) fn compact_icon_button(
 mod tests {
     use super::*;
     #[test]
-    fn standard_actions_have_icons_and_labels_only_in_dialogs() {
+    fn forms_label_every_action_and_toolbars_label_custom_actions() {
         for &action in STANDARD_ACTIONS {
             assert!(action.icon().contains("<svg"));
-            assert!(!action.show_label(ButtonContext::Control));
-            assert!(action.show_label(ButtonContext::Dialog));
+            assert!(!action.show_label(ButtonContext::Toolbar));
+            assert!(action.show_label(ButtonContext::Form));
         }
-        assert!(ButtonAction::Custom(ICON_LOCK).show_label(ButtonContext::Control));
+        for context in [ButtonContext::Toolbar, ButtonContext::Form] {
+            assert!(ButtonAction::Custom(ICON_LOCK).show_label(context));
+        }
     }
 }

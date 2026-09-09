@@ -71,7 +71,7 @@ pub(crate) fn toolbar_edit_bar(
                 .flex_shrink(0.0)
         }),
         input,
-        action_button(
+        form_action_button(
             ButtonAction::Save,
             || tr!(Save),
             IconButtonTone::Primary,
@@ -81,7 +81,7 @@ pub(crate) fn toolbar_edit_bar(
                 submit();
             },
         )
-        .style(|s| s.width(36.0).height(36.0).flex_shrink(0.0)),
+        .style(|s| s.height(36.0).flex_shrink(0.0)),
     ))
     .style(move |style| {
         let style = style

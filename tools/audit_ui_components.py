@@ -26,6 +26,9 @@ def violations(path: Path, source: str) -> list[str]:
             "local button implementation": r"\bfn\s+\w*(?:icon_button|text_button|action_button|dialog_button)\s*\(",
             "untitled icon surface": r"\bselectable_row\s*\(\s*svg\s*\(",
         }
+    rules["ambiguous button context; choose form_action_button or toolbar_action_button"] = r"\b(?:action_button|dialog_action_button)\s*\("
+    if path == Path("ui/form.rs"):
+        rules["form actions must retain captions"] = r"\b(?:toolbar_action_button|(?:compact_|enabled_)?icon_button)\s*\("
     return [f"{path}: {label}" for label, pattern in rules.items() if re.search(pattern, source)]
 
 

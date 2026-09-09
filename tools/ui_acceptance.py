@@ -319,7 +319,8 @@ AI_CARD_MIN_HEIGHT = 24
 AI_EXPANDED_MIN_HEIGHT = 80
 # Rounded corners leave the first and last rows of a card without a border.
 AI_CARD_CORNER = 7
-AI_CANCEL_X = AI_CARD_CONTENT_LEFT + 32 + 8 + 16
+# Save is a labeled form action; Cancel follows its content-sized button.
+AI_CANCEL_X = AI_CARD_CONTENT_LEFT + 120
 
 
 def tag_row_top(index: int) -> int:
@@ -8024,12 +8025,12 @@ def ai_settings_scenario(driver: WindowDriver, workspace: Path) -> None:
     driver.click_point(*AI_SIDEBAR_ITEM)
     settle()
     masked = driver.capture("ai-masked")
-    driver.click_point(913, field_y)
+    driver.click_point(854, field_y)  # Reveal precedes the labeled Paste action.
     driver.click_point(*AI_SIDEBAR_ITEM)
     settle()
     driver.wait_for_visual_change("AI reveal control shows the fixture key", masked,
         crop=(310, field_y - 12, 400, 24), minimum_pixels=50, timeout=10)
-    driver.click_point(913, field_y)
+    driver.click_point(854, field_y)
     driver.click_point(*AI_SIDEBAR_ITEM)
     settle()
     wait_until("AI reveal control conceals the key again", lambda:
@@ -8106,7 +8107,7 @@ def ai_settings_scenario(driver: WindowDriver, workspace: Path) -> None:
                                   crop=(310, key_y - 15, 540, 30), timeout=10)
     settle()
     review_frame("ai-provider-warning")
-    driver.click_point(435, cards()[0][1] - 39)
+    driver.click_point(490, cards()[0][1] - 39)
     wait_until("key edit cancelled", lambda: cards()[0][1] - cards()[0][0] < 160, timeout=10)
     settle()
     if state() != saved:
@@ -8160,10 +8161,15 @@ def ai_settings_scenario(driver: WindowDriver, workspace: Path) -> None:
     open_ai()
     review_frame("ai-ready-ru")
     edit(0)
-    driver.resize_window(860, 560)
+    driver.resize_window(960, 600)  # The product's supported minimum window size.
     settle()
     driver.wheel("down", clicks=3, delay_ms=40)
     settle()
+    compact = driver.capture("ai-compact-form")
+    form_columns = near_color_columns(compact, (54, 94, 130),
+        crop=(232, 0, 728, 600), tolerance=12)
+    if not form_columns or max(form_columns) > 918:
+        raise AcceptanceFailure("AI form or labeled actions overflow the compact content column")
     review_frame("ai-narrow-ru")
     driver.resize_window(SCREEN_WIDTH, SCREEN_HEIGHT)
     settle()
@@ -8176,11 +8182,11 @@ def ai_settings_scenario(driver: WindowDriver, workspace: Path) -> None:
     driver.wait_for_stable_frame("RTL settings", stable_for=0.6)
     driver.click_point(1110, 203)
     driver.wait_for_stable_frame("RTL AI", stable_for=0.6)
-    driver.resize_window(860, 560)
+    driver.resize_window(960, 600)
     wait_until("AI RTL sidebar", lambda: near_color_pixel_count(
-        driver.capture("ai-rtl-direction"), (35, 42, 51), crop=(628, 0, 232, 540)
+        driver.capture("ai-rtl-direction"), (35, 42, 51), crop=(728, 0, 232, 600)
     ) >= 50000, timeout=10)
-    driver.wait_for_stable_frame("RTL AI narrow", crop=(0, 0, 860, 560), stable_for=0.6)
+    driver.wait_for_stable_frame("RTL AI narrow", crop=(0, 0, 960, 600), stable_for=0.6)
     review_frame("ai-narrow-rtl")
     driver.close_app()
     if any("sk-proj-abcdefghijklmnopqrstuv" in path.read_text(errors="replace") for path in driver.app_log_paths):
@@ -9400,8 +9406,19 @@ def components_scenario(driver: WindowDriver, workspace: Path) -> None:
     driver.click_point(590, 440)
     driver.wait_for_visual_change("inline field opens before typing", before_inline,
         crop=(24, 470, 1165, 48), minimum_pixels=100)
-    driver.wait_for_stable_frame("inline field receives its initial focus",
+    inline = driver.wait_for_stable_frame("inline field receives its initial focus",
         crop=(176, 478, 971, 32), stable_for=0.2, ignore_control_caret=True)
+    # The standard Save action is still labeled in an inline form, including
+    # the longer Russian caption. Probe inside the button, away from field borders.
+    save_columns = near_color_columns(inline, (54, 94, 130),
+        crop=(900, 490, 292, 8), tolerance=2)
+    if not save_columns or max(save_columns) - min(save_columns) < 64:
+        raise AcceptanceFailure("inline form Save collapsed to an icon-only button")
+    caption_crop = (min(save_columns) + 36, 484,
+                    max(save_columns) - min(save_columns) - 46, 20)
+    if near_color_pixel_count(inline, (255, 255, 255), crop=caption_crop, tolerance=20) < 20:
+        raise AcceptanceFailure("inline form Save caption is missing or clipped")
+    export_screenshot(inline, Path("/workspace/dist/interface-components.png"))
     driver.type_text("inline edit")
     driver.key("Return")
     driver.wait_for_visual_change("inline edit submits through the shared field", before_inline,

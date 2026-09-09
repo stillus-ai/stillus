@@ -234,7 +234,7 @@ pub(super) fn page_at(
     });
     v_stack((
         actions((
-            action_button(
+            toolbar_action_button(
                 ButtonAction::Back,
                 move || tr!(AiJournalBack),
                 IconButtonTone::Secondary,
@@ -242,7 +242,7 @@ pub(super) fn page_at(
                 || true,
                 move || open.set(false),
             ),
-            action_button(
+            toolbar_action_button(
                 ButtonAction::Custom(ButtonAction::Delete.icon()),
                 move || tr!(AiJournalClear),
                 IconButtonTone::Danger,
@@ -251,7 +251,7 @@ pub(super) fn page_at(
                 move || confirm.set(true),
             )
             .style(move |s| s.apply_if(rows.get().is_empty(), |s| s.hide())),
-            action_button(
+            toolbar_action_button(
                 ButtonAction::Retry,
                 move || tr!(AiJournalRetry),
                 IconButtonTone::Secondary,
@@ -265,7 +265,7 @@ pub(super) fn page_at(
         page_title(i18n::Key::AiJournal, palette),
         page_description(i18n::Key::AiJournalHint, palette),
         actions((
-            action_button(
+            toolbar_action_button(
                 ButtonAction::Custom(ButtonAction::Settings.icon()),
                 move || {
                     provider
@@ -290,7 +290,7 @@ pub(super) fn page_at(
                     before.set(None);
                 },
             ),
-            action_button(
+            toolbar_action_button(
                 ButtonAction::Custom(ButtonAction::Settings.icon()),
                 move || {
                     status
@@ -323,7 +323,7 @@ pub(super) fn page_at(
         v_stack((
             label(move || tr!(AiJournalConfirm)),
             actions((
-                dialog_action_button(
+                form_action_button(
                     ButtonAction::Delete,
                     move || tr!(AiJournalClear),
                     IconButtonTone::Danger,
@@ -335,7 +335,7 @@ pub(super) fn page_at(
                         clear.refresh(true, false);
                     },
                 ),
-                dialog_action_button(
+                form_action_button(
                     ButtonAction::Cancel,
                     move || tr!(Cancel),
                     IconButtonTone::Secondary,
@@ -382,7 +382,7 @@ pub(super) fn page_at(
                 .apply_if(rows.get().is_empty(), |s| s.hide())
         }),
         actions((
-            action_button(
+            toolbar_action_button(
                 ButtonAction::Custom(ICON_ARROW_DOWN),
                 move || tr!(AiJournalNewest),
                 IconButtonTone::Secondary,
@@ -390,7 +390,7 @@ pub(super) fn page_at(
                 move || before.get().is_some(),
                 move || before.set(None),
             ),
-            action_button(
+            toolbar_action_button(
                 ButtonAction::Custom(ICON_ARROW_UP),
                 move || tr!(AiJournalOlder),
                 IconButtonTone::Secondary,
@@ -413,7 +413,7 @@ pub(super) fn page_at(
             label(move || overview.get().and_then(|v| v.error).unwrap_or_default())
                 .style(move |s| s.width_full().font_size(crate::ui::FONT_BODY).color(palette.danger)
                     .apply_if(overview.get().is_none_or(|v| v.error.is_none()), |s| s.hide())),
-            action_button(ButtonAction::Custom(ICON_CHEVRON_DOWN), || tr!(AiJournalDetails),
+            toolbar_action_button(ButtonAction::Custom(ICON_CHEVRON_DOWN), || tr!(AiJournalDetails),
                 IconButtonTone::Secondary, palette, || true,
                 move || details_open.update(|v| *v = !*v)),
         )).style(move |s| s.width_full().min_width(0.0).gap(8.0).padding(12.0).background(palette.paper)
@@ -455,7 +455,7 @@ pub(super) fn page_at(
                 .apply_if(detail.get().is_empty() || !details_open.get(), |s| s.hide())
         }),
         actions((
-            action_button(
+            toolbar_action_button(
                 ButtonAction::Custom(ButtonAction::Back.icon()),
                 move || tr!(AiJournalPreviousPart),
                 IconButtonTone::Secondary,
@@ -463,7 +463,7 @@ pub(super) fn page_at(
                 move || chunk.get() > 0,
                 move || chunk.update(|n| *n = n.saturating_sub(1)),
             ),
-            action_button(
+            toolbar_action_button(
                 ButtonAction::Custom(ICON_CHEVRON_RIGHT),
                 move || tr!(AiJournalNextPart),
                 IconButtonTone::Secondary,

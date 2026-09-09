@@ -270,6 +270,7 @@ automated checks.
 | [User guide](docs/user-guide.md) | Workspaces, writing, external files, and feeds |
 | [Storage and security](docs/storage.md) | File layout, encryption, recovery, and backups |
 | [Development](docs/development.md) | Building, testing, benchmarks, and packaging |
+| [Interface guidelines](docs/interface-guidelines.md) | Shared controls, action buttons, forms, and layout |
 | [Windows](docs/windows.md) | Windows setup, filesystem boundaries, and validation |
 | [Updates](docs/updates.md) | Release checks and installation |
 | [Publishing](docs/publishing.md) | Versioning and GitHub Releases |

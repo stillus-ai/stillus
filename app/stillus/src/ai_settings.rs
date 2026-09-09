@@ -264,7 +264,7 @@ pub(super) fn page(
     ))
     .style(|style| style.width_full());
     let cleanup_controller = controller.clone();
-    let cleanup = actions((action_button(
+    let cleanup = actions((form_action_button(
         ButtonAction::Custom(ButtonAction::Refresh.icon()),
         move || tr!(AiRetryCleanup),
         IconButtonTone::Danger,
@@ -294,7 +294,7 @@ pub(super) fn page(
         v_stack((
             h_stack((
                 page_title(i18n::Key::AiAssistant, palette),
-                action_button(
+                toolbar_action_button(
                     ButtonAction::Custom(ICON_FILE),
                     move || tr!(AiJournal),
                     IconButtonTone::Secondary,
@@ -416,7 +416,7 @@ fn connection_summary(controller: Controller, palette: Palette) -> impl IntoView
         ))
         .style(|style| rtl_column(style).width_full().gap(4.0)),
         actions((
-            action_button(
+            form_action_button(
                 ButtonAction::Custom(ICON_LOCK),
                 move || tr!(AiChangeCredential),
                 IconButtonTone::Secondary,
@@ -428,7 +428,7 @@ fn connection_summary(controller: Controller, palette: Palette) -> impl IntoView
                     edit.connection_open.set(true);
                 },
             ),
-            action_button(
+            form_action_button(
                 ButtonAction::Refresh,
                 move || {
                     if busy.get() && operation.get() == Operation::Refresh {
@@ -532,7 +532,7 @@ fn connection_form(controller: Controller, palette: Palette) -> impl IntoView {
         settings_hint(i18n::Key::AiKeyStorage, palette),
         warning,
         actions((
-            action_button(
+            form_action_button(
                 ButtonAction::Custom(ICON_LOCK),
                 move || {
                     if busy.get() && operation.get() == Operation::Connect {
@@ -551,7 +551,7 @@ fn connection_form(controller: Controller, palette: Palette) -> impl IntoView {
                 },
                 move || submit.connect(),
             ),
-            action_button(
+            form_action_button(
                 ButtonAction::Cancel,
                 move || tr!(Cancel),
                 IconButtonTone::Secondary,
@@ -568,7 +568,7 @@ fn connection_form(controller: Controller, palette: Palette) -> impl IntoView {
             .style(move |style| {
                 style.apply_if(settings.get().connection.is_none(), |style| style.hide())
             }),
-            action_button(
+            form_action_button(
                 ButtonAction::Custom(ICON_CANCEL),
                 move || tr!(AiDisconnect),
                 IconButtonTone::Danger,
@@ -704,7 +704,7 @@ fn secret_input(controller: Controller, palette: Palette) -> impl IntoView {
                     palette.divider
                 })
         }),
-        action_button(
+        form_action_button(
             ButtonAction::Paste,
             move || tr!(AiPaste),
             IconButtonTone::Secondary,
@@ -839,7 +839,7 @@ fn aliases_section(controller: Controller, palette: Palette) -> impl IntoView {
     v_stack((
         h_stack((
             section_title(i18n::Key::AiModels, palette),
-            action_button(
+            toolbar_action_button(
                 ButtonAction::Add,
                 move || tr!(AiAliasAdd),
                 IconButtonTone::Secondary,
@@ -1078,7 +1078,7 @@ fn alias_form(controller: Controller, palette: Palette) -> impl IntoView {
                 .apply_if(model.get().is_none(), |style| style.hide())
         }),
         actions((
-            action_button(
+            form_action_button(
                 ButtonAction::Save,
                 move || {
                     if busy.get() && operation.get() == Operation::Save {
@@ -1119,7 +1119,7 @@ fn alias_form(controller: Controller, palette: Palette) -> impl IntoView {
                     }
                 },
             ),
-            action_button(
+            form_action_button(
                 ButtonAction::Cancel,
                 move || tr!(Cancel),
                 IconButtonTone::Secondary,
@@ -1140,7 +1140,7 @@ fn alias_form(controller: Controller, palette: Palette) -> impl IntoView {
                 |style| style.hide(),
             )
         }),
-        actions((action_button(
+        actions((form_action_button(
             ButtonAction::Delete,
             move || tr!(AiAliasDelete),
             IconButtonTone::Danger,

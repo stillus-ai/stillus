@@ -9385,11 +9385,12 @@ fn editor_panel(
             if recover {
                 let recover_model = recover_model.clone();
                 let recover_security = recover_security.clone();
-                actions.push(icon_button(
-                    ICON_RECOVER,
+                actions.push(toolbar_action_button(
+                    ButtonAction::Custom(ICON_RECOVER),
                     || tr!(RestoreUnsaved),
                     IconButtonTone::Status,
                     palette,
+                    || true,
                     move || {
                         let result = recover_model.borrow_mut().restore_selected_recovery();
                         match result {
@@ -9419,11 +9420,12 @@ fn editor_panel(
             }
             if reload {
                 let reload_model = reload_model.clone();
-                actions.push(icon_button(
-                    ICON_DISK_VERSION,
+                actions.push(toolbar_action_button(
+                    ButtonAction::Custom(ICON_DISK_VERSION),
                     || tr!(LoadDisk),
                     IconButtonTone::Status,
                     palette,
+                    || true,
                     move || {
                         let result = reload_model
                             .borrow_mut()

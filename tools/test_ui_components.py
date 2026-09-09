@@ -26,7 +26,20 @@ class BoundaryTests(unittest.TestCase):
 
     def test_screen_can_compose_components_and_specialized_editor(self):
         self.assertFalse(violations(Path("main.rs"),
-                                    "TextArea::new(value, palette); action_button(kind, title); render_editor(model);"))
+                                    "TextArea::new(value, palette); form_action_button(kind, title); "
+                                    "toolbar_action_button(kind, title); render_editor(model);"))
+
+    def test_actions_must_declare_their_context(self):
+        for path in (Path("main.rs"), Path("ui/gallery.rs")):
+            for name in ("action_button", "dialog_action_button"):
+                with self.subTest(path=path, name=name):
+                    self.assertTrue(violations(path, f"{name}(kind, title)"))
+
+    def test_inline_form_cannot_use_icon_only_actions(self):
+        for name in ("toolbar_action_button", "icon_button", "compact_icon_button",
+                     "enabled_icon_button"):
+            self.assertTrue(violations(Path("ui/form.rs"), f"{name}(kind, title)"))
+        self.assertFalse(violations(Path("ui/form.rs"), "form_action_button(kind, title)"))
 
     def test_screen_can_compose_shared_menus_and_forms(self):
         self.assertFalse(violations(Path("main.rs"),

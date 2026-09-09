@@ -277,11 +277,12 @@ pub(super) fn panel(
         },
     );
     let journal_model = model.clone();
-    let journal_button = icon_button(
-        ICON_JOURNAL,
+    let journal_button = toolbar_action_button(
+        ButtonAction::Custom(ICON_JOURNAL),
         || tr!(AiJournal),
         IconButtonTone::Secondary,
         palette,
+        || true,
         move || {
             journal_selected.set(
                 journal_model
@@ -694,7 +695,7 @@ pub(super) fn panel(
     );
     let send_model = model.clone();
     let send_id = id.clone();
-    let send = action_button(
+    let send = form_action_button(
         ButtonAction::Send,
         || tr!(ChatSend),
         IconButtonTone::Primary,
@@ -712,7 +713,7 @@ pub(super) fn panel(
     let stop_id = id.clone();
     let stop_state = model.clone();
     let stop_state_id = id.clone();
-    let stop = action_button(
+    let stop = form_action_button(
         ButtonAction::Stop,
         || tr!(ChatStop),
         IconButtonTone::Secondary,
@@ -735,7 +736,7 @@ pub(super) fn panel(
     let continue_id = id.clone();
     let continue_state = model.clone();
     let continue_state_id = id.clone();
-    let continue_button = action_button(
+    let continue_button = form_action_button(
         ButtonAction::Custom(ButtonAction::Send.icon()),
         || tr!(ChatContinue),
         IconButtonTone::Secondary,
@@ -760,7 +761,7 @@ pub(super) fn panel(
             );
         },
     );
-    let connect = action_button(
+    let connect = form_action_button(
         ButtonAction::Custom(ButtonAction::Settings.icon()),
         || tr!(ChatConnect),
         IconButtonTone::Secondary,
@@ -802,8 +803,7 @@ pub(super) fn panel(
     let controls = h_stack((
         alias,
         empty().style(|s| s.flex_grow(1.0)),
-        h_stack((continue_button, stop, send))
-            .style(|s| s.flex_shrink(0.0).items_center().gap(8.0)),
+        actions((continue_button, stop, send)).style(|s| s.min_width(0.0)),
     ))
     .style(move |s| {
         s.width_full()
@@ -944,7 +944,7 @@ fn message_view(
             &serde_json::json!({"arguments":tool.arguments,"result":tool.result}),
         )
         .unwrap_or_default();
-        let acknowledge = action_button(
+        let acknowledge = form_action_button(
             ButtonAction::Custom(ButtonAction::Save.icon()),
             move || {
                 if confirm.get() {
@@ -1057,7 +1057,7 @@ fn message_view(
         })
         .collect::<Vec<_>>();
     let content = message.text.clone();
-    let copy = action_button(
+    let copy = toolbar_action_button(
         ButtonAction::Copy,
         || tr!(Copy),
         IconButtonTone::Secondary,
@@ -1163,7 +1163,7 @@ fn markdown_blocks(source: &str, width: floem::reactive::Memo<f64>, palette: Pal
                 });
                 let scroll_origin = create_rw_signal(Point::ZERO);
                 let requested_scroll = create_rw_signal(None::<Point>);
-                let copy = action_button(
+                let copy = toolbar_action_button(
                     ButtonAction::Copy,
                     || tr!(Copy),
                     IconButtonTone::Secondary,

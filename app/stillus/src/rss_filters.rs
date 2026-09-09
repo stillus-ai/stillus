@@ -168,7 +168,7 @@ pub(crate) fn form(
     let save_button = |apply: bool| {
         let model = model.clone();
         let id = id.clone();
-        dialog_action_button(
+        form_action_button(
             if apply {
                 ButtonAction::Custom(ButtonAction::Save.icon())
             } else {
