@@ -5,6 +5,7 @@
 import contextlib
 import ctypes
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 import io
 import json
 import os
@@ -14,6 +15,7 @@ import sys
 import subprocess
 import tarfile
 import tempfile
+from threading import Barrier
 import unittest
 from unittest.mock import Mock, patch
 import zipfile
@@ -28,6 +30,65 @@ SHA = "1234567890abcdef1234567890abcdef12345678"
 
 
 class CITests(unittest.TestCase):
+    def test_screenshot_export_creates_missing_parents(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "capture.png"
+            source.write_bytes(b"screenshot\x00\xff")
+            destination = root / "checkout" / "dist" / "chat-empty.png"
+            ui_acceptance.export_screenshot(source, destination)
+            self.assertEqual(destination.read_bytes(), source.read_bytes())
+
+    def test_screenshot_export_reuses_directory_and_replaces_preview(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "capture.png"
+            destination = root / "dist" / "chat-empty.png"
+            destination.parent.mkdir()
+            unrelated = destination.parent / "keep.txt"
+            unrelated.write_bytes(b"keep")
+            for content in (b"first screenshot", b"updated screenshot"):
+                source.write_bytes(content)
+                ui_acceptance.export_screenshot(source, destination)
+                self.assertEqual(destination.read_bytes(), content)
+                self.assertEqual(unrelated.read_bytes(), b"keep")
+
+    def test_screenshot_exports_share_missing_directory_concurrently(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            sources = [root / name for name in ("chat.png", "journal.png")]
+            for source in sources:
+                source.write_bytes(source.name.encode())
+            ready = Barrier(len(sources))
+
+            def export(source):
+                ready.wait(timeout=5)
+                ui_acceptance.export_screenshot(source, root / "dist" / source.name)
+
+            with ThreadPoolExecutor(max_workers=len(sources)) as workers:
+                list(workers.map(export, sources))
+            for source in sources:
+                self.assertEqual((root / "dist" / source.name).read_bytes(), source.read_bytes())
+
+    def test_screenshot_export_propagates_missing_source(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            destination = root / "dist" / "chat-empty.png"
+            with self.assertRaises(FileNotFoundError):
+                ui_acceptance.export_screenshot(root / "missing.png", destination)
+            self.assertFalse(destination.exists())
+
+    def test_screenshot_export_propagates_write_error(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "capture.png"
+            source.write_bytes(b"screenshot")
+            destination = root / "dist" / "chat-empty.png"
+            # A directory at the target path makes the real write fail even as root.
+            destination.mkdir(parents=True)
+            with self.assertRaises(IsADirectoryError):
+                ui_acceptance.export_screenshot(source, destination)
+
     def test_x11_close_delivers_protocol_without_destroying_window(self):
         # Own a real X11 window but do not run its event loop until after the
         # close request. The driver must leave it alive for the client to close.

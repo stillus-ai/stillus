@@ -488,6 +488,12 @@ class AcceptanceFailure(RuntimeError):
     """A click-driven acceptance condition was not satisfied."""
 
 
+def export_screenshot(source: Path, destination: Path) -> None:
+    """Export a preview even in a clean checkout or parallel acceptance run."""
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(source, destination)
+
+
 def failure_diagnostics(scenario: str, stage: str, error: Exception) -> list[str]:
     """Read code locations only: never format a traceback, source line or payload."""
     if not ui_diagnostic_context_valid(scenario, stage):
@@ -8249,7 +8255,7 @@ def ai_journal_scenario(driver: WindowDriver, workspace: Path) -> None:
     driver.wait_for_visual_change("request details", rows, crop=(260, 385, 720, 300), timeout=10)
     driver.wait_for_stable_frame("journal details rendered", crop=(260, 385, 720, 300), minimum_dark_pixels=800)
     preview = driver.capture("journal-details")
-    shutil.copyfile(preview, Path("/workspace/dist/ai-journal-preview.png"))
+    export_screenshot(preview, Path("/workspace/dist/ai-journal-preview.png"))
     driver.click_point(365, 45)
     driver.wait_for_visual_change("history cleanup confirmation", preview, crop=(260, 180, 720, 160), timeout=10)
     driver.wait_for_stable_frame("history cleanup controls", crop=(260, 180, 720, 160), stable_for=0.5)
@@ -8281,7 +8287,7 @@ def chat_scenario(driver: WindowDriver, workspace: Path) -> None:
     wait_until("a chat created through the plus menu", lambda: root.exists() and len(list(root.glob("*/metadata.json"))) == 1)
     chat = next(root.glob("*/metadata.json")).parent
     driver.wait_for_stable_frame("empty chat", crop=(260, 40, 960, 500), stable_for=0.2)
-    shutil.copyfile(driver.capture("chat-empty"), Path("/workspace/dist/chat-empty.png"))
+    export_screenshot(driver.capture("chat-empty"), Path("/workspace/dist/chat-empty.png"))
     composer_crop = (280, 620, 900, 105)
     unfocused = driver.wait_for_stable_frame("unfocused placeholder has no blinking caret",
                                              crop=composer_crop, stable_for=1.2)
@@ -8361,7 +8367,7 @@ def chat_scenario(driver: WindowDriver, workspace: Path) -> None:
     driver.wait_for_stable_frame("empty composer after sending has no unfocused caret",
                                  crop=(280, 615, 900, 105), stable_for=1.2)
     response_frame = driver.capture("chat-response")
-    shutil.copyfile(response_frame, Path("/workspace/dist/chat-preview.png"))
+    export_screenshot(response_frame, Path("/workspace/dist/chat-preview.png"))
     # A 75%-width user bubble starts at x=512; assistant prose stays at x=276.
     if near_color_pixel_count(response_frame, (246, 247, 248), crop=(520, 70, 650, 70), tolerance=1) < 20000:
         raise AcceptanceFailure("user message does not have a right-aligned bubble")
@@ -8380,7 +8386,7 @@ def chat_scenario(driver: WindowDriver, workspace: Path) -> None:
     # The chat opens its request directly in the existing journal page.
     driver.click_point(946, 36)
     driver.wait_for_stable_frame("chat request journal", crop=(280, 100, 850, 300), stable_for=0.2)
-    shutil.copyfile(driver.capture("chat-journal"), Path("/workspace/dist/chat-journal.png"))
+    export_screenshot(driver.capture("chat-journal"), Path("/workspace/dist/chat-journal.png"))
     driver.click_point(302, 45)
 
     def create_and_send(text: str) -> Path:
@@ -8444,7 +8450,7 @@ def chat_scenario(driver: WindowDriver, workspace: Path) -> None:
         raise AcceptanceFailure("manual chat title remained automatic")
     if {path.name: path.read_bytes() for path in (stopped / "messages").glob("*.json")} != conversation:
         raise AcceptanceFailure("organizing a chat rewrote its conversation")
-    shutil.copyfile(driver.capture("chat-background"), Path("/workspace/dist/chat-background.png"))
+    export_screenshot(driver.capture("chat-background"), Path("/workspace/dist/chat-background.png"))
     layout = create_and_send("layout fixture")
     driver.click_point(480, 670)
     driver.type_text("next draft")
@@ -8470,7 +8476,7 @@ def chat_scenario(driver: WindowDriver, workspace: Path) -> None:
         raise AcceptanceFailure("long answer pushed the toolbar off screen")
     if dark_pixel_count(long_frame, crop=(284, 618, 250, 35)) < 20:
         raise AcceptanceFailure("long answer pushed the composer off screen")
-    shutil.copyfile(long_frame, Path("/workspace/dist/chat-long.png"))
+    export_screenshot(long_frame, Path("/workspace/dist/chat-long.png"))
     driver.close_app()
     chat_paging_layout_scenario(driver, workspace, layout, fixture)
     if {path: path.read_bytes() for path in original} != original:
@@ -8545,7 +8551,7 @@ def chat_paging_layout_scenario(driver: WindowDriver, workspace: Path, chat: Pat
                                             crop=(300, 430, 750, 100), minimum_pixels=200)
     expanded = driver.wait_for_stable_frame("expanded tool arguments and result",
                                            crop=(300, 430, 750, 100), stable_for=0.3)
-    shutil.copyfile(expanded, Path("/workspace/dist/chat-tool.png"))
+    export_screenshot(expanded, Path("/workspace/dist/chat-tool.png"))
     driver.resize_window(860, 560)
     driver.xdotool("mousemove", "--window", driver.window_id, "255", "300", "mousedown", "1",
                     "mousemove", "--sync", "--window", driver.window_id, "480", "300", "mouseup", "1")
@@ -8558,7 +8564,7 @@ def chat_paging_layout_scenario(driver: WindowDriver, workspace: Path, chat: Pat
         raise AcceptanceFailure("wrapped toolbar buttons are outside the minimum window")
     if dark_pixel_count(narrow, crop=(505, 335, 250, 90)) < 20:
         raise AcceptanceFailure("composer is outside the minimum window")
-    shutil.copyfile(narrow, Path("/workspace/dist/chat-narrow.png"))
+    export_screenshot(narrow, Path("/workspace/dist/chat-narrow.png"))
     # Journal remains available in the wrapped toolbar and Back returns to this chat.
     driver.click_point(516, 78)
     driver.wait_for_visual_change("journal opens from wrapped toolbar", narrow,
