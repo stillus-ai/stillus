@@ -103,7 +103,10 @@ impl TextArea {
         let doc = Rc::new(TextDocument::new(scope, draft.get_untracked()));
         doc.keep_indent.set(false);
         let mut styling = SimpleStyling::new();
-        styling.set_font_size(14);
+        styling.set_font_size(crate::ui::FONT_BODY as usize);
+        styling.set_font_family(vec![floem::text::FamilyOwned::Name(
+            crate::ui::UI_FONT_FAMILY.to_owned(),
+        )]);
         let mut editor = Editor::new(scope, doc.clone(), Rc::new(styling), false);
         editor.cursor_info.should_blink = Rc::new(move || active.get_untracked());
         let gain = editor.editor_view_focused;
@@ -167,8 +170,10 @@ impl TextArea {
             move |_| active.get(),
             move |key, mods| {
                 use floem::views::editor::keypress::key::KeyInput;
-                if matches!(&key.key, KeyInput::Keyboard(Key::Named(NamedKey::Escape), _))
-                    && super::popover_close_top_on_escape()
+                if matches!(
+                    &key.key,
+                    KeyInput::Keyboard(Key::Named(NamedKey::Escape), _)
+                ) && super::popover_close_top_on_escape()
                 {
                     return CommandExecuted::Yes;
                 }
@@ -189,8 +194,8 @@ impl TextArea {
                 s.absolute()
                     .inset_left(2.0)
                     .inset_top(0.0)
-                    .font_size(14.0)
-                    .color(palette.muted)
+                    .font_size(crate::ui::FONT_BODY as f32)
+                    .color(palette.ink3)
                     .apply_if(!draft.get().is_empty(), |s| s.hide())
             })
             .pointer_events(|| false);

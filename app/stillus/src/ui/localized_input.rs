@@ -98,11 +98,11 @@ impl View for LocalizedInput {
         let style = cx.style();
         let family = style
             .get(FontFamily)
-            .unwrap_or_else(|| "sans-serif".to_owned());
+            .unwrap_or_else(|| crate::ui::UI_FONT_FAMILY.to_owned());
         self.attrs = AttrsList::new(
             Attrs::new()
                 .family(&[FamilyOwned::Name(family)])
-                .font_size(style.get(FontSize).unwrap_or(14.0))
+                .font_size(style.get(FontSize).unwrap_or(crate::ui::FONT_BODY as f32))
                 .color(
                     style
                         .get(TextColor)

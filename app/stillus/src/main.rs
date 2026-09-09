@@ -100,7 +100,7 @@ const SYSTEM_OPEN_POLL_MS: u64 = 100;
 const CARET_BLINK_MS: u64 = 530;
 const SEARCH_RECONCILE_MS: u64 = 1_000;
 const NOTE_FIND_MATCH_LIMIT: usize = 10_000;
-const EDITOR_FONT_SIZE_PX: f64 = 14.0;
+const EDITOR_FONT_SIZE_PX: f64 = crate::ui::FONT_BODY;
 const EDITOR_LINE_HEIGHT_MULTIPLIER: f32 = 1.6;
 const EDITOR_LINE_HEIGHT_PX: f64 = 22.4;
 const EDITOR_CHARACTER_WIDTH_PX: f64 = 8.4;
@@ -166,18 +166,9 @@ const RSS_FORM_STATUS_HEIGHT_PX: f64 = 16.0;
 /// Pressed-in shade of `Palette::accent` for the primary form button hover.
 const RSS_FORM_ACCENT_HOVER: Color = Color::rgb8(42, 74, 103);
 const MAX_PASSWORD_BYTES: usize = 1_024;
-/// Monospace families probed in order at startup. Floem applies only the
-/// first family of a CSS-style list, so the editor picks one that is actually
-/// installed and measures its real advance width instead of assuming one.
-const EDITOR_FONT_CANDIDATES: [&str; 6] = [
-    "Menlo",
-    "SF Mono",
-    "Monaco",
-    "Consolas",
-    "Liberation Mono",
-    "DejaVu Sans Mono",
-];
-const EDITOR_FALLBACK_FONT_FAMILY: &str = "monospace";
+/// The bundled monospace family gives the editor a stable, measured advance.
+const EDITOR_FONT_CANDIDATES: [&str; 1] = [ui::MONO_FONT_FAMILY];
+const EDITOR_FALLBACK_FONT_FAMILY: &str = ui::MONO_FONT_FAMILY;
 /// One frame is held this long: slow enough to read as a lock opening, fast
 /// enough to look alive next to the caret blink.
 const DECRYPT_FRAME_MS: u64 = 150;
@@ -191,6 +182,7 @@ struct EditorFont {
 }
 
 fn probe_editor_font() -> EditorFont {
+    ui::register_fonts();
     use floem::text::{Attrs, AttrsList, FONT_SYSTEM, FamilyOwned, TextLayout};
 
     let family = {
@@ -236,6 +228,7 @@ use crash_dialog::install as install_panic_logging;
 
 fn main() -> Result<(), LaunchError> {
     install_panic_logging();
+    ui::register_fonts();
     let launch = LaunchOptions::parse()?;
     if launch.restart_after_update
         && !restart::await_handoff().map_err(|error| LaunchError::Restart(error.to_string()))?
@@ -2307,7 +2300,7 @@ fn app_view(
             .background(palette.canvas)
             .color(palette.ink)
             .font_family(UI_FONT_FAMILY.to_owned())
-            .font_size(14.0)
+            .font_size(crate::ui::FONT_BODY as f32)
             .line_height(1.35)
     });
     let restart_model = model.clone();
@@ -2571,9 +2564,18 @@ fn settings_page_view(
         palette,
     );
     let language_card = v_stack((
-        text(msg!(Language)).style(move |style| style.font_size(15.0).color(palette.ink)),
-        text(msg!(LanguageDescription))
-            .style(move |style| style.font_size(12.5).color(palette.muted)),
+        text(msg!(Language)).style(move |style| {
+            style
+                .font_size(crate::ui::FONT_SECTION as f32)
+                .font_family(crate::ui::HEADING_FONT_FAMILY.to_owned())
+                .font_weight(floem::text::Weight::SEMIBOLD)
+                .color(palette.ink)
+        }),
+        text(msg!(LanguageDescription)).style(move |style| {
+            style
+                .font_size(crate::ui::FONT_CAPTION as f32)
+                .color(palette.muted)
+        }),
         language_picker,
         label(move || {
             language_feedback
@@ -2581,7 +2583,11 @@ fn settings_page_view(
                 .map(|message| message.render())
                 .unwrap_or_default()
         })
-        .style(move |style| style.font_size(12.5).color(palette.danger)),
+        .style(move |style| {
+            style
+                .font_size(crate::ui::FONT_CAPTION as f32)
+                .color(palette.danger)
+        }),
     ))
     .style(move |style| settings_card_style(style, palette).gap(10.0));
     let close_action = close_settings.clone();
@@ -2600,7 +2606,7 @@ fn settings_page_view(
             ),
             label(move || tr!(Settings)).style(move |style| {
                 style
-                    .font_size(18.0)
+                    .font_size(crate::ui::FONT_SECTION as f32).font_family(crate::ui::HEADING_FONT_FAMILY.to_owned())
                     .font_weight(floem::text::Weight::SEMIBOLD)
                     .color(palette.sidebar_ink)
                     .selectable(false)
@@ -2610,7 +2616,7 @@ fn settings_page_view(
         empty().style(|style| style.height(22.0)),
         label(move || tr!(Sections)).style(move |style| {
             style
-                .font_size(10.0)
+                .font_size(crate::ui::FONT_CAPTION as f32)
                 .color(palette.sidebar_muted)
                 .selectable(false)
         }),
@@ -2618,7 +2624,7 @@ fn settings_page_view(
         selectable_row(
             h_stack((
                 svg(ButtonAction::Settings.icon()).style(|style| style.size(16.0, 16.0)),
-                label(move || tr!(General)).style(|style| style.font_size(13.5).selectable(false)),
+                label(move || tr!(General)).style(|style| style.font_size(crate::ui::FONT_BODY as f32).selectable(false)),
             ))
             .style(|style| rtl_row(style).items_center().gap(10.0)),
             move || {
@@ -2645,7 +2651,7 @@ fn settings_page_view(
             h_stack((
                 svg(ICON_LOCK).style(|style| style.size(16.0, 16.0)),
                 label(move || tr!(Encryption))
-                    .style(|style| style.font_size(13.5).selectable(false)),
+                    .style(|style| style.font_size(crate::ui::FONT_BODY as f32).selectable(false)),
             ))
             .style(|style| rtl_row(style).items_center().gap(10.0)),
             move || {
@@ -2682,7 +2688,7 @@ fn settings_page_view(
                 .height(38.0)
                 .items_center()
                 .padding_horiz(11.0)
-                .font_size(13.5)
+                .font_size(crate::ui::FONT_BODY as f32)
                 .border_radius(6.0)
                 .color(palette.sidebar_ink)
                 .background(if signals.section.get() == SettingsSection::Ai {
@@ -2695,7 +2701,7 @@ fn settings_page_view(
         selectable_row(
             h_stack((
                 svg(ICON_UPDATE).style(|style| style.size(16.0, 16.0)),
-                label(move || tr!(Updates)).style(|style| style.font_size(13.5).selectable(false)),
+                label(move || tr!(Updates)).style(|style| style.font_size(crate::ui::FONT_BODY as f32).selectable(false)),
             ))
             .style(|style| rtl_row(style).items_center().gap(10.0)),
             move || {
@@ -2793,7 +2799,7 @@ fn settings_page_view(
             Some(feedback) => text(feedback.message)
                 .style(move |style| {
                     style
-                        .font_size(12.5)
+                        .font_size(crate::ui::FONT_CAPTION as f32)
                         .line_height(1.4)
                         .color(if feedback.is_error {
                             palette.danger
@@ -2813,13 +2819,17 @@ fn settings_page_view(
             v_stack((
                 label(move || tr!(Workspace)).style(move |style| {
                     style
-                        .font_size(15.0)
+                        .font_size(crate::ui::FONT_SECTION as f32)
+                        .font_family(crate::ui::HEADING_FONT_FAMILY.to_owned())
                         .font_weight(floem::text::Weight::SEMIBOLD)
                         .color(palette.ink)
                         .selectable(false)
                 }),
                 label(move || tr!(WorkspaceDescription)).style(move |style| {
-                    style.font_size(12.5).color(palette.muted).selectable(false)
+                    style
+                        .font_size(crate::ui::FONT_CAPTION as f32)
+                        .color(palette.muted)
+                        .selectable(false)
                 }),
             ))
             .style(|style| rtl_column(style).gap(3.0)),
@@ -2840,14 +2850,19 @@ fn settings_page_view(
         v_stack((
             label(move || tr!(GeneralSettings)).style(move |style| {
                 style
-                    .font_size(26.0)
+                    .font_size(crate::ui::FONT_SCREEN as f32)
+                    .font_family(crate::ui::HEADING_FONT_FAMILY.to_owned())
                     .font_weight(floem::text::Weight::SEMIBOLD)
                     .color(palette.ink)
                     .selectable(false)
             }),
             empty().style(|style| style.height(7.0)),
-            label(move || tr!(GeneralDescription))
-                .style(move |style| style.font_size(13.5).color(palette.muted).selectable(false)),
+            label(move || tr!(GeneralDescription)).style(move |style| {
+                style
+                    .font_size(crate::ui::FONT_BODY as f32)
+                    .color(palette.muted)
+                    .selectable(false)
+            }),
             empty().style(|style| style.height(28.0)),
             language_card,
             empty().style(|style| style.height(20.0)),
@@ -2863,6 +2878,8 @@ fn settings_page_view(
     .style(move |style| {
         style
             .min_width(0.0)
+            .flex_basis(0.0)
+            .flex_shrink(1.0)
             .height_full()
             .flex_grow(1.0)
             .background(palette.canvas)
@@ -2899,7 +2916,14 @@ fn settings_page_view(
             }
         }),
     ))
-    .style(|style| style.min_width(0.0).height_full().flex_grow(1.0));
+    .style(|style| {
+        style
+            .min_width(0.0)
+            .flex_basis(0.0)
+            .flex_shrink(1.0)
+            .height_full()
+            .flex_grow(1.0)
+    });
 
     h_stack((navigation, content)).style(move |style| {
         let style = rtl_row(style)
@@ -3003,7 +3027,11 @@ fn startup_workspace_modal(
             .primary_label()
             .to_owned()
         })
-        .style(|style| style.font_size(13.0).selectable(false)),
+        .style(|style| {
+            style
+                .font_size(crate::ui::FONT_BODY as f32)
+                .selectable(false)
+        }),
         open_action,
     )
     .disabled(move || {
@@ -3045,7 +3073,7 @@ fn startup_workspace_modal(
             Some(diagnostic) => text(diagnostic)
                 .style(move |style| {
                     style
-                        .font_size(12.5)
+                        .font_size(crate::ui::FONT_CAPTION as f32)
                         .line_height(1.4)
                         .color(palette.danger)
                         .selectable(false)
@@ -3071,7 +3099,7 @@ fn startup_workspace_modal(
             .border(1.0)
             .border_color(palette.divider)
             .border_radius(6.0)
-            .font_size(13.0)
+            .font_size(crate::ui::FONT_BODY as f32)
             .selectable(true)
     });
     let detail_signals = signals;
@@ -3089,7 +3117,7 @@ fn startup_workspace_modal(
             detail_signals.may_create_root.get(),
         );
         style
-            .font_size(12.5)
+            .font_size(crate::ui::FONT_CAPTION as f32)
             .line_height(1.4)
             .color(if matches!(state, StartupCandidateState::Invalid(_)) {
                 palette.danger
@@ -3101,13 +3129,18 @@ fn startup_workspace_modal(
     let card = v_stack((
         h_stack((
             svg(ICON_FOLDER).style(move |style| style.size(24.0, 24.0).color(palette.accent)),
-            label(move || tr!(ChooseWorkspace))
-                .style(|style| style.font_size(18.0).selectable(false)),
+            label(move || tr!(ChooseWorkspace)).style(|style| {
+                style
+                    .font_size(crate::ui::FONT_SECTION as f32)
+                    .font_family(crate::ui::HEADING_FONT_FAMILY.to_owned())
+                    .font_weight(floem::text::Weight::SEMIBOLD)
+                    .selectable(false)
+            }),
         ))
         .style(|style| style.items_center().gap(10.0)),
         label(move || tr!(NotesDirectoryInfo)).style(move |style| {
             style
-                .font_size(13.0)
+                .font_size(crate::ui::FONT_BODY as f32)
                 .line_height(1.4)
                 .color(palette.muted)
                 .selectable(false)
@@ -3310,7 +3343,7 @@ fn encryption_settings_view(
             tr!(ProtectedSecretCounts , "notes" => notes, "recovery" => recovery, "secrets" => secrets)
         }
     })
-    .style(move |style| style.font_size(13.0).color(palette.ink));
+    .style(move |style| style.font_size(crate::ui::FONT_BODY as f32).color(palette.ink));
 
     let submit_model = model.clone();
     let disabled_model = model.clone();
@@ -3399,7 +3432,7 @@ fn encryption_settings_view(
                 .encryption_feedback
                 .get()
                 .is_some_and(|feedback| feedback.is_error);
-        style.min_height(18.0).font_size(12.5).color(if is_error {
+        style.min_height(18.0).font_size(crate::ui::FONT_CAPTION as f32).color(if is_error {
             palette.danger
         } else {
             palette.accent
@@ -3418,13 +3451,17 @@ fn encryption_settings_view(
         v_stack((
             label(move || tr!(Encryption)).style(move |style| {
                 style
-                    .font_size(26.0)
+                    .font_size(crate::ui::FONT_SCREEN as f32)
+                    .font_family(crate::ui::HEADING_FONT_FAMILY.to_owned())
                     .font_weight(floem::text::Weight::SEMIBOLD)
                     .color(palette.ink)
             }),
             empty().style(|style| style.height(7.0)),
-            label(move || tr!(ChangePasswordDescription))
-                .style(move |style| style.font_size(13.5).color(palette.muted)),
+            label(move || tr!(ChangePasswordDescription)).style(move |style| {
+                style
+                    .font_size(crate::ui::FONT_BODY as f32)
+                    .color(palette.muted)
+            }),
             empty().style(|style| style.height(28.0)),
             card,
         ))
@@ -3603,14 +3640,27 @@ fn password_change_recovery_modal(
     let retry_model = model.clone();
     let error_model = model.clone();
     let card = v_stack((
-        label(move || tr!(EncryptionRecoveryRequired)).style(|style| style.font_size(18.0)),
-        text(msg!(EncryptionRecoveryDescription))
-            .style(move |style| style.font_size(13.0).line_height(1.4).color(palette.muted)),
+        label(move || tr!(EncryptionRecoveryRequired)).style(|style| {
+            style
+                .font_size(crate::ui::FONT_SECTION as f32)
+                .font_family(crate::ui::HEADING_FONT_FAMILY.to_owned())
+                .font_weight(floem::text::Weight::SEMIBOLD)
+        }),
+        text(msg!(EncryptionRecoveryDescription)).style(move |style| {
+            style
+                .font_size(crate::ui::FONT_BODY as f32)
+                .line_height(1.4)
+                .color(palette.muted)
+        }),
         label(move || {
             revision.get();
             error_model.borrow().error.clone().unwrap_or_default()
         })
-        .style(move |style| style.font_size(12.0).color(palette.danger)),
+        .style(move |style| {
+            style
+                .font_size(crate::ui::FONT_CAPTION as f32)
+                .color(palette.danger)
+        }),
         h_stack((
             empty().style(|style| style.flex_grow(1.0)),
             dialog_button(
@@ -3706,7 +3756,10 @@ fn integrity_modal(
             })
             .style(move |style| {
                 revision.get();
-                let style = style.min_height(16.0).font_size(12.0).color(palette.danger);
+                let style = style
+                    .min_height(16.0)
+                    .font_size(crate::ui::FONT_CAPTION as f32)
+                    .color(palette.danger);
                 if error_visibility_model.borrow().error.is_some() {
                     style
                 } else {
@@ -3715,9 +3768,17 @@ fn integrity_modal(
             });
             let card = v_stack((
                 v_stack((
-                    label(move || tr!(VerifySaveFailed)).style(|style| style.font_size(18.0)),
+                    label(move || tr!(VerifySaveFailed)).style(|style| {
+                        style
+                            .font_size(crate::ui::FONT_SECTION as f32)
+                            .font_family(crate::ui::HEADING_FONT_FAMILY.to_owned())
+                            .font_weight(floem::text::Weight::SEMIBOLD)
+                    }),
                     text(msg!(PreviousEncryptedVersion)).style(move |style| {
-                        style.font_size(13.0).line_height(1.4).color(palette.muted)
+                        style
+                            .font_size(crate::ui::FONT_BODY as f32)
+                            .line_height(1.4)
+                            .color(palette.muted)
                     }),
                 ))
                 .style(|style| style.width_full().gap(6.0)),
@@ -3930,7 +3991,7 @@ fn password_dialog_card(
                 palette.divider
             })
             .border_radius(6.0)
-            .font_size(14.0)
+            .font_size(crate::ui::FONT_BODY as f32)
     })
     .keyboard_navigable();
     let primary_id = primary_field.id();
@@ -4053,7 +4114,7 @@ fn password_dialog_card(
                 palette.divider
             })
             .border_radius(6.0)
-            .font_size(14.0);
+            .font_size(crate::ui::FONT_BODY as f32);
         if is_setup { style } else { style.hide() }
     })
     .keyboard_navigable();
@@ -4126,7 +4187,7 @@ fn password_dialog_card(
         style
             .width_full()
             .height(16.0)
-            .font_size(12.0)
+            .font_size(crate::ui::FONT_CAPTION as f32)
             .color(if is_error {
                 palette.danger
             } else {
@@ -4147,14 +4208,23 @@ fn password_dialog_card(
             .background(Color::rgb8(250, 246, 235))
             .color(Color::rgb8(114, 89, 42))
             .border_radius(6.0)
-            .font_size(12.0)
+            .font_size(crate::ui::FONT_CAPTION as f32)
             .line_height(1.35);
         if is_setup { style } else { style.hide() }
     });
     let card = v_stack((
         v_stack((
-            text(title).style(|style| style.font_size(18.0)),
-            text(detail).style(move |style| style.font_size(13.0).color(palette.muted)),
+            text(title).style(|style| {
+                style
+                    .font_size(crate::ui::FONT_SECTION as f32)
+                    .font_family(crate::ui::HEADING_FONT_FAMILY.to_owned())
+                    .font_weight(floem::text::Weight::SEMIBOLD)
+            }),
+            text(detail).style(move |style| {
+                style
+                    .font_size(crate::ui::FONT_BODY as f32)
+                    .color(palette.muted)
+            }),
         ))
         .style(|style| style.width_full().gap(4.0)),
         warning,
@@ -6086,7 +6156,7 @@ fn rss_creation_form(
         }),
         label(move || tr!(RssFeed)).style(move |style| {
             style
-                .font_size(13.0)
+                .font_size(crate::ui::FONT_BODY as f32)
                 .font_weight(floem::text::Weight::SEMIBOLD)
                 .color(palette.ink)
                 .selectable(false)
@@ -6103,7 +6173,7 @@ fn rss_creation_form(
                 .style(move |style| {
                     style
                         .width_full()
-                        .font_size(11.5)
+                        .font_size(crate::ui::FONT_CAPTION as f32)
                         .color(palette.danger)
                         .selectable(false)
                 })
@@ -6112,7 +6182,7 @@ fn rss_creation_form(
                 .style(move |style| {
                     style
                         .width_full()
-                        .font_size(11.5)
+                        .font_size(crate::ui::FONT_CAPTION as f32)
                         .color(palette.muted)
                         .selectable(false)
                 })
@@ -6128,7 +6198,11 @@ fn rss_creation_form(
     let footer = h_stack((
         content_button(
             ButtonAction::Back.icon(),
-            label(move || tr!(Back)).style(|style| style.font_size(12.5).selectable(false)),
+            label(move || tr!(Back)).style(|style| {
+                style
+                    .font_size(crate::ui::FONT_CAPTION as f32)
+                    .selectable(false)
+            }),
             move || {
                 rss_mode.set(false);
                 rss_error.set(None);
@@ -6151,7 +6225,11 @@ fn rss_creation_form(
         empty().style(|style| style.flex_grow(1.0)),
         content_button(
             ButtonAction::Add.icon(),
-            label(move || tr!(Add)).style(|style| style.font_size(12.5).selectable(false)),
+            label(move || tr!(Add)).style(|style| {
+                style
+                    .font_size(crate::ui::FONT_CAPTION as f32)
+                    .selectable(false)
+            }),
             move || button_submit(),
         )
         .disabled(move || submit_enabled.get().trim().is_empty())
@@ -6241,8 +6319,12 @@ fn sidebar_sort_popover(
     let apply_scope = scope;
     let apply_model = model;
     v_stack((
-        label(move || tr!(SortNotes))
-            .style(move |style| style.font_size(13.0).color(palette.ink).selectable(false)),
+        label(move || tr!(SortNotes)).style(move |style| {
+            style
+                .font_size(crate::ui::FONT_BODY as f32)
+                .color(palette.ink)
+                .selectable(false)
+        }),
         v_stack((
             choice_row(
                 msg!(ByName),
@@ -6431,7 +6513,7 @@ fn sidebar_group_row(
         })
         .style(move |style| {
             style
-                .font_size(14.0)
+                .font_size(crate::ui::FONT_BODY as f32)
                 .color(palette.sidebar_ink)
                 .min_width(0.0)
                 .flex_shrink(1.0)
@@ -6442,7 +6524,7 @@ fn sidebar_group_row(
         sort_action,
         text(count).style(move |style| {
             style
-                .font_size(12.0)
+                .font_size(crate::ui::FONT_CAPTION as f32)
                 .color(palette.sidebar_muted)
                 .flex_shrink(0.0)
                 .selectable(false)
@@ -6557,14 +6639,14 @@ fn external_group_row(count: usize, palette: Palette) -> AnyView {
         }),
         label(move || tr!(External)).style(move |style| {
             style
-                .font_size(14.0)
+                .font_size(crate::ui::FONT_BODY as f32)
                 .color(palette.sidebar_ink)
                 .selectable(false)
         }),
         empty().style(|style| style.flex_grow(1.0)),
         text(count).style(move |style| {
             style
-                .font_size(12.0)
+                .font_size(crate::ui::FONT_CAPTION as f32)
                 .color(palette.sidebar_muted)
                 .selectable(false)
         }),
@@ -6614,7 +6696,7 @@ fn external_file_row(
             svg(ICON_NOTE).style(|style| style.size(13.0, 13.0).flex_shrink(0.0)),
             text(file.title).style(move |style| {
                 style
-                    .font_size(13.5)
+                    .font_size(crate::ui::FONT_BODY as f32)
                     .color(if is_ready {
                         palette.sidebar_ink
                     } else {
@@ -6752,7 +6834,7 @@ fn sidebar_note_row(
         // then captures the next click anywhere in the window.
         text(note_caption(&note)).style(move |style| {
             style
-                .font_size(13.5)
+                .font_size(crate::ui::FONT_BODY as f32)
                 .color(if is_ready {
                     palette.sidebar_ink
                 } else {
@@ -6955,7 +7037,7 @@ fn engine_sidebar_row(
         }),
         text(title).style(move |style| {
             style
-                .font_size(13.5)
+                .font_size(crate::ui::FONT_BODY as f32)
                 .color(palette.sidebar_ink)
                 .min_width(0.0)
                 .flex_shrink(1.0)
@@ -6981,7 +7063,7 @@ fn engine_sidebar_row(
                 .items_center()
                 .justify_center()
                 .border_radius(9.0)
-                .font_size(11.0)
+                .font_size(crate::ui::FONT_CAPTION as f32)
                 .font_weight(floem::text::Weight::SEMIBOLD)
                 .background(
                     if chat_badge
@@ -7854,7 +7936,7 @@ fn sidebar_panel(
                     h_stack((
                         text(result.title).style(move |style| {
                             style
-                                .font_size(13.5)
+                                .font_size(crate::ui::FONT_BODY as f32)
                                 .color(palette.sidebar_ink)
                                 .min_width(0.0)
                                 .flex_shrink(1.0)
@@ -7864,7 +7946,7 @@ fn sidebar_panel(
                         empty().style(|style| style.flex_grow(1.0)),
                         text(kind).style(move |style| {
                             style
-                                .font_size(10.0)
+                                .font_size(crate::ui::FONT_CAPTION as f32)
                                 .color(palette.sidebar_accent)
                                 .flex_shrink(0.0)
                                 .selectable(false)
@@ -7873,7 +7955,7 @@ fn sidebar_panel(
                     .style(|style| style.width_full().min_width(0.0).items_center().gap(6.0)),
                     text(detail).style(move |style| {
                         style
-                            .font_size(12.0)
+                            .font_size(crate::ui::FONT_CAPTION as f32)
                             .color(palette.sidebar_muted)
                             .text_ellipsis()
                             .selectable(false)
@@ -7929,7 +8011,7 @@ fn sidebar_panel(
                 .border(1.0)
                 .border_color(palette.sidebar_border)
                 .border_radius(5.0)
-                .font_size(13.0)
+                .font_size(crate::ui::FONT_BODY as f32)
         });
     let search_input_id = search_input.id();
     create_effect(move |_| {
@@ -8057,7 +8139,7 @@ fn sidebar_panel(
                 && !search_query.get().trim().is_empty()
                 && !search_input_model.borrow().search_results.is_empty());
         let style = style
-            .font_size(12.0)
+            .font_size(crate::ui::FONT_CAPTION as f32)
             .color(palette.sidebar_muted)
             .padding_horiz(4.0);
         if hidden { style.hide() } else { style }
@@ -8173,11 +8255,11 @@ fn rss_title(label: String, ink: Color) -> impl IntoView {
         style
             .width_full()
             .min_width(0.0)
-            .font_size(26.0)
+            .font_size(ui::FONT_CARD)
             .line_height(1.25)
-            .font_weight(floem::text::Weight::BOLD)
+            .font_weight(floem::text::Weight::SEMIBOLD)
             .selectable(false)
-            .font_family("sans-serif".to_owned())
+            .font_family(ui::UI_FONT_FAMILY.to_owned())
             .color(ink)
     })
 }
@@ -8427,7 +8509,8 @@ fn rss_panel(
             .min_width(0.0)
             .flex_shrink(1.0)
             .text_ellipsis()
-            .font_size(18.0)
+            .font_size(crate::ui::FONT_SECTION as f32)
+            .font_family(crate::ui::HEADING_FONT_FAMILY.to_owned())
             .font_weight(floem::text::Weight::SEMIBOLD)
             .color(palette.ink)
             .selectable(false)
@@ -8558,14 +8641,16 @@ fn rss_panel(
                 .as_deref()
                 .and_then(rss_card::article_url)
                 .or_else(|| excerpt.continuation.clone());
-            let alpha = if card.unread {
-                1.0
-            } else if card.selected {
-                0.68
+            let ink = if card.unread {
+                palette.ink
             } else {
-                0.42
+                rss_card::read_title_ink(palette.paper)
             };
-            let ink = rss_card::faded_ink(Color::rgb8(51, 51, 51), palette.paper, alpha);
+            let body_ink = if card.unread {
+                palette.ink
+            } else {
+                palette.ink2
+            };
             let published = card.entry.published.clone().or(card.entry.updated.clone());
             let author = card.entry.author.clone();
             let metadata = move || {
@@ -8582,7 +8667,7 @@ fn rss_panel(
                 .collect::<Vec<_>>()
                 .join(" · ")
             };
-            let summary_layout = excerpt.layout(ink);
+            let summary_layout = excerpt.layout(body_ink);
             let select_entry = Rc::new(move || {
                 let selected = select_model.borrow_mut().select_rss_entry(&entry_id);
                 scroll_target.set(Some(Point::new(0.0, card_top.get_untracked())));
@@ -8622,26 +8707,12 @@ fn rss_panel(
             };
             let select_pointer = select_entry.clone();
             let view = v_stack((
-                title,
                 h_stack((
-                    label(metadata)
-                        .pointer_events(|| false)
-                        .style(move |style| {
-                            style
-                                .min_width(0.0)
-                                .flex_grow(1.0)
-                                .font_size(14.0)
-                                .line_height(1.4)
-                                .font_family("sans-serif".to_owned())
-                                .color(rss_card::faded_ink(
-                                    Color::rgb8(153, 153, 153),
-                                    palette.paper,
-                                    alpha,
-                                ))
-                        }),
+                    title.style(|style| style.min_width(0.0).flex_grow(1.0).flex_shrink(1.0)),
                     empty().style(move |style| {
                         style
                             .size(6.0, 6.0)
+                            .margin_top(6.0)
                             .flex_shrink(0.0)
                             .border_radius(3.0)
                             .background(if card.unread {
@@ -8651,13 +8722,19 @@ fn rss_panel(
                             })
                     }),
                 ))
-                .style(move |style| {
-                    style
-                        .width_full()
-                        .items_center()
-                        .gap(12.0)
-                        .apply_if(card.hidden && !card.expanded, |s| s.hide())
-                }),
+                .style(|style| style.width_full().min_width(0.0).items_start().gap(12.0)),
+                label(metadata)
+                    .pointer_events(|| false)
+                    .style(move |style| {
+                        style
+                            .width_full()
+                            .min_width(0.0)
+                            .font_size(ui::FONT_CAPTION)
+                            .line_height(1.4)
+                            .font_family(ui::UI_FONT_FAMILY.to_owned())
+                            .color(palette.ink2)
+                            .apply_if(card.hidden && !card.expanded, |s| s.hide())
+                    }),
                 floem::views::rich_text(move || summary_layout.clone())
                     .pointer_events(|| false)
                     .style(move |style| {
@@ -8689,16 +8766,12 @@ fn rss_panel(
                     .width_full()
                     .padding(24.0)
                     .gap(12.0)
-                    .background(if card.unread || card.selected {
-                        palette.paper
-                    } else {
-                        palette.paper.multiply_alpha(0.45)
-                    })
+                    .background(palette.paper)
                     .border(1.0)
                     .border_color(if card.selected {
                         palette.accent
                     } else {
-                        palette.divider.multiply_alpha(alpha)
+                        palette.divider
                     })
                     .border_radius(8.0)
             });
@@ -8741,7 +8814,7 @@ fn rss_panel(
             .min_height(30.0)
             .padding_horiz(20.0)
             .items_center()
-            .font_size(11.5)
+            .font_size(crate::ui::FONT_CAPTION as f32)
             .color(Color::rgb8(190, 72, 72))
             .background(palette.paper)
             .border_top(1.0)
@@ -9063,7 +9136,7 @@ fn go_to_line_prompt(
                     palette.divider
                 })
                 .border_radius(5.0)
-                .font_size(14.0)
+                .font_size(crate::ui::FONT_BODY as f32)
         });
     let input_id = input.id();
     create_effect(move |_| {
@@ -9093,7 +9166,7 @@ fn go_to_line_prompt(
     let range_model = model.clone();
     let submit_model = model;
     let card = v_stack((
-        label(|| tr!(GoToLine)).style(|style| style.font_size(15.0)),
+        label(|| tr!(GoToLine)).style(|style| style.font_size(crate::ui::FONT_CARD as f32)),
         h_stack((
             input,
             label(move || {
@@ -9106,7 +9179,11 @@ fn go_to_line_prompt(
                     .map_or(0, |document| document.line_count());
                 tr!(OfMaximum , "maximum" => maximum)
             })
-            .style(move |style| style.font_size(12.0).color(palette.muted)),
+            .style(move |style| {
+                style
+                    .font_size(crate::ui::FONT_CAPTION as f32)
+                    .color(palette.muted)
+            }),
             empty().style(|style| style.flex_grow(1.0)),
             dialog_button(
                 ButtonAction::Custom(ICON_ARROW_DOWN),
@@ -9128,7 +9205,7 @@ fn go_to_line_prompt(
         .style(move |style| {
             style
                 .min_height(16.0)
-                .font_size(11.0)
+                .font_size(crate::ui::FONT_CAPTION as f32)
                 .color(if signals.error.get().is_some() {
                     palette.danger
                 } else {
@@ -9881,7 +9958,7 @@ fn editor_panel(
                 .border(1.0)
                 .border_color(palette.divider)
                 .border_radius(5.0)
-                .font_size(13.0)
+                .font_size(crate::ui::FONT_BODY as f32)
         });
     let find_input_id = find_input.id();
     create_effect(move |_| {
@@ -9927,7 +10004,7 @@ fn editor_panel(
         .style(move |style| {
             style
                 .min_width(44.0)
-                .font_size(11.0)
+                .font_size(crate::ui::FONT_CAPTION as f32)
                 .color(palette.muted)
                 .text_ellipsis()
         }),
@@ -10198,7 +10275,7 @@ fn editor_panel(
                     .min_width(0.0)
                     .flex_shrink(1.0)
                     .text_ellipsis()
-                    .font_size(11.0)
+                    .font_size(crate::ui::FONT_CAPTION as f32)
                     .color(if is_error {
                         palette.danger
                     } else {
@@ -10904,13 +10981,7 @@ fn protected_placeholder_card(
     let card = v_stack((
         badge,
         empty().style(|style| style.height(18.0)),
-        label(move || tr!(ProtectedNote)).style(move |style| {
-            style
-                .font_size(10.0)
-                .font_weight(floem::text::Weight::SEMIBOLD)
-                .color(palette.muted)
-                .selectable(false)
-        }),
+        caption(move || tr!(ProtectedNote), palette.ink2),
         empty().style(|style| style.height(7.0)),
         label(move || {
             revision.get();
@@ -10921,7 +10992,8 @@ fn protected_placeholder_card(
         })
         .style(move |style| {
             style
-                .font_size(17.0)
+                .font_size(crate::ui::FONT_SECTION as f32)
+                .font_family(crate::ui::HEADING_FONT_FAMILY.to_owned())
                 .font_weight(floem::text::Weight::SEMIBOLD)
                 .color(palette.ink)
                 .selectable(false)
@@ -10934,7 +11006,12 @@ fn protected_placeholder_card(
                 .unwrap_or_default()
                 .to_owned()
         })
-        .style(move |style| style.font_size(12.5).color(palette.muted).selectable(false)),
+        .style(move |style| {
+            style
+                .font_size(crate::ui::FONT_CAPTION as f32)
+                .color(palette.muted)
+                .selectable(false)
+        }),
     ))
     .style(move |style| {
         style
@@ -11193,7 +11270,7 @@ fn tag_popover_card(
                 .border(1.0)
                 .border_color(palette.divider)
                 .border_radius(5.0)
-                .font_size(13.0)
+                .font_size(crate::ui::FONT_BODY as f32)
         },
     );
     let input_id = input.id();
@@ -11253,7 +11330,7 @@ fn tag_popover_card(
             .width_full()
             .items_center()
             .padding_horiz(10.0)
-            .font_size(13.0)
+            .font_size(crate::ui::FONT_BODY as f32)
             .color(palette.muted);
         if selected_note_tags(&empty_state_model.borrow()).is_empty() {
             style
@@ -11320,7 +11397,7 @@ fn tag_popover_card(
                     style
                         .min_width(0.0)
                         .flex_grow(1.0)
-                        .font_size(13.0)
+                        .font_size(crate::ui::FONT_BODY as f32)
                         .color(palette.ink)
                         .text_ellipsis()
                 }),
@@ -11372,7 +11449,7 @@ fn tag_popover_card(
                     style
                         .min_width(0.0)
                         .width_full()
-                        .font_size(13.0)
+                        .font_size(crate::ui::FONT_BODY as f32)
                         .color(palette.ink)
                         .text_ellipsis()
                 }),

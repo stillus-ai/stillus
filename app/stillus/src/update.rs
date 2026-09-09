@@ -183,7 +183,12 @@ pub(crate) fn prompt_view(updates: Updates, palette: Palette) -> impl IntoView {
             UiText::from(msg!(UpdateAvailable, "version" => release.version.to_string()))
         }),
     })
-    .style(move |style| style.font_size(13.5).color(palette.ink).selectable(false));
+    .style(move |style| {
+        style
+            .font_size(crate::ui::FONT_BODY as f32)
+            .color(palette.ink)
+            .selectable(false)
+    });
     let status = label(move || {
         restart_error.get().unwrap_or_else(|| {
             if restarting.get() {
@@ -193,7 +198,12 @@ pub(crate) fn prompt_view(updates: Updates, palette: Palette) -> impl IntoView {
             }
         })
     })
-    .style(move |style| style.font_size(12.5).color(palette.muted).selectable(false))
+    .style(move |style| {
+        style
+            .font_size(crate::ui::FONT_CAPTION as f32)
+            .color(palette.muted)
+            .selectable(false)
+    })
     .style(move |style| {
         style.apply_if(
             matches!(stage.get(), Stage::Available(_))
@@ -307,13 +317,23 @@ pub(crate) fn page(
     let restarting = updates.restarting;
     let restart_error = updates.restart_error;
     let status_card = v_stack((
-        label(|| msg!(UpdateInstalledVersion, "version" => env!("CARGO_PKG_VERSION")))
-            .style(move |style| style.font_size(15.0).color(palette.ink).selectable(false)),
-        label(move || status_text(&stage.get()))
-            .style(move |style| style.font_size(12.5).line_height(1.4).color(palette.muted)),
+        label(|| msg!(UpdateInstalledVersion, "version" => env!("CARGO_PKG_VERSION"))).style(
+            move |style| {
+                style
+                    .font_size(crate::ui::FONT_CARD as f32)
+                    .color(palette.ink)
+                    .selectable(false)
+            },
+        ),
+        label(move || status_text(&stage.get())).style(move |style| {
+            style
+                .font_size(crate::ui::FONT_CAPTION as f32)
+                .line_height(1.4)
+                .color(palette.muted)
+        }),
         label(move || restart_error.get().unwrap_or_default()).style(move |style| {
             style
-                .font_size(12.5)
+                .font_size(crate::ui::FONT_CAPTION as f32)
                 .color(palette.muted)
                 .apply_if(restart_error.get().is_none(), |style| style.hide())
         }),
@@ -387,7 +407,12 @@ pub(crate) fn page(
                 .map(|release| release.notes.clone())
                 .unwrap_or_default()
         })
-        .style(move |style| style.font_size(12.5).line_height(1.4).color(palette.muted)),
+        .style(move |style| {
+            style
+                .font_size(crate::ui::FONT_CAPTION as f32)
+                .line_height(1.4)
+                .color(palette.muted)
+        }),
     ))
     .style(move |style| {
         settings_card_style(style, palette).gap(8.0).apply_if(
@@ -400,8 +425,12 @@ pub(crate) fn page(
     });
 
     let automatic_card = v_stack((
-        label(move || tr!(UpdateAutomatic))
-            .style(move |style| style.font_size(15.0).color(palette.ink).selectable(false)),
+        label(move || tr!(UpdateAutomatic)).style(move |style| {
+            style
+                .font_size(crate::ui::FONT_CARD as f32)
+                .color(palette.ink)
+                .selectable(false)
+        }),
         settings_hint(i18n::Key::UpdateAutomaticHint, palette),
         label(move || {
             if automatic.get() {
@@ -410,7 +439,12 @@ pub(crate) fn page(
                 tr!(UpdateAutomaticDisabled)
             }
         })
-        .style(move |style| style.font_size(12.5).color(palette.muted).selectable(false)),
+        .style(move |style| {
+            style
+                .font_size(crate::ui::FONT_CAPTION as f32)
+                .color(palette.muted)
+                .selectable(false)
+        }),
         actions((action_button(
             ButtonAction::Custom(ICON_UPDATE),
             move || {

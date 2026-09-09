@@ -15,8 +15,12 @@ pub(crate) fn choice_row(
     reliable_button(
         h_stack((
             svg(ICON_SORT).style(|s| s.size(16.0, 16.0).margin_right(8.0)),
-            text(title)
-                .style(move |style| style.font_size(13.0).color(palette.ink).selectable(false)),
+            text(title).style(move |style| {
+                style
+                    .font_size(crate::ui::FONT_BODY as f32)
+                    .color(palette.ink)
+                    .selectable(false)
+            }),
             empty().style(|style| style.flex_grow(1.0)),
             label(move || {
                 if indicator_selected() {
@@ -28,7 +32,7 @@ pub(crate) fn choice_row(
             .style(move |style| {
                 style
                     .width(16.0)
-                    .font_size(13.0)
+                    .font_size(crate::ui::FONT_BODY as f32)
                     .color(palette.accent)
                     .selectable(false)
             }),
@@ -61,7 +65,7 @@ pub(crate) fn menu_action_row(
         ICON_LOCK,
         text(title).style(move |style| {
             style
-                .font_size(13.0)
+                .font_size(crate::ui::FONT_BODY as f32)
                 .color(if danger { palette.danger } else { palette.ink })
                 .selectable(false)
         }),

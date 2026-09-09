@@ -58,8 +58,12 @@ pub(crate) fn toolbar_edit_bar(
         }
     });
     h_stack((
-        text(bar.label)
-            .style(move |style| style.font_size(12.5).color(palette.muted).selectable(false)),
+        text(bar.label).style(move |style| {
+            style
+                .font_size(crate::ui::FONT_CAPTION as f32)
+                .color(palette.muted)
+                .selectable(false)
+        }),
         input,
         action_button(
             ButtonAction::Save,
@@ -91,7 +95,8 @@ pub(crate) fn toolbar_edit_bar(
 pub(crate) fn page_title(key: i18n::Key, palette: Palette) -> impl IntoView {
     label(move || key.to_string()).style(move |style| {
         style
-            .font_size(26.0)
+            .font_size(crate::ui::FONT_SCREEN as f32)
+            .font_family(crate::ui::HEADING_FONT_FAMILY.to_owned())
             .font_weight(floem::text::Weight::SEMIBOLD)
             .color(palette.ink)
             .selectable(false)
@@ -99,8 +104,12 @@ pub(crate) fn page_title(key: i18n::Key, palette: Palette) -> impl IntoView {
 }
 
 pub(crate) fn page_description(key: i18n::Key, palette: Palette) -> impl IntoView {
-    label(move || key.to_string())
-        .style(move |style| style.font_size(13.5).color(palette.muted).selectable(false))
+    label(move || key.to_string()).style(move |style| {
+        style
+            .font_size(crate::ui::FONT_BODY as f32)
+            .color(palette.muted)
+            .selectable(false)
+    })
 }
 
 /// A step of the page: the connection and the model aliases are two sections
@@ -108,7 +117,8 @@ pub(crate) fn page_description(key: i18n::Key, palette: Palette) -> impl IntoVie
 pub(crate) fn section_title(key: i18n::Key, palette: Palette) -> impl IntoView {
     label(move || key.to_string()).style(move |style| {
         style
-            .font_size(15.0)
+            .font_size(crate::ui::FONT_SECTION as f32)
+            .font_family(crate::ui::HEADING_FONT_FAMILY.to_owned())
             .font_weight(floem::text::Weight::SEMIBOLD)
             .color(palette.ink)
             .selectable(false)

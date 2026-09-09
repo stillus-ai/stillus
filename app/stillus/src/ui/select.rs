@@ -185,7 +185,7 @@ pub(crate) fn select<T: Clone + 'static>(
                         .flex_shrink(0.0)
                         .padding_horiz(12.0)
                         .items_center()
-                        .font_size(13.0)
+                        .font_size(crate::ui::FONT_BODY as f32)
                         .color(palette.ink)
                         .background(if current.get() == index {
                             palette.accent_soft

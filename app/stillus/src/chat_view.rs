@@ -164,8 +164,8 @@ pub(super) fn panel(
             .unwrap_or_else(|| tr!(ChatNew))
     })
     .style(move |s| {
-        s.font_size(20.0)
-            .font_family(UI_FONT_FAMILY.to_owned())
+        s.font_size(crate::ui::FONT_SECTION as f32)
+            .font_family(crate::ui::HEADING_FONT_FAMILY.to_owned())
             .font_weight(floem::text::Weight::SEMIBOLD)
             .min_width(0.0)
             .flex_grow(1.0)
@@ -586,8 +586,11 @@ pub(super) fn panel(
     )
     .style(|s| s.width(240.0));
     let alias = h_stack((
-        label(|| format!("{}:", tr!(AiModelLabel)))
-            .style(move |s| s.font_size(13.0).color(palette.ink).flex_shrink(0.0)),
+        label(|| format!("{}:", tr!(AiModelLabel))).style(move |s| {
+            s.font_size(crate::ui::FONT_BODY as f32)
+                .color(palette.ink)
+                .flex_shrink(0.0)
+        }),
         alias,
     ))
     .style(|s| s.items_center().gap(8.0).flex_shrink(0.0));
@@ -776,14 +779,16 @@ pub(super) fn panel(
         _ => String::new(),
     })
     .style(move |s| {
-        s.color(palette.muted).font_size(12.0).apply_if(
-            matches!(
-                readiness.get(),
-                application::chat::GenerationReadiness::Ready
-                    | application::chat::GenerationReadiness::Disconnected
-            ),
-            |s| s.hide(),
-        )
+        s.color(palette.muted)
+            .font_size(crate::ui::FONT_CAPTION as f32)
+            .apply_if(
+                matches!(
+                    readiness.get(),
+                    application::chat::GenerationReadiness::Ready
+                        | application::chat::GenerationReadiness::Disconnected
+                ),
+                |s| s.hide(),
+            )
     });
     let controls = h_stack((
         alias,
@@ -842,7 +847,11 @@ pub(super) fn panel(
             }
         }
     })
-    .style(move |s| s.color(palette.muted).font_size(12.0).flex_shrink(0.0));
+    .style(move |s| {
+        s.color(palette.muted)
+            .font_size(crate::ui::FONT_CAPTION as f32)
+            .flex_shrink(0.0)
+    });
     let body = v_stack((
         header,
         rename_bar,
@@ -956,7 +965,11 @@ fn message_view(
             acknowledge,
             content_button(
                 ICON_CHEVRON_DOWN,
-                text(title).style(move |s| s.font_size(12.0).line_height(1.5).color(palette.muted)),
+                text(title).style(move |s| {
+                    s.font_size(crate::ui::FONT_CAPTION as f32)
+                        .line_height(1.5)
+                        .color(palette.muted)
+                }),
                 move || open.update(|v| *v = !*v),
             )
             .style(|s| s.min_width(0.0).width_full()),
@@ -964,7 +977,7 @@ fn message_view(
                 detail,
                 move || (history_width.get() - 20.0).max(1.0),
                 palette.muted,
-                12.0,
+                crate::ui::FONT_CAPTION as f32,
             )
             .style(move |s| s.apply_if(!open.get(), |s| s.hide())),
         ))
@@ -993,7 +1006,7 @@ fn message_view(
             message.text.clone(),
             move || message_width.get(),
             palette.ink,
-            18.0,
+            crate::ui::FONT_BODY as f32,
         )
     } else {
         markdown_blocks(&message.text, message_width, palette)
@@ -1012,7 +1025,12 @@ fn message_view(
             let model = model.clone();
             let label = url.clone();
             selectable_row(
-                wrapped_text(label, move || message_width.get(), palette.accent, 13.0),
+                wrapped_text(
+                    label,
+                    move || message_width.get(),
+                    palette.accent,
+                    crate::ui::FONT_BODY as f32,
+                ),
                 move || {
                     if let Err(e) = open_rss_original(&url) {
                         model.borrow_mut().error = Some(e.to_string().into());
@@ -1035,7 +1053,10 @@ fn message_view(
     );
     let bubble = v_stack((
         h_stack((
-            text(role).style(move |s| s.color(palette.muted).font_size(12.0)),
+            text(role).style(move |s| {
+                s.color(palette.muted)
+                    .font_size(crate::ui::FONT_CAPTION as f32)
+            }),
             empty().style(|s| s.flex_grow(1.0)),
             copy,
         )),
@@ -1096,8 +1117,8 @@ fn markdown_blocks(source: &str, width: floem::reactive::Memo<f64>, palette: Pal
                         scroll(text(code.clone()).style(move |s| {
                             s.text_clip()
                                 .padding_bottom(8.0)
-                                .font_family("monospace".to_owned())
-                                .font_size(14.0)
+                                .font_family(crate::ui::MONO_FONT_FAMILY.to_owned())
+                                .font_size(crate::ui::FONT_BODY as f32)
                                 .color(palette.ink)
                         }))
                         .style(move |s| s.width((width.get() - 24.0).max(1.0)).min_width(0.0)),
@@ -1142,7 +1163,11 @@ fn wrapped_text(
 ) -> AnyView {
     floem::views::rich_text(move || {
         let mut layout = floem::text::TextLayout::new();
+        let family = [floem::text::FamilyOwned::Name(
+            crate::ui::UI_FONT_FAMILY.to_owned(),
+        )];
         let attrs = floem::text::Attrs::new()
+            .family(&family)
             .font_size(size)
             .color(color)
             .line_height(floem::text::LineHeightValue::Normal(1.45));

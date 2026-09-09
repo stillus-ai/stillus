@@ -4,6 +4,35 @@
 
 use super::*;
 
+pub(crate) const SETTINGS_PAGE_INSET_PX: f64 = 44.0;
+
+pub(crate) const FONT_SCREEN: f64 = 24.0;
+pub(crate) const FONT_SECTION: f64 = 17.0;
+pub(crate) const FONT_CARD: f64 = 15.0;
+pub(crate) const FONT_BODY: f64 = 14.0;
+pub(crate) const FONT_CAPTION: f64 = 12.0;
+pub(crate) const MONO_FONT_FAMILY: &str = "Noto Sans Mono";
+pub(crate) const HEADING_FONT_FAMILY: &str = "Noto Serif";
+
+/// Register bundled faces before shaping text or measuring editor advances.
+pub(crate) fn register_fonts() {
+    static REGISTERED: std::sync::Once = std::sync::Once::new();
+    REGISTERED.call_once(|| {
+        let faces: &[&[u8]] = &[
+            include_bytes!("../../assets/fonts/NotoSans-Regular.ttf"),
+            include_bytes!("../../assets/fonts/NotoSans-Italic.ttf"),
+            include_bytes!("../../assets/fonts/NotoSans-SemiBold.ttf"),
+            include_bytes!("../../assets/fonts/NotoSans-SemiBoldItalic.ttf"),
+            include_bytes!("../../assets/fonts/NotoSansMono-Regular.ttf"),
+            include_bytes!("../../assets/fonts/NotoSerif-SemiBold.ttf"),
+        ];
+        let mut fonts = floem::text::FONT_SYSTEM.lock();
+        for face in faces {
+            fonts.db_mut().load_font_data(face.to_vec());
+        }
+    });
+}
+
 #[derive(Clone, Copy)]
 pub(crate) struct Palette {
     pub(crate) canvas: Color,
@@ -15,6 +44,8 @@ pub(crate) struct Palette {
     pub(crate) sidebar_accent: Color,
     pub(crate) paper: Color,
     pub(crate) ink: Color,
+    pub(crate) ink2: Color,
+    pub(crate) ink3: Color,
     pub(crate) muted: Color,
     pub(crate) divider: Color,
     pub(crate) accent: Color,
@@ -35,7 +66,9 @@ impl Palette {
             sidebar_accent: Color::rgb8(143, 184, 220),
             paper: Color::rgb8(255, 255, 255),
             ink: Color::rgb8(35, 39, 45),
-            muted: Color::rgb8(105, 112, 121),
+            ink2: Color::rgb8(97, 104, 112),
+            ink3: Color::rgb8(130, 137, 145),
+            muted: Color::rgb8(97, 104, 112),
             divider: Color::rgb8(226, 229, 233),
             accent: Color::rgb8(54, 94, 130),
             accent_soft: Color::rgb8(229, 238, 246),
@@ -61,7 +94,7 @@ pub(crate) fn text_input_affordance(
 /// One field affordance for every engine form: the creation popover and the
 /// toolbar editing bars share height, radius, colors and focus ring.
 pub(crate) fn form_field_style(style: Style, palette: Palette, invalid: bool) -> Style {
-    text_input_affordance(style, palette.muted, palette.accent)
+    text_input_affordance(style, palette.ink3, palette.accent)
         .height(FORM_FIELD_HEIGHT_PX)
         .items_center()
         .padding_horiz(10.0)
@@ -74,7 +107,7 @@ pub(crate) fn form_field_style(style: Style, palette: Palette, invalid: bool) ->
             palette.divider
         })
         .border_radius(6.0)
-        .font_size(13.0)
+        .font_size(FONT_BODY)
         .focus(move |style| {
             if invalid {
                 style
@@ -115,7 +148,7 @@ pub(crate) fn settings_control_style(style: Style, palette: Palette) -> Style {
         .border(1.0)
         .border_color(palette.divider)
         .border_radius(6.0)
-        .font_size(13.0)
+        .font_size(FONT_BODY)
 }
 
 /// A settings text field: the shared control plus the placeholder and caret
@@ -123,7 +156,7 @@ pub(crate) fn settings_control_style(style: Style, palette: Palette) -> Style {
 pub(crate) fn settings_input_style(style: Style, palette: Palette) -> Style {
     text_input_affordance(
         settings_control_style(style, palette),
-        palette.muted,
+        palette.ink3,
         palette.accent,
     )
     .focus(move |style| style.border_color(palette.accent))
@@ -140,8 +173,8 @@ pub(crate) fn settings_secret_style(
 ) -> Style {
     settings_control_style(style, palette)
         .cursor(CursorStyle::Text)
-        .font_size(13.5)
-        .color(if empty { palette.muted } else { palette.ink })
+        .font_size(FONT_BODY)
+        .color(if empty { palette.ink3 } else { palette.ink })
         .border_color(if active {
             palette.accent
         } else {
@@ -163,8 +196,7 @@ pub(crate) fn disabled_control_style(style: Style, palette: Palette) -> Style {
 
 /// The small caption above a settings control ("Path", "API key", "Model").
 pub(crate) fn settings_field_label(key: i18n::Key, palette: Palette) -> impl IntoView {
-    label(move || key.to_string())
-        .style(move |style| style.font_size(10.0).color(palette.muted).selectable(false))
+    caption(move || key.to_string(), palette.ink2)
 }
 
 /// A settings paragraph: card subtitles, form hints and inline explanations.
@@ -172,7 +204,7 @@ pub(crate) fn settings_hint(key: i18n::Key, palette: Palette) -> impl IntoView {
     label(move || key.to_string()).style(move |style| {
         style
             .width_full()
-            .font_size(12.5)
+            .font_size(FONT_BODY)
             .line_height(1.4)
             .color(palette.muted)
             .selectable(false)
@@ -199,7 +231,7 @@ pub(crate) const FORM_FIELD_HEIGHT_PX: f64 = 32.0;
 pub(crate) const SETTINGS_CARD_MAX_WIDTH_PX: f64 = 720.0;
 pub(crate) const SETTINGS_CARD_PADDING_PX: f64 = 22.0;
 pub(crate) const SETTINGS_FIELD_HEIGHT_PX: f64 = 40.0;
-pub(crate) const UI_FONT_FAMILY: &str = "sans-serif";
+pub(crate) const UI_FONT_FAMILY: &str = "Noto Sans";
 
 pub(crate) fn modal_backdrop(style: Style) -> Style {
     style

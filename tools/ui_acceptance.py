@@ -7444,17 +7444,18 @@ def rss_cards_scenario(driver: WindowDriver, workspace: Path) -> None:
     # rounded corners. A capped or overflowing list must fail even if centered.
     for width in (SCREEN_WIDTH, 960, SCREEN_WIDTH):
         driver.resize_window(width, SCREEN_HEIGHT)
+        sidebar_width = 200 if width < 1000 else SIDEBAR_WIDTH
         frame = driver.wait_for_stable_frame(
             f"RSS card layout at width {width}", stable_for=0.3,
-            crop=(SIDEBAR_WIDTH, 80, width - SIDEBAR_WIDTH, 120),
+            crop=(sidebar_width, 80, width - sidebar_width, 120),
         )
         edges = column_runs(near_color_columns(
             frame, (54, 94, 130),
-            crop=(SIDEBAR_WIDTH, 90, width - SIDEBAR_WIDTH, 4),
+            crop=(sidebar_width, 90, width - sidebar_width, 4),
         ), merge_gap=0)
         if len(edges) != 2 or any(end - start > 1 for start, end in edges):
             raise AcceptanceFailure(f"RSS card side borders missing at width {width}: {edges}")
-        left = edges[0][0] - SIDEBAR_WIDTH
+        left = edges[0][0] - sidebar_width
         right = width - 1 - edges[1][1]
         if abs(left - 20) > 1 or abs(right - 20) > 1 or abs(left - right) > 1:
             raise AcceptanceFailure(
@@ -7470,7 +7471,7 @@ def localization_scenario(driver: WindowDriver, workspace: Path) -> None:
     def open_language_picker(rtl: bool) -> int:
         # Locate the dropdown arrow independently of each script's line metrics.
         frame = driver.capture("language-control")
-        arrow_x = 271 if rtl else 577
+        arrow_x = 371 if rtl else 577
         pixels = run_command(["convert", str(frame), "-crop", f"12x120+{arrow_x}+180",
                               "+repage", "-depth", "8", "txt:-"]).stdout
         rows = []
@@ -7480,7 +7481,7 @@ def localization_scenario(driver: WindowDriver, workspace: Path) -> None:
                 rows.append(int(match[1]) + 180)
         if not rows:
             raise AcceptanceFailure("language dropdown arrow is not visible")
-        driver.click_point(411 if rtl else 448, max(rows))
+        driver.click_point(511 if rtl else 448, max(rows))
         return max(rows)
 
     languages = ("en", "es", "ru", "zh/hans", "zh/hant", "pt/br", "pt/pt", "hi",
@@ -7490,7 +7491,7 @@ def localization_scenario(driver: WindowDriver, workspace: Path) -> None:
     original_notes = {path.name: path.read_bytes() for path in (workspace / "notes").iterdir()}
     driver.click("settings")
     driver.wait_for_stable_frame("language settings", stable_for=0.3, timeout=10)
-    driver.resize_window(860, 560)
+    driver.resize_window(960, 600)
     baseline = driver.wait_for_stable_frame("English language control", stable_for=0.3, timeout=10)
     escape_control_y = open_language_picker(False)
     language_list_crop = (298, escape_control_y + 24, 300, 520 - escape_control_y - 24)
@@ -7548,9 +7549,9 @@ def localization_scenario(driver: WindowDriver, workspace: Path) -> None:
                    lambda: json.loads((driver.home / ".stillus.cfg").read_text()).get("locale") == locale)
         if locale != current:
             driver.wait_for_visual_change("rendered language " + locale, previous,
-                                          crop=(0, 0, 860, 100), timeout=10)
+                                          crop=(0, 0, 960, 100), timeout=10)
         rtl = locale in {"ar", "ur"}
-        sidebar_x = 628 if rtl else 0
+        sidebar_x = 728 if rtl else 0
         wait_until("sidebar direction " + locale,
                    lambda: near_color_pixel_count(driver.capture("language-direction"),
                        (35, 42, 51), crop=(sidebar_x, 0, 232, 540)) >= 50000, timeout=10)
@@ -7568,22 +7569,25 @@ def localization_scenario(driver: WindowDriver, workspace: Path) -> None:
                     return pixels[(edge - 2, 530)] > 220 and pixels[(edge + 8, 530)] < 100
                 wait_until("mirrored sidebar boundary", positioned, timeout=10)
 
-            driver.click_point(824, 42)
-            wait_rtl_boundary(604)
-            driver.press_point(606, 400)
-            driver.drag_point(526, 400)
+            driver.click_point(924, 42)
+            wait_rtl_boundary(760)
+            driver.resize_window(1240, 800)
+            wait_rtl_boundary(984)
+            driver.press_point(986, 400)
+            driver.drag_point(906, 400)
             driver.release()
-            wait_rtl_boundary(524)
+            wait_rtl_boundary(904)
             before_menu = driver.capture("before-rtl-menu")
-            driver.click_point(590, 27)
+            driver.click_point(970, 27)
             driver.wait_for_visual_change("RTL creation menu", before_menu,
-                                          crop=(524, 45, 336, 300), timeout=10)
+                                          crop=(904, 45, 336, 300), timeout=10)
             driver.key("Escape")
-            driver.press_point(526, 400)
-            driver.drag_point(606, 400)
+            driver.press_point(906, 400)
+            driver.drag_point(986, 400)
             driver.release()
-            wait_rtl_boundary(604)
-            driver.click_point(632, 27)
+            wait_rtl_boundary(984)
+            driver.click_point(1012, 27)
+            driver.resize_window(960, 600)
             driver.wait_for_stable_frame("return to RTL settings", stable_for=0.3, timeout=10)
         current = locale
     driver.resize_window(SCREEN_WIDTH, SCREEN_HEIGHT)
@@ -7593,7 +7597,7 @@ def localization_scenario(driver: WindowDriver, workspace: Path) -> None:
     if json.loads(config.read_text())["locale"] != "ko":
         raise AcceptanceFailure("non-English language did not survive restart")
     driver.click("settings")
-    driver.resize_window(860, 560)
+    driver.resize_window(960, 600)
     driver.wait_for_stable_frame("Korean settings after restart", stable_for=0.3, timeout=10)
     # Return to English using the same control, then check that the choice survives launch.
     open_language_picker(False)

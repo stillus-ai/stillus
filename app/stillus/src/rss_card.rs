@@ -7,6 +7,7 @@
 use std::ops::Range;
 
 use crate::i18n::{Key, tr};
+use crate::ui::{FONT_BODY, MONO_FONT_FAMILY, UI_FONT_FAMILY};
 use chrono::{DateTime, Datelike, Local, Timelike};
 use floem::peniko::Color;
 use floem::text::{Attrs, AttrsList, FamilyOwned, LineHeightValue, Style, TextLayout, Weight};
@@ -26,6 +27,11 @@ pub fn faded_ink(ink: Color, paper: Color, opacity: f32) -> Color {
         channel(ink.g, paper.g),
         channel(ink.b, paper.b),
     )
+}
+
+/// A 60% title tint with sufficient contrast even on the slightly darker canvas.
+pub fn read_title_ink(paper: Color) -> Color {
+    faded_ink(Color::rgb8(10, 14, 18), paper, 0.6)
 }
 
 #[derive(Default)]
@@ -199,13 +205,14 @@ fn render(markdown: &str, limit: Option<usize>, continuation: bool) -> Excerpt {
 
 impl Excerpt {
     pub fn layout(&self, color: Color) -> TextLayout {
+        let family = [FamilyOwned::Name(UI_FONT_FAMILY.to_owned())];
         let base = Attrs::new()
-            .font_size(18.0)
+            .font_size(FONT_BODY as f32)
             .line_height(LineHeightValue::Normal(1.55))
-            .family(&[FamilyOwned::Serif])
+            .family(&family)
             .color(color);
         let mut attrs = AttrsList::new(base);
-        let monospace = [FamilyOwned::Monospace];
+        let monospace = [FamilyOwned::Name(MONO_FONT_FAMILY.to_owned())];
         for (range, strong, emphasis, code) in &self.spans {
             let range = range.start..range.end.min(self.text.len());
             if range.is_empty() {
@@ -232,6 +239,51 @@ impl Excerpt {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn emphasis_keeps_the_bundled_sans_family_with_cyrillic() {
+        crate::ui::register_fonts();
+        let layout = markdown("Текст **жирный** *курсив*").layout(Color::BLACK);
+        let ids = layout
+            .layout_runs()
+            .flat_map(|run| run.glyphs.iter().map(|glyph| glyph.font_id))
+            .collect::<Vec<_>>();
+        assert!(!ids.is_empty());
+        let fonts = floem::text::FONT_SYSTEM.lock();
+        for id in ids {
+            assert!(
+                fonts
+                    .db()
+                    .face(id)
+                    .unwrap()
+                    .families
+                    .iter()
+                    .any(|(name, _)| name == UI_FONT_FAMILY)
+            );
+        }
+    }
+
+    #[test]
+    fn read_title_and_secondary_text_keep_accessible_contrast() {
+        let luminance = |color: Color| {
+            let channel = |value: u8| {
+                let value = f64::from(value) / 255.0;
+                if value <= 0.04045 {
+                    value / 12.92
+                } else {
+                    ((value + 0.055) / 1.055).powf(2.4)
+                }
+            };
+            0.2126 * channel(color.r) + 0.7152 * channel(color.g) + 0.0722 * channel(color.b)
+        };
+        let palette = crate::ui::Palette::new();
+        for background in [palette.paper, palette.canvas] {
+            for foreground in [read_title_ink(background), palette.ink2] {
+                let contrast = (luminance(background) + 0.05) / (luminance(foreground) + 0.05);
+                assert!(contrast >= 4.5, "contrast {contrast}");
+            }
+        }
+    }
 
     #[test]
     fn renders_markdown_and_extracts_legacy_read_more_without_url_noise() {

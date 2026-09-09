@@ -474,7 +474,7 @@ mod tests {
                 AttrsList::new(
                     Attrs::new()
                         .family(&[FamilyOwned::SansSerif])
-                        .font_size(14.0),
+                        .font_size(crate::ui::FONT_BODY as f32),
                 ),
             );
             for run in layout.layout_runs() {

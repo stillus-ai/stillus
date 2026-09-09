@@ -361,7 +361,7 @@ fn feedback_view(
             .width_full()
             .max_width(SETTINGS_CARD_MAX_WIDTH_PX)
             .margin_top(10.0)
-            .font_size(12.5)
+            .font_size(crate::ui::FONT_CAPTION as f32)
             .line_height(1.4)
             .color(palette.danger)
             .selectable(false)
@@ -386,7 +386,7 @@ fn connection_summary(controller: Controller, palette: Palette) -> impl IntoView
             })
             .style(move |style| {
                 style
-                    .font_size(14.0)
+                    .font_size(crate::ui::FONT_BODY as f32)
                     .font_weight(floem::text::Weight::SEMIBOLD)
                     .color(palette.ink)
                     .selectable(false)
@@ -394,7 +394,7 @@ fn connection_summary(controller: Controller, palette: Palette) -> impl IntoView
             label(move || tr!(AiKeySaved))
                 .style(move |style| {
                     style
-                        .font_size(12.5)
+                        .font_size(crate::ui::FONT_CAPTION as f32)
                         .color(palette.accent)
                         .selectable(false)
                 })
@@ -487,7 +487,7 @@ fn connection_form(controller: Controller, palette: Palette) -> impl IntoView {
         let rejected = validate.get() && !key.is_empty() && detect_provider(&key).is_none();
         style
             .width_full()
-            .font_size(12.5)
+            .font_size(crate::ui::FONT_CAPTION as f32)
             .line_height(1.4)
             .selectable(false)
             .color(if rejected {
@@ -521,7 +521,7 @@ fn connection_form(controller: Controller, palette: Palette) -> impl IntoView {
         });
         style
             .width_full()
-            .font_size(12.5)
+            .font_size(crate::ui::FONT_CAPTION as f32)
             .line_height(1.4)
             .color(palette.danger)
             .selectable(false)
@@ -678,7 +678,7 @@ fn secret_input(controller: Controller, palette: Palette) -> impl IntoView {
             .height_full()
             .items_center()
             .cursor(CursorStyle::Text)
-            .font_size(13.5)
+            .font_size(crate::ui::FONT_BODY as f32)
             .color(if empty_key.borrow().is_empty() {
                 palette.muted
             } else {
@@ -772,7 +772,7 @@ fn aliases_section(controller: Controller, palette: Palette) -> impl IntoView {
                             style
                                 .width_full()
                                 .min_width(0.0)
-                                .font_size(14.0)
+                                .font_size(crate::ui::FONT_BODY as f32)
                                 .color(palette.ink)
                                 .text_ellipsis()
                                 .selectable(false)
@@ -808,7 +808,7 @@ fn aliases_section(controller: Controller, palette: Palette) -> impl IntoView {
                             style
                                 .width_full()
                                 .min_width(0.0)
-                                .font_size(12.0)
+                                .font_size(crate::ui::FONT_CAPTION as f32)
                                 .text_ellipsis()
                                 .color(if valid { palette.muted } else { palette.danger })
                                 .selectable(false)
@@ -1041,7 +1041,7 @@ fn alias_form(controller: Controller, palette: Palette) -> impl IntoView {
             ),
             label(move || DEFAULT_ALIAS.to_owned()).style(move |style| {
                 style
-                    .font_size(13.0)
+                    .font_size(crate::ui::FONT_BODY as f32)
                     .color(palette.ink)
                     .apply_if(editing.get().as_deref() != Some(DEFAULT_ALIAS), |style| {
                         style.hide()
@@ -1063,7 +1063,7 @@ fn alias_form(controller: Controller, palette: Palette) -> impl IntoView {
                 let old = editing.get().filter(|old| !old.is_empty());
                 style
                     .width_full()
-                    .font_size(12.5)
+                    .font_size(crate::ui::FONT_CAPTION as f32)
                     .color(palette.danger)
                     .apply_if(
                         name.get().is_empty()
@@ -1095,7 +1095,7 @@ fn alias_form(controller: Controller, palette: Palette) -> impl IntoView {
                 .style(move |style| {
                     style
                         .width_full()
-                        .font_size(12.5)
+                        .font_size(crate::ui::FONT_CAPTION as f32)
                         .line_height(1.4)
                         .color(palette.danger)
                         .selectable(false)

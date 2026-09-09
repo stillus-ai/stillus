@@ -509,8 +509,8 @@ mod tests {
 
     fn config(content_width: f32, max_rows: usize) -> GeometryConfig {
         GeometryConfig {
-            font_family: "monospace".to_owned(),
-            font_size: 14.0,
+            font_family: crate::ui::MONO_FONT_FAMILY.to_owned(),
+            font_size: crate::ui::FONT_BODY as f32,
             line_height: 22.0,
             content_width,
             tab_width: 4,

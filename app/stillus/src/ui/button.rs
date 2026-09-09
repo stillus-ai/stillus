@@ -241,7 +241,7 @@ fn tooltip_style(s: Style, palette: Palette) -> Style {
         .background(Color::rgb8(28, 33, 40))
         .color(palette.sidebar_ink)
         .font_family(UI_FONT_FAMILY.to_owned())
-        .font_size(12.0)
+        .font_size(crate::ui::FONT_CAPTION as f32)
         .border(1.0)
         .border_color(Color::rgb8(58, 66, 77))
         .border_radius(5.0)
@@ -292,7 +292,7 @@ fn button(
     let content = h_stack((
         glyph,
         label(move || caption()).style(move |s| {
-            s.font_size(13.0)
+            s.font_size(crate::ui::FONT_BODY as f32)
                 .selectable(false)
                 .apply_if(!labeled, |s| s.hide())
         }),
@@ -659,7 +659,7 @@ pub(crate) fn password_dialog_button(
         .style(move |style| {
             style
                 .font_family(UI_FONT_FAMILY.to_owned())
-                .font_size(13.0)
+                .font_size(crate::ui::FONT_BODY as f32)
                 .color(colors.foreground)
                 .selectable(false)
         });
@@ -680,7 +680,7 @@ pub(crate) fn password_dialog_button(
     stack((surface, label)).style(move |style| {
         style
             .font_family(UI_FONT_FAMILY.to_owned())
-            .font_size(13.0)
+            .font_size(crate::ui::FONT_BODY as f32)
             .width(button_width)
             .min_width(button_width)
             .max_width(button_width)
@@ -747,7 +747,7 @@ pub(super) fn menu_button(
         h_stack((
             svg(icon).style(|s| s.size(15.0, 15.0)),
             label(move || caption()).style(move |s| {
-                s.font_size(13.0)
+                s.font_size(crate::ui::FONT_BODY as f32)
                     .selectable(false)
                     .apply_if(!labeled, |s| s.hide())
             }),

@@ -114,7 +114,7 @@ pub(crate) fn view() -> impl IntoView {
                 second.get()
             )
         })
-        .style(|s| s.font_size(14.0)),
+        .style(|s| s.font_size(crate::ui::FONT_BODY as f32)),
     ))
     .style(move |s| {
         s.size_full()

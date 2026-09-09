@@ -380,8 +380,8 @@ pub(super) fn page_at(
                 move |(_, line)| {
                     text(line).style(move |s| {
                         s.min_height(18.0)
-                            .font_family("monospace".to_owned())
-                            .font_size(12.0)
+                            .font_family(crate::ui::MONO_FONT_FAMILY.to_owned())
+                            .font_size(crate::ui::FONT_CAPTION as f32)
                             .color(palette.ink)
                             .selectable(true)
                     })

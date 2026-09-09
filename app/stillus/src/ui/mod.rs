@@ -20,12 +20,14 @@ use floem::{
 };
 use std::{cell::RefCell, rc::Rc, time::Duration};
 mod button;
+mod caption;
 mod icons;
 mod interaction;
 pub(crate) mod localized_input;
 mod popover;
 mod style;
 pub(crate) use button::*;
+pub(crate) use caption::caption;
 pub(crate) use icons::*;
 pub(crate) use interaction::*;
 pub(crate) use popover::*;

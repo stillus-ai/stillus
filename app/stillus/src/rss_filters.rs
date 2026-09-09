@@ -105,7 +105,7 @@ fn form(
         String::new()
     })
     .style(move |s| {
-        s.font_size(12.0)
+        s.font_size(crate::ui::FONT_CAPTION as f32)
             .color(palette.muted)
             .width_full()
             .height(36.0)
@@ -164,9 +164,17 @@ fn form(
         )
     };
     v_stack((
-        label(move || tr!(RssFilters)).style(move |s| s.font_size(16.0).color(palette.ink)),
-        label(move || tr!(RssFilterHint))
-            .style(move |s| s.width_full().font_size(12.0).color(palette.muted)),
+        label(move || tr!(RssFilters)).style(move |s| {
+            s.font_size(crate::ui::FONT_SECTION as f32)
+                .font_family(crate::ui::HEADING_FONT_FAMILY.to_owned())
+                .font_weight(floem::text::Weight::SEMIBOLD)
+                .color(palette.ink)
+        }),
+        label(move || tr!(RssFilterHint)).style(move |s| {
+            s.width_full()
+                .font_size(crate::ui::FONT_CAPTION as f32)
+                .color(palette.muted)
+        }),
         label(move || tr!(RssFilterBlacklist)),
         multiline(blacklist, open, palette),
         label(move || tr!(RssFilterWhitelist)),
