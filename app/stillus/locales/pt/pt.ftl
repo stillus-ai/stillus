@@ -420,3 +420,6 @@ ChatEmpty = Inicie uma conversa. O histórico é guardado neste espaço de traba
 ChatAcknowledge = Continuar sem repetir esta ação
 
 ChatUnsupported = Este fornecedor ainda não suporta a geração de respostas no chat.
+
+SidebarCollapse = Recolher barra lateral
+SidebarExpand = Expandir barra lateral

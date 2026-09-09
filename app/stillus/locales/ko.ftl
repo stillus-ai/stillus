@@ -419,3 +419,6 @@ ChatEmpty = 대화를 시작하세요. 기록은 이 작업 공간에 저장됩�
 ChatAcknowledge = 이 작업을 반복하지 않고 계속
 
 ChatUnsupported = 이 제공자는 아직 채팅 응답 생성을 지원하지 않습니다.
+
+SidebarCollapse = 사이드바 접기
+SidebarExpand = 사이드바 펼치기

@@ -28,4 +28,5 @@ license = "GPL-3.0-only"
 authors = ["Evgeniy Udodov"]
 
 [patch.crates-io]
+floem = { path = "third_party/floem" }
 floem-winit = { git = "https://github.com/stillus-ai/winit", rev = "2e2dc2f5555b7f1df465a72ebef578a4ae01e010" }

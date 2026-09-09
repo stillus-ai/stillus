@@ -424,3 +424,6 @@ ChatEmpty = Start a conversation. Your history is saved in this workspace.
 ChatAcknowledge = Continue without repeating this action
 
 ChatUnsupported = This provider does not support chat generation yet.
+
+SidebarCollapse = Collapse sidebar
+SidebarExpand = Expand sidebar

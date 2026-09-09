@@ -26,8 +26,8 @@ pub(crate) enum PublicEdit {
 pub(crate) const SETTINGS_VERSION: u32 = 1;
 pub(crate) const DEFAULT_WINDOW_WIDTH: f64 = 1_240.0;
 pub(crate) const DEFAULT_WINDOW_HEIGHT: f64 = 800.0;
-pub(crate) const MIN_WINDOW_WIDTH: f64 = 860.0;
-pub(crate) const MIN_WINDOW_HEIGHT: f64 = 560.0;
+pub(crate) const MIN_WINDOW_WIDTH: f64 = 960.0;
+pub(crate) const MIN_WINDOW_HEIGHT: f64 = 600.0;
 const MAX_WINDOW_DIMENSION: f64 = 16_384.0;
 const SETTINGS_DIRECTORY: &str = ".stillus";
 const SETTINGS_FILE: &str = "settings.json";
@@ -403,6 +403,8 @@ impl Default for WindowSettings {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct SidebarSettings {
+    #[serde(default)]
+    pub(crate) collapsed: bool,
     pub(crate) width: f64,
     pub(crate) expanded: Vec<PersistedSidebarGroup>,
     pub(crate) creation_group: PersistedSidebarGroup,
@@ -415,6 +417,7 @@ pub(crate) struct SidebarSettings {
 impl Default for SidebarSettings {
     fn default() -> Self {
         Self {
+            collapsed: false,
             width: 256.0,
             expanded: vec![PersistedSidebarGroup::All],
             creation_group: PersistedSidebarGroup::All,
@@ -985,6 +988,7 @@ mod tests {
                 height: 700.0,
             },
             sidebar: SidebarSettings {
+                collapsed: true,
                 width: 420.0,
                 expanded: vec![
                     PersistedSidebarGroup::Tag("Work".to_owned()),

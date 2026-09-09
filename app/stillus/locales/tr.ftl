@@ -419,3 +419,6 @@ ChatEmpty = Bir konuşma başlatın. Geçmiş bu çalışma alanında saklanır.
 ChatAcknowledge = Bu eylemi tekrarlamadan devam et
 
 ChatUnsupported = Bu sağlayıcı henüz sohbet yanıtı oluşturmayı desteklemiyor.
+
+SidebarCollapse = Kenar çubuğunu daralt
+SidebarExpand = Kenar çubuğunu genişlet

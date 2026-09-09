@@ -420,3 +420,6 @@ ChatEmpty = बातचीत शुरू करें। इतिहास �
 ChatAcknowledge = इस कार्रवाई को दोहराए बिना जारी रखें
 
 ChatUnsupported = यह प्रदाता अभी चैट के उत्तर बनाने का समर्थन नहीं करता।
+
+SidebarCollapse = साइडबार समेटें
+SidebarExpand = साइडबार फैलाएँ

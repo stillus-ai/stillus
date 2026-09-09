@@ -352,6 +352,7 @@ fn main() -> Result<(), LaunchError> {
         WindowConfig::default()
             .title("Stillus")
             .size((initial_window.width, initial_window.height))
+            .min_size((settings::MIN_WINDOW_WIDTH, settings::MIN_WINDOW_HEIGHT))
             .apply_default_theme(false),
     );
     #[cfg(feature = "test-utils")]
@@ -2250,6 +2251,7 @@ fn app_view(
             revision,
             sidebar_width,
             sidebar_state,
+            window_size,
             SearchPanelSignals {
                 open: search_open,
                 query: search_query,
@@ -2277,7 +2279,7 @@ fn app_view(
     .style(move |style| {
         rtl_row(style)
             .size_full()
-            .min_size(860.0, 560.0)
+            .min_size(settings::MIN_WINDOW_WIDTH, settings::MIN_WINDOW_HEIGHT)
             .background(palette.canvas)
             .color(palette.ink)
             .font_family(UI_FONT_FAMILY.to_owned())
@@ -2357,9 +2359,19 @@ fn app_view(
             (
                 settings_page.open.get(),
                 settings_page.section.get(),
-                model.workspace.as_ref().map(|workspace| workspace.root().to_owned()),
-                model.workspace.as_ref().and_then(|workspace| workspace.selected_target()),
-                model.workspace.as_ref().and_then(|workspace| workspace.selected_engine_item()).cloned(),
+                model
+                    .workspace
+                    .as_ref()
+                    .map(|workspace| workspace.root().to_owned()),
+                model
+                    .workspace
+                    .as_ref()
+                    .and_then(|workspace| workspace.selected_target()),
+                model
+                    .workspace
+                    .as_ref()
+                    .and_then(|workspace| workspace.selected_engine_item())
+                    .cloned(),
             )
         };
         if previous.as_ref().is_some_and(|previous| previous != &owner) {
@@ -2869,7 +2881,7 @@ fn settings_page_view(
         let style = rtl_row(style)
             .absolute()
             .size_full()
-            .min_size(860.0, 560.0)
+            .min_size(settings::MIN_WINDOW_WIDTH, settings::MIN_WINDOW_HEIGHT)
             .background(palette.canvas)
             .font_family(UI_FONT_FAMILY.to_owned());
         if signals.open.get() {
@@ -4427,6 +4439,7 @@ impl Default for NoteSort {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct SidebarState {
+    collapsed: bool,
     expanded: HashSet<SidebarFilter>,
     creation_group: SidebarFilter,
     category_order: Vec<String>,
@@ -4436,6 +4449,7 @@ struct SidebarState {
 impl Default for SidebarState {
     fn default() -> Self {
         Self {
+            collapsed: false,
             expanded: HashSet::from([SidebarFilter::All]),
             creation_group: SidebarFilter::All,
             category_order: Vec::new(),
@@ -4451,6 +4465,7 @@ impl SidebarState {
     ) -> Self {
         let categories = categories.into_iter().collect::<Vec<_>>();
         let mut state = Self {
+            collapsed: settings.collapsed,
             expanded: settings
                 .expanded
                 .iter()
@@ -4486,6 +4501,7 @@ impl SidebarState {
             .collect::<Vec<_>>();
         expanded.sort();
         SidebarSettings {
+            collapsed: self.collapsed,
             width,
             expanded,
             creation_group: PersistedSidebarGroup::from(self.creation_group.clone()),
@@ -4822,6 +4838,18 @@ fn protection_password_dialog(workspace: &WorkspaceSession) -> PasswordDialogKin
 
 fn selected_note_is_ready(model: &Rc<RefCell<AppModel>>) -> bool {
     selected_note_flag(model, |note| note.availability.is_ready())
+}
+
+fn displayed_sidebar_width(saved: f64, window: f64, collapsed: bool) -> f64 {
+    if collapsed {
+        return 56.0;
+    }
+    if window < 1000.0 {
+        return 200.0;
+    }
+    saved
+        .clamp(SIDEBAR_MIN_WIDTH_PX, SIDEBAR_MAX_WIDTH_PX)
+        .min(window * 0.4)
 }
 
 fn resized_sidebar_width(current_width: f64, pointer_x: f64, grab_x: f64) -> f64 {
@@ -7211,7 +7239,11 @@ struct SearchPanelSignals {
     editor_focus_request: RwSignal<u64>,
 }
 
-fn sidebar_resize_handle(sidebar_width: RwSignal<f64>, palette: Palette) -> impl IntoView {
+fn sidebar_resize_handle(
+    sidebar_width: RwSignal<f64>,
+    actual_width: floem::reactive::Memo<f64>,
+    palette: Palette,
+) -> impl IntoView {
     let hovered = create_rw_signal(false);
     let dragging = create_rw_signal(false);
     let grab_x = create_rw_signal(None::<f64>);
@@ -7220,6 +7252,7 @@ fn sidebar_resize_handle(sidebar_width: RwSignal<f64>, palette: Palette) -> impl
     SidebarResizeView::new(
         stack((hit_surface,)),
         sidebar_width,
+        actual_width,
         hovered,
         dragging,
         grab_x,
@@ -7246,6 +7279,7 @@ fn sidebar_resize_handle(sidebar_width: RwSignal<f64>, palette: Palette) -> impl
 
 struct SidebarResizeView {
     id: ViewId,
+    actual_width: floem::reactive::Memo<f64>,
     sidebar_width: RwSignal<f64>,
     hovered: RwSignal<bool>,
     dragging: RwSignal<bool>,
@@ -7256,6 +7290,7 @@ impl SidebarResizeView {
     fn new(
         child: impl IntoView,
         sidebar_width: RwSignal<f64>,
+        actual_width: floem::reactive::Memo<f64>,
         hovered: RwSignal<bool>,
         dragging: RwSignal<bool>,
         grab_x: RwSignal<Option<f64>>,
@@ -7265,6 +7300,7 @@ impl SidebarResizeView {
         Self {
             id,
             sidebar_width,
+            actual_width,
             hovered,
             dragging,
             grab_x,
@@ -7286,7 +7322,7 @@ impl View for SidebarResizeView {
             Event::PointerMove(pointer) => {
                 if let Some(grab_x) = self.grab_x.get_untracked() {
                     let width = resized_sidebar_width(
-                        self.sidebar_width.get_untracked(),
+                        self.actual_width.get_untracked(),
                         if i18n::current().is_rtl() {
                             2.0 * grab_x - pointer.pos.x
                         } else {
@@ -7337,6 +7373,7 @@ fn sidebar_panel(
     revision: RwSignal<u64>,
     sidebar_width: RwSignal<f64>,
     sidebar_state: RwSignal<SidebarState>,
+    window_size: RwSignal<Size>,
     search: SearchPanelSignals,
     open_settings: Rc<dyn Fn()>,
     palette: Palette,
@@ -7367,6 +7404,18 @@ fn sidebar_panel(
         reconciled.reconcile_categories(categories.iter().map(String::as_str));
         if reconciled != current {
             sidebar_state.set(reconciled);
+        }
+    });
+    let actual_width = floem::reactive::create_memo(move |_| {
+        displayed_sidebar_width(
+            sidebar_width.get(),
+            window_size.get().width,
+            sidebar_state.get().collapsed,
+        )
+    });
+    create_effect(move |_| {
+        if search_open.get() && sidebar_state.get_untracked().collapsed {
+            sidebar_state.update(|state| state.collapsed = false);
         }
     });
     let tree_state_model = model.clone();
@@ -7598,7 +7647,7 @@ fn sidebar_panel(
         })
         .style(move |style| {
             let style = style.width_full().min_height(0.0).flex_grow(1.0);
-            if search_open.get() {
+            if search_open.get() || sidebar_state.get().collapsed {
                 style.hide()
             } else {
                 style
@@ -7662,13 +7711,87 @@ fn sidebar_panel(
             move || open_settings(),
         ),
     ))
-    .style(|style| {
+    .style(move |style| {
         rtl_row(style)
             .width_full()
-            .height(32.0)
+            .height(if sidebar_state.get().collapsed {
+                120.0
+            } else {
+                32.0
+            })
+            .flex_shrink(0.0)
             .items_center()
             .gap(6.0)
+            .apply_if(sidebar_state.get().collapsed, |style| style.flex_col())
     });
+    let rail = v_stack_from_iter(
+        [
+            (SidebarFilter::All, ICON_NOTE, i18n::Key::All),
+            (
+                SidebarFilter::Favorites,
+                ButtonAction::Favorite.icon(),
+                i18n::Key::Favorites,
+            ),
+            (
+                SidebarFilter::Trash,
+                ButtonAction::Delete.icon(),
+                i18n::Key::Trash,
+            ),
+        ]
+        .into_iter()
+        .map(|(filter, icon, title)| {
+            let model = model.clone();
+            icon_button(
+                icon,
+                move || title.to_string(),
+                IconButtonTone::Sidebar,
+                palette,
+                move || {
+                    sidebar_state.update(|state| {
+                        state.collapsed = false;
+                        state.expanded.remove(&filter);
+                    });
+                    activate_sidebar_group(&filter, &model, sidebar_state, revision);
+                },
+            )
+            .into_any()
+        }),
+    )
+    .style(move |style| {
+        style
+            .width_full()
+            .items_center()
+            .gap(8.0)
+            .apply_if(!sidebar_state.get().collapsed, |style| style.hide())
+    });
+    let collapse = dyn_container(
+        move || sidebar_state.get().collapsed,
+        move |collapsed| {
+            icon_button(
+                if collapsed {
+                    ICON_CHEVRON_RIGHT
+                } else {
+                    ICON_BACK
+                },
+                move || {
+                    if collapsed {
+                        tr!(SidebarExpand)
+                    } else {
+                        tr!(SidebarCollapse)
+                    }
+                },
+                IconButtonTone::Sidebar,
+                palette,
+                move || {
+                    popover_close_all();
+                    search_open.set(false);
+                    sidebar_state.update(|state| state.collapsed = !state.collapsed);
+                },
+            )
+            .into_any()
+        },
+    )
+    .style(|style| style.height(32.0).flex_shrink(0.0));
 
     let search_rows_state_model = model.clone();
     let search_rows_view_model = model.clone();
@@ -7952,22 +8075,43 @@ fn sidebar_panel(
         tree_scroll_origin.set(None);
         search_scroll_origin.set(None);
     });
-    let content = v_stack((header, search_controls, search_status, search_results, tree)).style(
-        move |style| {
+    let content = v_stack((
+        header,
+        search_controls,
+        search_status,
+        search_results,
+        tree,
+        rail,
+        empty().style(move |style| {
             style
-                .width(sidebar_width.get())
-                .flex_shrink(0.0)
-                .height_full()
-                .min_height(0.0)
-                .gap(10.0)
-                .padding(12.0)
-                .background(palette.sidebar)
-                .color(palette.sidebar_ink)
-        },
-    );
-    stack((content, sidebar_resize_handle(sidebar_width, palette))).style(move |style| {
-        let width = sidebar_width.get();
-        style.width(width).height_full().flex_shrink(0.0)
+                .flex_grow(1.0)
+                .apply_if(!sidebar_state.get().collapsed, |style| style.hide())
+        }),
+        collapse,
+    ))
+    .style(move |style| {
+        style
+            .width(actual_width.get())
+            .flex_shrink(0.0)
+            .height_full()
+            .min_height(0.0)
+            .gap(10.0)
+            .padding(12.0)
+            .background(palette.sidebar)
+            .color(palette.sidebar_ink)
+    });
+    let handle = sidebar_resize_handle(sidebar_width, actual_width, palette).style(move |style| {
+        style.apply_if(
+            sidebar_state.get().collapsed || window_size.get().width < 1000.0,
+            |style| style.hide(),
+        )
+    });
+    stack((content, handle)).style(move |style| {
+        style
+            .width(actual_width.get())
+            .height_full()
+            .min_height(0.0)
+            .flex_shrink(0.0)
     })
 }
 
@@ -8297,20 +8441,24 @@ fn rss_panel(
         },
     );
 
-    let toolbar = h_stack((title, empty().style(|style| style.flex_grow(1.0)), actions)).style(
-        move |style| {
-            style
-                .width_full()
-                .height(EDITOR_HEADER_HEIGHT_PX)
-                .flex_shrink(0.0)
-                .padding_horiz(20.0)
-                .items_center()
-                .gap(TOOLBAR_ACTION_GAP_PX)
-                .border_bottom(1.0)
-                .border_color(palette.divider)
-                .background(palette.paper)
-        },
-    );
+    let toolbar = h_stack((
+        title,
+        empty().style(|style| style.flex_grow(1.0)),
+        actions.style(|style| style.flex_shrink(0.0)),
+    ))
+    .style(move |style| {
+        style
+            .width_full()
+            .min_width(0.0)
+            .height(EDITOR_HEADER_HEIGHT_PX)
+            .flex_shrink(0.0)
+            .padding_horiz(20.0)
+            .items_center()
+            .gap(TOOLBAR_ACTION_GAP_PX)
+            .border_bottom(1.0)
+            .border_color(palette.divider)
+            .background(palette.paper)
+    });
 
     let rename_model = model.clone();
     let rename_form = toolbar_edit_bar(signals.rename, palette, move || {
@@ -8581,7 +8729,15 @@ fn rss_panel(
         }
     });
     let panel = v_stack((toolbar, rename_form, categories_form, list, status))
-        .style(move |style| style.width_full().height_full().background(palette.canvas))
+        .style(move |style| {
+            style
+                .width_full()
+                .min_width(0.0)
+                .min_height(0.0)
+                .flex_shrink(1.0)
+                .height_full()
+                .background(palette.canvas)
+        })
         .keyboard_navigable()
         .into_any();
     let focus_id = panel.id();
@@ -8656,7 +8812,11 @@ fn main_content_panel(
     )
     .style(move |style| {
         revision.get();
-        let style = style.width_full().height_full();
+        let style = style
+            .width_full()
+            .min_width(0.0)
+            .flex_shrink(1.0)
+            .height_full();
         if feed_visibility_model
             .borrow()
             .workspace
@@ -8698,6 +8858,8 @@ fn main_content_panel(
             .is_some_and(|(e, _)| e == &stillus_chat::engine_id());
         style
             .width_full()
+            .min_width(0.0)
+            .flex_shrink(1.0)
             .height_full()
             .apply_if(!visible, |s| s.hide())
     });
@@ -10014,8 +10176,9 @@ fn editor_panel(
     .style(|style| {
         style
             .height_full()
-            .min_width(360.0)
+            .min_width(0.0)
             .min_height(0.0)
+            .flex_shrink(1.0)
             .flex_grow(1.0)
     })
 }
@@ -11637,6 +11800,15 @@ mod tests {
             EditorCommand::Insert("∂".to_owned())
         };
         assert_eq!(command, EditorCommand::ToggleTaskDone);
+    }
+
+    #[test]
+    fn sidebar_display_width_preserves_user_width_and_limits_narrow_windows() {
+        assert_eq!(super::displayed_sidebar_width(480.0, 960.0, false), 200.0);
+        assert_eq!(super::displayed_sidebar_width(480.0, 1100.0, false), 440.0);
+        assert_eq!(super::displayed_sidebar_width(256.0, 1240.0, false), 256.0);
+        assert_eq!(super::displayed_sidebar_width(480.0, 960.0, true), 56.0);
+        assert_eq!(super::displayed_sidebar_width(420.0, 1240.0, false), 420.0);
     }
 
     #[test]
@@ -13622,6 +13794,7 @@ mod tests {
     #[test]
     fn persisted_sidebar_state_restores_only_existing_categories() {
         let settings = SidebarSettings {
+            collapsed: true,
             width: 412.0,
             expanded: vec![
                 PersistedSidebarGroup::All,
@@ -13661,6 +13834,7 @@ mod tests {
         assert_eq!(
             state.to_settings(412.0),
             SidebarSettings {
+                collapsed: true,
                 width: 412.0,
                 expanded: vec![
                     PersistedSidebarGroup::All,

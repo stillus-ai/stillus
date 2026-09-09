@@ -412,4 +412,6 @@ message_keys! {
     UpdateNoPackage,
     UpdateChecksumFailed,
     UpdateFailed,
+    SidebarCollapse,
+    SidebarExpand,
 }

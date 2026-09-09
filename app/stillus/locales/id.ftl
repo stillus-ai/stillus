@@ -419,3 +419,6 @@ ChatEmpty = Mulai percakapan. Riwayat disimpan di ruang kerja ini.
 ChatAcknowledge = Lanjutkan tanpa mengulangi tindakan ini
 
 ChatUnsupported = Penyedia ini belum mendukung pembuatan balasan chat.
+
+SidebarCollapse = Ciutkan bilah samping
+SidebarExpand = Perluas bilah samping

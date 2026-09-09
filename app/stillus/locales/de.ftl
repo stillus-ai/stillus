@@ -420,3 +420,6 @@ ChatEmpty = Beginne ein Gespräch. Der Verlauf wird in diesem Arbeitsbereich ges
 ChatAcknowledge = Ohne Wiederholung dieser Aktion fortfahren
 
 ChatUnsupported = Dieser Anbieter unterstützt noch keine Chatantworten.
+
+SidebarCollapse = Seitenleiste einklappen
+SidebarExpand = Seitenleiste ausklappen

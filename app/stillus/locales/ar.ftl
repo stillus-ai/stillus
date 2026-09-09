@@ -424,3 +424,6 @@ ChatEmpty = ابدأ محادثة. يتم حفظ السجل في مساحة ال
 ChatAcknowledge = المتابعة دون تكرار هذا الإجراء
 
 ChatUnsupported = هذا المزوّد لا يدعم إنشاء ردود الدردشة بعد.
+
+SidebarCollapse = طي الشريط الجانبي
+SidebarExpand = توسيع الشريط الجانبي

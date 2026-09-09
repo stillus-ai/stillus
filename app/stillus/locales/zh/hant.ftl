@@ -419,3 +419,6 @@ ChatEmpty = 開始對話。歷史記錄儲存在此工作區。
 ChatAcknowledge = 繼續，不重複此操作
 
 ChatUnsupported = 此提供商暫不支援產生聊天回覆。
+
+SidebarCollapse = 收合側邊欄
+SidebarExpand = 展開側邊欄

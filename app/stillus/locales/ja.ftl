@@ -419,3 +419,6 @@ ChatEmpty = 会話を始めましょう。履歴はこのワークスペース�
 ChatAcknowledge = この操作を繰り返さずに続行
 
 ChatUnsupported = このプロバイダーはまだチャットの応答生成に対応していません。
+
+SidebarCollapse = サイドバーを折りたたむ
+SidebarExpand = サイドバーを展開

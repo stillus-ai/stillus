@@ -1014,7 +1014,7 @@ def crop_luminances(
 
 def sidebar_boundary_x(image: Path, *, y: int = 600) -> int:
     """Find the first light editor column after the dark sidebar surface."""
-    left = 160
+    left = 40
     right = 500
     luminances = crop_luminances(image, (left, y, right - left, 1))
     for x in range(left + 1, right - 3):
@@ -6853,7 +6853,7 @@ def resize_scenario(driver: WindowDriver, workspace: Path) -> None:
         def reached() -> bool:
             nonlocal measured
             try:
-                measured = sidebar_boundary_x(driver.capture("sidebar-boundary"))
+                measured = sidebar_boundary_x(driver.capture("sidebar-boundary"), y=500)
             except AcceptanceFailure:
                 return False
             return abs(measured - expected) <= 1
@@ -6941,7 +6941,16 @@ def resize_scenario(driver: WindowDriver, workspace: Path) -> None:
         )
 
     wait_until("durable sidebar and navigation settings", durable_state_written)
+    driver.resize_window(960, 600)
+    wait_for_boundary("narrow sidebar uses 200px", 200)
+    driver.click_point(28, 572)
+    wait_for_boundary("sidebar collapses to icons", 56)
+    driver.click_point(28, 572)
+    wait_for_boundary("sidebar expands at narrow width", 200)
+    driver.resize_window(1240, 800)
+    wait_for_boundary("expanded window restores saved width", 480)
     driver.resize_window(1_100, 700)
+    wait_for_boundary("sidebar respects forty percent", 440)
     driver.close_app()
 
     saved = json.loads(settings_path.read_text(encoding="utf-8"))
@@ -6951,7 +6960,7 @@ def resize_scenario(driver: WindowDriver, workspace: Path) -> None:
         raise AcceptanceFailure("workspace settings changed canonical notes")
 
     driver.start_app(workspace, "resize-restored", expected_size=(1_100, 700))
-    if wait_for_boundary("restored sidebar width", 480) != 480:
+    if wait_for_boundary("restored sidebar width", 440) != 440:
         raise AcceptanceFailure("sidebar width was not restored after restart")
     restored_tree = driver.wait_for_stable_frame(
         "restored expanded sidebar groups", crop=(0, 0, 480, 700)
