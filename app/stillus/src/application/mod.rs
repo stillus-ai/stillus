@@ -42,3 +42,5 @@ pub(crate) mod preferences;
 
 #[cfg(test)]
 mod api_tests;
+
+pub(crate) mod chat;

@@ -9,6 +9,7 @@ use application::journal as ai_journal;
 mod ai_journal_view;
 mod ai_settings;
 mod application;
+mod chat_view;
 mod crash_dialog;
 mod editor_geometry;
 mod i18n;
@@ -225,6 +226,7 @@ const ICON_CHEVRON_RIGHT: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" vie
 const ICON_CHEVRON_DOWN: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 9 7 7 7-7"/></svg>"##;
 const ICON_NOTE: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l4 4v14H6V3Z"/><path d="M15 3v5h4M9 12h6M9 16h6"/></svg>"##;
 const ICON_FILE: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l4 4v14H6V3Z"/><path d="M15 3v5h4"/></svg>"##;
+const ICON_CHAT: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="currentColor" d="M4 3h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H8l-6 4V5a2 2 0 0 1 2-2zm2 5v2h12V8zm0 5v2h8v-2z"/></svg>"#;
 const ICON_RSS: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.9" stroke-linecap="round"><circle cx="6" cy="18" r="1.5" fill="#000" stroke="none"/><path d="M5 11a8 8 0 0 1 8 8M5 5a14 14 0 0 1 14 14"/></svg>"##;
 const ICON_UPDATE: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4a8 8 0 1 0 7.5 5.3"/><path d="M20 3.5V10h-6.5"/><path d="M12 8v5l3 2"/></svg>"##;
 const ICON_UNLOCK: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M16 10V7a4 4 0 0 0-7.8-1.2M12 14v3"/></svg>"##;
@@ -341,13 +343,14 @@ fn main() -> Result<(), LaunchError> {
                 .as_deref()
                 .and_then(|path| resolve_note_path(&workspace, path));
             let selected_external = settings.selected_external.as_deref().map(Path::new);
-            let model = AppModel::load_restoring_state(
+            let mut model = AppModel::load_restoring_state(
                 &workspace,
                 restored_note.as_deref(),
                 &settings.external_files,
                 selected_external,
                 settings.selected_rss.as_deref(),
             );
+            model.restore_chat_selection(settings.selected_chat.as_deref());
             (model, store, settings, None, Some(workspace))
         }
         StartupWorkspace::Choose(prompt) => (
@@ -1845,6 +1848,12 @@ fn ui_settings_snapshot(
         external_files,
         selected_external,
         selected_rss,
+        selected_chat: model
+            .workspace
+            .as_ref()
+            .and_then(WorkspaceSession::selected_engine_item)
+            .filter(|(e, _)| e == &stillus_chat::engine_id())
+            .map(|(_, id)| id.to_string()),
     }
 }
 
@@ -2321,6 +2330,7 @@ fn app_view(
                 editor_focus_request,
             },
             panel_context,
+            settings_page,
         ),
     ))
     .style(move |style| {
@@ -5513,7 +5523,7 @@ enum SidebarRow {
         index: usize,
         depth: usize,
     },
-    Rss {
+    Engine {
         parent: SidebarFilter,
         index: usize,
         depth: usize,
@@ -5623,7 +5633,7 @@ fn current_sidebar_rows(model: &AppModel, state: &SidebarState) -> Vec<SidebarRo
     let Some(workspace) = model.workspace.as_ref() else {
         return Vec::new();
     };
-    let rss = workspace.rss_subscriptions();
+    let rss = workspace.non_document_items();
     let note_count = workspace.notes().len();
     let mut projected = workspace
         .notes()
@@ -5631,7 +5641,7 @@ fn current_sidebar_rows(model: &AppModel, state: &SidebarState) -> Vec<SidebarRo
         .map(|note| (note.tags.as_slice(), note.favorited, note.deleted))
         .collect::<Vec<_>>();
     projected.extend(rss.iter().map(|summary| {
-        let subscription = &summary.subscription;
+        let subscription = &summary.metadata;
         (
             subscription.categories.as_slice(),
             subscription.favorited,
@@ -5660,7 +5670,7 @@ fn current_sidebar_rows(model: &AppModel, state: &SidebarState) -> Vec<SidebarRo
                     parent,
                     index,
                     depth,
-                } if index >= note_count => SidebarRow::Rss {
+                } if index >= note_count => SidebarRow::Engine {
                     parent,
                     index: index - note_count,
                     depth,
@@ -5675,28 +5685,28 @@ fn current_sidebar_rows(model: &AppModel, state: &SidebarState) -> Vec<SidebarRo
 #[derive(Clone, Copy)]
 enum CatalogRowIndex {
     Note(usize),
-    Rss(usize),
+    Engine(usize),
 }
 
 fn catalog_pinned(
     index: CatalogRowIndex,
     notes: &[stillus_core::NoteSummary],
-    rss: &[RssSubscriptionSummary],
+    rss: &[stillus_engine::ItemSummary],
 ) -> bool {
     match index {
         CatalogRowIndex::Note(index) => notes[index].pinned,
-        CatalogRowIndex::Rss(index) => rss[index].subscription.pinned,
+        CatalogRowIndex::Engine(index) => rss[index].metadata.pinned,
     }
 }
 
 fn catalog_title<'a>(
     index: CatalogRowIndex,
     notes: &'a [stillus_core::NoteSummary],
-    rss: &'a [RssSubscriptionSummary],
+    rss: &'a [stillus_engine::ItemSummary],
 ) -> &'a str {
     match index {
         CatalogRowIndex::Note(index) => &notes[index].title,
-        CatalogRowIndex::Rss(index) => &rss[index].display_title,
+        CatalogRowIndex::Engine(index) => &rss[index].metadata.title,
     }
 }
 
@@ -5704,16 +5714,16 @@ fn catalog_date<'a>(
     index: CatalogRowIndex,
     field: NoteSortField,
     notes: &'a [stillus_core::NoteSummary],
-    rss: &'a [RssSubscriptionSummary],
+    rss: &'a [stillus_engine::ItemSummary],
 ) -> Option<&'a str> {
     match (index, field) {
         (CatalogRowIndex::Note(index), NoteSortField::Created) => notes[index].created.as_deref(),
         (CatalogRowIndex::Note(index), NoteSortField::Modified) => notes[index].modified.as_deref(),
-        (CatalogRowIndex::Rss(index), NoteSortField::Created) => {
-            Some(rss[index].subscription.created.as_str())
+        (CatalogRowIndex::Engine(index), NoteSortField::Created) => {
+            rss[index].metadata.created.as_deref()
         }
-        (CatalogRowIndex::Rss(index), NoteSortField::Modified) => {
-            Some(rss[index].subscription.modified.as_str())
+        (CatalogRowIndex::Engine(index), NoteSortField::Modified) => {
+            rss[index].metadata.modified.as_deref()
         }
         (_, NoteSortField::Name) => None,
     }
@@ -5723,11 +5733,11 @@ fn catalog_order_rank<'a>(
     index: CatalogRowIndex,
     key: &str,
     notes: &'a [stillus_core::NoteSummary],
-    rss: &'a [RssSubscriptionSummary],
+    rss: &'a [stillus_engine::ItemSummary],
 ) -> Option<&'a u32> {
     match index {
         CatalogRowIndex::Note(index) => notes[index].order.get(key),
-        CatalogRowIndex::Rss(index) => rss[index].subscription.order.get(key),
+        CatalogRowIndex::Engine(index) => rss[index].metadata.order.get(key),
     }
 }
 
@@ -5738,7 +5748,7 @@ fn catalog_row_order(
     sort: NoteSort,
     manual: bool,
     notes: &[stillus_core::NoteSummary],
-    rss: &[RssSubscriptionSummary],
+    rss: &[stillus_engine::ItemSummary],
 ) -> Ordering {
     let partition = catalog_pinned(right, notes, rss).cmp(&catalog_pinned(left, notes, rss));
     if partition != Ordering::Equal {
@@ -5780,14 +5790,16 @@ fn catalog_row_order(
 fn sort_sidebar_catalog_rows(
     rows: &mut [SidebarRow],
     notes: &[stillus_core::NoteSummary],
-    rss: &[RssSubscriptionSummary],
+    rss: &[stillus_engine::ItemSummary],
     state: &SidebarState,
 ) {
     let mut groups = HashMap::<SidebarFilter, Vec<(usize, CatalogRowIndex)>>::new();
     for (position, row) in rows.iter().enumerate() {
         let pair = match row {
             SidebarRow::Note { parent, index, .. } => Some((parent, CatalogRowIndex::Note(*index))),
-            SidebarRow::Rss { parent, index, .. } => Some((parent, CatalogRowIndex::Rss(*index))),
+            SidebarRow::Engine { parent, index, .. } => {
+                Some((parent, CatalogRowIndex::Engine(*index)))
+            }
             _ => None,
         };
         if let Some((parent, index)) = pair
@@ -5810,9 +5822,8 @@ fn sort_sidebar_catalog_rows(
             .sort_by(|left, right| catalog_row_order(*left, *right, key, sort, manual, notes, rss));
         for ((position, _), index) in entries.into_iter().zip(indices) {
             let (parent, depth) = match &rows[position] {
-                SidebarRow::Note { parent, depth, .. } | SidebarRow::Rss { parent, depth, .. } => {
-                    (parent.clone(), *depth)
-                }
+                SidebarRow::Note { parent, depth, .. }
+                | SidebarRow::Engine { parent, depth, .. } => (parent.clone(), *depth),
                 _ => unreachable!("catalog row position changed while sorting"),
             };
             rows[position] = match index {
@@ -5821,7 +5832,7 @@ fn sort_sidebar_catalog_rows(
                     index,
                     depth,
                 },
-                CatalogRowIndex::Rss(index) => SidebarRow::Rss {
+                CatalogRowIndex::Engine(index) => SidebarRow::Engine {
                     parent,
                     index,
                     depth,
@@ -5862,11 +5873,14 @@ fn ordered_sidebar_catalog_items(
                 .notes()
                 .get(index)
                 .map(|note| (CatalogOrderItem::Note(note.path.clone()), note.pinned)),
-            SidebarRow::Rss { parent, index, .. } if &parent == group => {
-                workspace.rss_subscriptions().get(index).map(|summary| {
+            SidebarRow::Engine { parent, index, .. } if &parent == group => {
+                workspace.non_document_items().get(index).map(|summary| {
                     (
-                        CatalogOrderItem::Rss(summary.subscription.id.clone()),
-                        summary.subscription.pinned,
+                        CatalogOrderItem::Engine(
+                            summary.engine_id.clone(),
+                            summary.item_id.clone(),
+                        ),
+                        summary.metadata.pinned,
                     )
                 })
             }
@@ -5952,10 +5966,11 @@ enum SidebarRowKey {
         ready: bool,
         protected: bool,
     },
-    Rss {
+    Engine {
         parent: SidebarFilter,
         depth: usize,
         id: ItemId,
+        engine: stillus_engine::EngineId,
         title: String,
         unread: u64,
         pinned: bool,
@@ -5982,10 +5997,10 @@ enum SidebarItem {
         depth: usize,
         note: stillus_core::NoteSummary,
     },
-    Rss {
+    Engine {
         parent: SidebarFilter,
         depth: usize,
-        summary: RssSubscriptionSummary,
+        summary: stillus_engine::ItemSummary,
     },
     Separator,
 }
@@ -6024,19 +6039,20 @@ impl SidebarItem {
                 ready: note.availability.is_ready(),
                 protected: note.protection == NoteProtection::Protected,
             },
-            SidebarItem::Rss {
+            SidebarItem::Engine {
                 parent,
                 depth,
                 summary,
-            } => SidebarRowKey::Rss {
+            } => SidebarRowKey::Engine {
                 parent: parent.clone(),
                 depth: *depth,
-                id: summary.subscription.id.clone(),
-                title: summary.display_title.clone(),
-                unread: summary.unread,
-                pinned: summary.subscription.pinned,
-                favorited: summary.subscription.favorited,
-                deleted: summary.subscription.deleted,
+                id: summary.item_id.clone(),
+                engine: summary.engine_id.clone(),
+                title: summary.metadata.title.clone(),
+                unread: summary.badge.unwrap_or(0),
+                pinned: summary.metadata.pinned,
+                favorited: summary.metadata.favorited,
+                deleted: summary.metadata.deleted,
             },
             SidebarItem::Separator => SidebarRowKey::Separator,
         }
@@ -6124,7 +6140,7 @@ struct NoteDragState {
 fn sidebar_row_height(row: &SidebarRow) -> f64 {
     match row {
         SidebarRow::ExternalGroup { .. } | SidebarRow::Group { .. } => SIDEBAR_GROUP_ROW_HEIGHT_PX,
-        SidebarRow::ExternalFile { .. } | SidebarRow::Note { .. } | SidebarRow::Rss { .. } => {
+        SidebarRow::ExternalFile { .. } | SidebarRow::Note { .. } | SidebarRow::Engine { .. } => {
             SIDEBAR_NOTE_ROW_HEIGHT_PX
         }
         SidebarRow::Separator => SIDEBAR_SECTION_GAP_PX,
@@ -6462,6 +6478,7 @@ fn creation_choices(
     palette: Palette,
 ) -> impl IntoView {
     let note_model = model.clone();
+    let chat_model = model.clone();
     let file_model = model;
     let file_enabled = file_spec.is_some();
     v_stack((
@@ -6500,6 +6517,30 @@ fn creation_choices(
         creation_menu_row(ICON_RSS, msg!(RssFeed), true, palette, move || {
             rss_error.set(None);
             rss_mode.set(true);
+        }),
+        creation_menu_row(ICON_CHAT, msg!(ChatMenu), true, palette, move || {
+            open.set(false);
+            let group = sidebar_state.get_untracked().creation_group;
+            let categories = if let SidebarFilter::Tag(category) = &group {
+                vec![category.clone()]
+            } else {
+                Vec::new()
+            };
+            let result = chat_model.borrow_mut().dispatch(
+                application::api::Caller::Ui,
+                application::api::Command::Chat(application::chat::Command::Create {
+                    title: tr!(ChatNew),
+                    categories,
+                    favorited: matches!(group, SidebarFilter::Favorites),
+                    open: true,
+                }),
+            );
+            if let Err(error) = result {
+                chat_model.borrow_mut().error = Some(UiText::Failure {
+                    details: format!("{error:?}"),
+                });
+            }
+            revision.update(|v| *v += 1);
         }),
     ))
     .style(|style| style.width_full().gap(2.0))
@@ -7382,10 +7423,10 @@ fn sidebar_note_row(
     view.into_any()
 }
 
-fn rss_sidebar_row(
+fn engine_sidebar_row(
     parent: SidebarFilter,
     depth: usize,
-    summary: RssSubscriptionSummary,
+    summary: stillus_engine::ItemSummary,
     model: Rc<RefCell<AppModel>>,
     signals: SidebarNoteSignals,
     palette: Palette,
@@ -7395,18 +7436,32 @@ fn rss_sidebar_row(
         note_drag,
         revision,
     } = signals;
-    let item_id = summary.subscription.id.clone();
+    let engine = summary.engine_id.clone();
+    let item_id = summary.item_id.clone();
+    let selected_engine = engine.clone();
+    let activate_engine = engine.clone();
+    let drag_engine = engine.clone();
     let selected_id = item_id.clone();
     let selected_model = model.clone();
     let activate_model = model.clone();
     let activate_id = item_id.clone();
     let activate_parent = parent.clone();
-    let title = summary.display_title;
-    let unread = summary.unread;
-    let pinned = summary.subscription.pinned;
+    let title = summary.metadata.title;
+    let unread = summary.badge.unwrap_or(0);
+    let badge_model = model.clone();
+    let badge_id = item_id.clone();
+    let badge_style_model = model.clone();
+    let badge_style_id = item_id.clone();
+    let chat_badge = engine == stillus_chat::engine_id();
+    let pinned = summary.metadata.pinned;
     let ready = matches!(summary.availability, stillus_core::ItemAvailability::Ready);
     let content = h_stack((
-        svg(ICON_RSS).style(move |style| {
+        svg(if engine == stillus_chat::engine_id() {
+            ICON_CHAT
+        } else {
+            ICON_RSS
+        })
+        .style(move |style| {
             style.size(13.0, 13.0).flex_shrink(0.0).color(if ready {
                 palette.sidebar_muted
             } else {
@@ -7423,7 +7478,17 @@ fn rss_sidebar_row(
                 .selectable(false)
         }),
         empty().style(|style| style.flex_grow(1.0)),
-        text(unread).style(move |style| {
+        label(move || {
+            revision.get();
+            if chat_badge && badge_model.borrow().chat_running(&badge_id) {
+                "…".to_owned()
+            } else if chat_badge && unread == 0 {
+                String::new()
+            } else {
+                unread.to_string()
+            }
+        })
+        .style(move |style| {
             style
                 .min_width(20.0)
                 .padding_horiz(5.0)
@@ -7433,25 +7498,35 @@ fn rss_sidebar_row(
                 .border_radius(9.0)
                 .font_size(11.0)
                 .font_weight(floem::text::Weight::SEMIBOLD)
-                .background(if unread > 0 {
-                    palette.sidebar_accent
-                } else {
-                    palette.sidebar_active
-                })
+                .background(
+                    if chat_badge
+                        && unread == 0
+                        && !{
+                            revision.get();
+                            badge_style_model.borrow().chat_running(&badge_style_id)
+                        }
+                    {
+                        Color::TRANSPARENT
+                    } else if unread > 0 {
+                        palette.sidebar_accent
+                    } else {
+                        palette.sidebar_active
+                    },
+                )
                 .color(palette.sidebar_ink)
                 .selectable(false)
         }),
     ))
     .style({
-        let style_item = CatalogOrderItem::Rss(item_id.clone());
+        let style_item = CatalogOrderItem::Engine(engine.clone(), item_id.clone());
         move |style| {
             revision.get();
             let selected = selected_model
                 .borrow()
                 .workspace
                 .as_ref()
-                .and_then(WorkspaceSession::selected_rss)
-                == Some(&selected_id);
+                .and_then(WorkspaceSession::selected_engine_item)
+                == Some(&(selected_engine.clone(), selected_id.clone()));
             let mut style = rtl_row(style)
                 .width_full()
                 .height(SIDEBAR_NOTE_ROW_HEIGHT_PX)
@@ -7496,13 +7571,22 @@ fn rss_sidebar_row(
     });
     let activate: Rc<dyn Fn()> = Rc::new(move || {
         sidebar_state.update(|state| state.use_group(activate_parent.clone()));
-        let opened = activate_model.borrow_mut().open_rss(&activate_id);
-        if opened
-            && activate_model
-                .borrow_mut()
-                .start_rss_refresh(activate_id.clone())
-        {
-            schedule_rss_poll(activate_model.clone(), revision);
+        if activate_engine == stillus_core::rss_engine_id() {
+            let opened = activate_model.borrow_mut().open_rss(&activate_id);
+            if opened
+                && activate_model
+                    .borrow_mut()
+                    .start_rss_refresh(activate_id.clone())
+            {
+                schedule_rss_poll(activate_model.clone(), revision);
+            }
+        } else {
+            let _ = activate_model.borrow_mut().dispatch(
+                application::api::Caller::Ui,
+                application::api::Command::Chat(application::chat::Command::Open {
+                    id: activate_id.to_string(),
+                }),
+            );
         }
         revision.update(|value| *value = value.saturating_add(1));
         schedule_autosave(activate_model.clone(), revision);
@@ -7511,10 +7595,10 @@ fn rss_sidebar_row(
         let click = activate;
         return reliable_button(content, move || click()).into_any();
     }
-    let drag_item = CatalogOrderItem::Rss(item_id.clone());
+    let drag_item = CatalogOrderItem::Engine(drag_engine.clone(), item_id.clone());
     let drag_group = parent.clone();
     let drag_model = model.clone();
-    let drop_item = CatalogOrderItem::Rss(item_id);
+    let drop_item = CatalogOrderItem::Engine(drag_engine, item_id);
     let drop_group = parent;
     let drop_model = model;
     let click = activate.clone();
@@ -7868,7 +7952,7 @@ fn sidebar_panel(
                 return Vec::new();
             };
             let notes = workspace.notes();
-            let rss = workspace.rss_subscriptions();
+            let rss = workspace.non_document_items();
             let external_files = workspace.external_files();
             current_sidebar_rows(&model, &state)
                 .into_iter()
@@ -7897,11 +7981,11 @@ fn sidebar_panel(
                         depth,
                         note: notes[index].clone(),
                     },
-                    SidebarRow::Rss {
+                    SidebarRow::Engine {
                         parent,
                         index,
                         depth,
-                    } => SidebarItem::Rss {
+                    } => SidebarItem::Engine {
                         parent,
                         depth,
                         summary: rss[index].clone(),
@@ -7947,11 +8031,11 @@ fn sidebar_panel(
                 palette,
             )
             .into_any(),
-            SidebarItem::Rss {
+            SidebarItem::Engine {
                 parent,
                 depth,
                 summary,
-            } => rss_sidebar_row(
+            } => engine_sidebar_row(
                 parent,
                 depth,
                 summary,
@@ -9100,6 +9184,7 @@ fn main_content_panel(
     revision: RwSignal<u64>,
     signals: EditorPanelSignals,
     context: PanelContext,
+    settings: SettingsPageSignals,
 ) -> AnyView {
     let editor_state_model = model.clone();
     let editor =
@@ -9109,7 +9194,7 @@ fn main_content_panel(
                 .borrow()
                 .workspace
                 .as_ref()
-                .and_then(WorkspaceSession::selected_rss)
+                .and_then(WorkspaceSession::selected_engine_item)
                 .is_some()
             {
                 style.hide()
@@ -9119,7 +9204,7 @@ fn main_content_panel(
         });
     let feed_state_model = model.clone();
     let feed_visibility_model = model.clone();
-    let feed_model = model;
+    let feed_model = model.clone();
     let feed_palette = context.palette;
     let feed = dyn_stack(
         move || {
@@ -9152,7 +9237,39 @@ fn main_content_panel(
             style.hide()
         }
     });
-    stack((editor, feed))
+    let chat_state = model.clone();
+    let chat_model = model.clone();
+    let chat_visible = model;
+    let chat = dyn_stack(
+        move || {
+            revision.get();
+            let model = chat_state.borrow();
+            model
+                .workspace
+                .as_ref()
+                .and_then(WorkspaceSession::selected_engine_item)
+                .filter(|(e, _)| e == &stillus_chat::engine_id())
+                .map(|(_, id)| (model.rss_session, id.clone()))
+                .into_iter()
+                .collect::<Vec<_>>()
+        },
+        Clone::clone,
+        move |(_, id)| chat_view::panel(chat_model.clone(), id, revision, settings, feed_palette),
+    )
+    .style(move |style| {
+        revision.get();
+        let visible = chat_visible
+            .borrow()
+            .workspace
+            .as_ref()
+            .and_then(WorkspaceSession::selected_engine_item)
+            .is_some_and(|(e, _)| e == &stillus_chat::engine_id());
+        style
+            .width_full()
+            .height_full()
+            .apply_if(!visible, |s| s.hide())
+    });
+    stack((editor, feed, chat))
         .style(|style| style.width_full().height_full())
         .into_any()
 }
@@ -12007,6 +12124,7 @@ where
 enum ToolbarSubject {
     Note,
     Feed,
+    Chat,
 }
 
 fn toolbar_action_icon(action: ToolbarAction) -> &'static str {
@@ -12046,6 +12164,7 @@ fn toolbar_action_title(action: ToolbarAction, subject: ToolbarSubject, active: 
                 match subject {
                     ToolbarSubject::Note => tr!(RefreshNote),
                     ToolbarSubject::Feed => tr!(RefreshFeed),
+                    ToolbarSubject::Chat => tr!(ChatRunning),
                 }
             }
         }
@@ -12056,11 +12175,13 @@ fn toolbar_action_title(action: ToolbarAction, subject: ToolbarSubject, active: 
                 match subject {
                     ToolbarSubject::Note => tr!(RenameNote),
                     ToolbarSubject::Feed => tr!(RenameFeed),
+                    ToolbarSubject::Chat => tr!(ChatRename),
                 }
             }
         }
         ToolbarAction::Categories => match subject {
             ToolbarSubject::Note => tr!(ManageTags),
+            ToolbarSubject::Chat => tr!(ChatCategories),
             ToolbarSubject::Feed => {
                 if active {
                     tr!(CloseCategories)
@@ -12074,11 +12195,13 @@ fn toolbar_action_title(action: ToolbarAction, subject: ToolbarSubject, active: 
                 match subject {
                     ToolbarSubject::Note => tr!(UnpinNote),
                     ToolbarSubject::Feed => tr!(UnpinFeed),
+                    ToolbarSubject::Chat => tr!(ChatUnpin),
                 }
             } else {
                 match subject {
                     ToolbarSubject::Note => tr!(PinNote),
                     ToolbarSubject::Feed => tr!(PinFeed),
+                    ToolbarSubject::Chat => tr!(ChatPin),
                 }
             }
         }
@@ -12092,10 +12215,12 @@ fn toolbar_action_title(action: ToolbarAction, subject: ToolbarSubject, active: 
         ToolbarAction::Delete => match subject {
             ToolbarSubject::Note => tr!(TrashNote),
             ToolbarSubject::Feed => tr!(TrashFeed),
+            ToolbarSubject::Chat => tr!(ChatTrash),
         },
         ToolbarAction::Restore => match subject {
             ToolbarSubject::Note => tr!(RestoreNote),
             ToolbarSubject::Feed => tr!(RestoreFeed),
+            ToolbarSubject::Chat => tr!(ChatRestore),
         },
     }
 }
@@ -15398,14 +15523,14 @@ mod tests {
         let rows = current_sidebar_rows(&model, &state);
         assert!(rows.iter().any(|row| matches!(
             row,
-            SidebarRow::Rss {
+            SidebarRow::Engine {
                 parent: SidebarFilter::All,
                 ..
             }
         )));
         assert!(rows.iter().any(|row| matches!(
             row,
-            SidebarRow::Rss {
+            SidebarRow::Engine {
                 parent: SidebarFilter::Tag(category),
                 ..
             } if category == "Work"

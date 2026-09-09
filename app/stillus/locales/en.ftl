@@ -393,3 +393,34 @@ AiJournalNewest = Newest
 AiJournalOlder = Older
 AiJournalPreviousPart = Previous part
 AiJournalNextPart = Next part
+
+ChatMenu = AI Chat
+ChatNew = New chat
+ChatSend = Send
+ChatStop = Stop
+ChatContinue = Continue
+ChatPlaceholder = Write a message…
+ChatLoadEarlier = Load earlier messages
+ChatRunning = Working…
+ChatQueued = Queued
+ChatPaused = Paused
+ChatInterrupted = Interrupted
+ChatCompleted = Completed
+ChatFailed = Failed
+ChatUser = You
+ChatAssistant = Assistant
+ChatTool = Action
+ChatUnknown = Unknown outcome
+ChatConnect = Open AI settings
+ChatAlias = Model alias
+ChatRename = Rename chat
+ChatTrash = Move chat to trash
+ChatRestore = Restore chat
+ChatPin = Pin chat
+ChatUnpin = Unpin chat
+ChatCategories = Chat categories
+ChatEmpty = Start a conversation. Your history is saved in this workspace.
+
+ChatAcknowledge = Continue without repeating this action
+
+ChatUnsupported = This provider does not support chat generation yet.

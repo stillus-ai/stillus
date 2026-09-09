@@ -25,7 +25,10 @@ pub(crate) fn list() -> Vec<ToolDescriptor> {
     let strings = json!({"type":"array","items":string,"maxItems":100});
     super::catalog::ACTIONS.iter().filter(|action| action.access == Access::Tool).map(|action| {
         let (properties, required) = match action.handler {
-            H::NotesList | H::ExternalList => (json!({"offset":integer,"limit":integer}),vec![]),
+            H::ChatsList | H::NotesList | H::ExternalList => (json!({"offset":integer,"limit":integer}),vec![]),
+            H::ChatsRead => (json!({"id":string,"before":string,"limit":integer}),vec!["id"]),
+            H::ChatsCreate => (json!({"title":string,"categories":strings,"favorited":boolean}),vec!["title"]),
+            H::ChatsMetadata => (json!({"id":string,"version":string,"title":string,"categories":strings,"pinned":boolean,"favorited":boolean,"deleted":boolean,"alias":string}),vec!["id","version"]),
             H::NotesRead => (json!({"id":string,"offset":integer,"limit":integer}),vec!["id"]),
             H::NotesUpdate => (json!({"id":string,"version":string,"start":integer,"end":integer,"text":string}),vec!["id","version","start","end","text"]),
             H::NotesCreate => (json!({"title":string}),vec!["title"]),
@@ -61,6 +64,7 @@ pub(crate) fn list() -> Vec<ToolDescriptor> {
 #[derive(Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 struct Arguments {
+    alias: Option<String>,
     id: Option<String>,
     version: Option<String>,
     offset: Option<usize>,
@@ -663,6 +667,15 @@ pub(crate) fn call(
         })
     };
     let query = match handler {
+        H::ChatsList => Some(Q::Chat(super::chat::Query::List {
+            offset: a.offset.unwrap_or(0),
+            limit: a.limit.unwrap_or(100),
+        })),
+        H::ChatsRead => Some(Q::Chat(super::chat::Query::Read {
+            id: required(a.id.clone())?,
+            before: a.before.clone(),
+            limit: a.limit.unwrap_or(32),
+        })),
         H::WorkspaceState => Some(Q::Workspace),
         H::SettingsRead => Some(Q::Settings),
         H::NotesList => Some(Q::Notes {
@@ -696,6 +709,25 @@ pub(crate) fn call(
             .map_err(|_| ActionError::InvalidArguments);
     }
     let command = match handler {
+        H::ChatsCreate => C::Chat(super::chat::Command::Create {
+            title: required(a.title)?,
+            categories: a.categories.unwrap_or_default(),
+            favorited: a.favorited.unwrap_or(false),
+            open: false,
+        }),
+        H::ChatsMetadata => C::Chat(super::chat::Command::Metadata {
+            id: required(a.id)?,
+            version: required(a.version)?,
+            patch: stillus_engine::CommonMetadataPatch {
+                title: a.title,
+                categories: a.categories,
+                pinned: a.pinned,
+                favorited: a.favorited,
+                deleted: a.deleted,
+                order: None,
+            },
+            alias: a.alias,
+        }),
         H::NotesUpdate => C::Notes(Action::Edit {
             id: required(a.id)?,
             version: required(a.version)?,

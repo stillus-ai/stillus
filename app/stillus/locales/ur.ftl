@@ -389,3 +389,34 @@ AiJournalNewest = تازہ ترین
 AiJournalOlder = پرانی
 AiJournalPreviousPart = پچھلا حصہ
 AiJournalNextPart = اگلا حصہ
+
+ChatMenu = AI چیٹ
+ChatNew = نئی چیٹ
+ChatSend = بھیجیں
+ChatStop = روکیں
+ChatContinue = جاری رکھیں
+ChatPlaceholder = پیغام لکھیں…
+ChatLoadEarlier = پچھلے پیغامات لوڈ کریں
+ChatRunning = کام جاری ہے…
+ChatQueued = قطار میں
+ChatPaused = عارضی طور پر رکا ہوا
+ChatInterrupted = منقطع
+ChatCompleted = مکمل
+ChatFailed = ناکام
+ChatUser = آپ
+ChatAssistant = معاون
+ChatTool = کارروائی
+ChatUnknown = نتیجہ نامعلوم
+ChatConnect = AI ترتیبات کھولیں
+ChatAlias = ماڈل کا عرف
+ChatRename = چیٹ کا نام بدلیں
+ChatTrash = چیٹ کو کوڑے دان میں منتقل کریں
+ChatRestore = چیٹ بحال کریں
+ChatPin = چیٹ پن کریں
+ChatUnpin = چیٹ اَن پن کریں
+ChatCategories = چیٹ کی اقسام
+ChatEmpty = گفتگو شروع کریں۔ تاریخ اس ورک اسپیس میں محفوظ ہوتی ہے۔
+
+ChatAcknowledge = اس کارروائی کو دہرائے بغیر جاری رکھیں
+
+ChatUnsupported = یہ فراہم کنندہ ابھی چیٹ کے جوابات تیار کرنے کی سہولت نہیں دیتا۔

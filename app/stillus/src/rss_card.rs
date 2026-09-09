@@ -101,10 +101,17 @@ fn is_continuation(label: &str) -> bool {
 }
 
 pub fn excerpt(markdown: &str) -> Excerpt {
+    render(markdown, Some(MAX_EXCERPT_CHARS), true)
+}
+pub fn markdown(markdown: &str) -> Excerpt {
+    render(markdown, None, false)
+}
+fn render(markdown: &str, limit: Option<usize>, continuation: bool) -> Excerpt {
     let source = restore_reference_lines(markdown);
     let mut result = Excerpt::default();
     let (mut strong, mut emphasis, mut code, mut image) = (0_u32, 0_u32, 0_u32, 0_u32);
     let mut link: Option<(usize, String)> = None;
+    let mut lists: Vec<Option<u64>> = Vec::new();
     for event in Parser::new(&source) {
         match event {
             Event::Start(Tag::Strong | Tag::Heading { .. }) => strong += 1,
@@ -128,7 +135,7 @@ pub fn excerpt(markdown: &str) -> Excerpt {
             Event::End(TagEnd::Link) => {
                 if let Some((start, destination)) = link.take() {
                     let label = result.text[start..].to_owned();
-                    if is_continuation(&label) {
+                    if continuation && is_continuation(&label) {
                         result.continuation =
                             result.continuation.or_else(|| article_url(&destination));
                         result.text.truncate(start);
@@ -156,11 +163,29 @@ pub fn excerpt(markdown: &str) -> Excerpt {
                     result.text.push('\n');
                 }
             }
-            Event::Start(Tag::Item) => result.text.push_str("• "),
+            Event::Start(Tag::List(start)) => lists.push(start),
+            Event::End(TagEnd::List(_)) => {
+                lists.pop();
+            }
+            Event::Start(Tag::Item) => {
+                if !continuation {
+                    result
+                        .text
+                        .push_str(&"  ".repeat(lists.len().saturating_sub(1).min(8)));
+                }
+                if !continuation && lists.last().is_some_and(Option::is_some) {
+                    if let Some(Some(number)) = lists.last_mut() {
+                        result.text.push_str(&format!("{number}. "));
+                        *number += 1;
+                    }
+                } else {
+                    result.text.push_str("• ");
+                }
+            }
             _ => {}
         }
     }
-    if let Some((end, _)) = result.text.char_indices().nth(MAX_EXCERPT_CHARS) {
+    if let Some((end, _)) = limit.and_then(|limit| result.text.char_indices().nth(limit)) {
         result.text.truncate(end);
         result.spans.retain(|(range, ..)| range.start < end);
         for (range, ..) in &mut result.spans {

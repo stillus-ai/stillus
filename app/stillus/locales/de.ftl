@@ -389,3 +389,34 @@ AiJournalNewest = Neueste
 AiJournalOlder = Ältere
 AiJournalPreviousPart = Vorheriger Teil
 AiJournalNextPart = Nächster Teil
+
+ChatMenu = KI-Chat
+ChatNew = Neuer Chat
+ChatSend = Senden
+ChatStop = Stoppen
+ChatContinue = Fortsetzen
+ChatPlaceholder = Nachricht schreiben…
+ChatLoadEarlier = Ältere Nachrichten laden
+ChatRunning = Wird ausgeführt…
+ChatQueued = In Warteschlange
+ChatPaused = Pausiert
+ChatInterrupted = Unterbrochen
+ChatCompleted = Abgeschlossen
+ChatFailed = Fehler
+ChatUser = Du
+ChatAssistant = Assistent
+ChatTool = Aktion
+ChatUnknown = Ergebnis unbekannt
+ChatConnect = KI-Einstellungen öffnen
+ChatAlias = Modellalias
+ChatRename = Chat umbenennen
+ChatTrash = Chat in den Papierkorb verschieben
+ChatRestore = Chat wiederherstellen
+ChatPin = Chat anheften
+ChatUnpin = Chat lösen
+ChatCategories = Chat-Kategorien
+ChatEmpty = Beginne ein Gespräch. Der Verlauf wird in diesem Arbeitsbereich gespeichert.
+
+ChatAcknowledge = Ohne Wiederholung dieser Aktion fortfahren
+
+ChatUnsupported = Dieser Anbieter unterstützt noch keine Chatantworten.

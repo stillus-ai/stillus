@@ -388,3 +388,34 @@ AiJournalNewest = 最新
 AiJournalOlder = 更早
 AiJournalPreviousPart = 上一部分
 AiJournalNextPart = 下一部分
+
+ChatMenu = AI 聊天
+ChatNew = 新聊天
+ChatSend = 发送
+ChatStop = 停止
+ChatContinue = 继续
+ChatPlaceholder = 输入消息…
+ChatLoadEarlier = 加载更早的消息
+ChatRunning = 执行中…
+ChatQueued = 排队中
+ChatPaused = 已暂停
+ChatInterrupted = 已中断
+ChatCompleted = 已完成
+ChatFailed = 失败
+ChatUser = 你
+ChatAssistant = 助手
+ChatTool = 操作
+ChatUnknown = 结果未知
+ChatConnect = 打开 AI 设置
+ChatAlias = 模型别名
+ChatRename = 重命名聊天
+ChatTrash = 将聊天移到回收站
+ChatRestore = 恢复聊天
+ChatPin = 置顶聊天
+ChatUnpin = 取消置顶聊天
+ChatCategories = 聊天分类
+ChatEmpty = 开始对话。历史记录保存在此工作区。
+
+ChatAcknowledge = 继续，不重复此操作
+
+ChatUnsupported = 此提供商暂不支持生成聊天回复。

@@ -90,8 +90,13 @@ and results.
 
 Stillus exposes application actions through a shared **Rust application API**,
 giving the built-in assistant direct access to permitted operations across the
-workspace without a local network server. Use OpenAI or Anthropic; API keys are
-kept in the system credential store.
+workspace without a local network server. Create **AI Chat** from the plus menu;
+chats share categories, Favorites, dragging and Trash with notes and RSS. OpenAI
+streams replies and can execute application tools; Anthropic currently supports
+model catalogs. Provider adapters can be added independently of the chat engine.
+API keys stay in the system credential store. Chats are saved locally with the
+workspace, and each request is linked to the global AI journal. See the
+[chat guide](docs/user-guide.md#ai-chats) and [storage details](docs/storage.md).
 
 <details>
 <summary><strong>More tools for the work around your writing</strong></summary>

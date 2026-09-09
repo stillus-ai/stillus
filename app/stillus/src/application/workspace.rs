@@ -311,6 +311,41 @@ impl Workspace {
         result
     }
 
+    pub fn non_document_items(&self) -> Vec<stillus_engine::ItemSummary> {
+        self.core.non_document_items()
+    }
+    pub fn selected_engine_item(&self) -> Option<&(EngineId, ItemId)> {
+        self.core.selected_engine_item()
+    }
+    pub(super) fn accept_engine_items(
+        &mut self,
+        engine: &EngineId,
+        items: Vec<stillus_engine::ItemSummary>,
+    ) {
+        self.core.accept_engine_items(engine, items)
+    }
+    pub(super) fn open_engine_item(
+        &mut self,
+        engine: &EngineId,
+        id: &ItemId,
+    ) -> Result<(), CoreError> {
+        if self.operations.writing() {
+            return Err(CoreError::UnsavedChanges);
+        }
+        self.core.open_engine_item(engine, id)
+    }
+    pub(super) fn update_engine_metadata(
+        &mut self,
+        engine: &EngineId,
+        id: &ItemId,
+        version: &str,
+        patch: stillus_engine::CommonMetadataPatch,
+    ) -> Result<(), CoreError> {
+        if self.operations.writing() {
+            return Err(CoreError::UnsavedChanges);
+        }
+        self.core.update_engine_metadata(engine, id, version, patch)
+    }
     pub fn selected_rss(&self) -> Option<&ItemId> {
         self.core.selected_rss()
     }

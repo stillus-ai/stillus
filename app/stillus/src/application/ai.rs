@@ -58,7 +58,7 @@ pub(crate) fn start(
             expected,
             action,
             &cancellation,
-            &stillus_ai::HttpsCatalogTransport,
+            &stillus_ai::provider::RegistryCatalogTransport,
             &stillus_platform::credentials::SystemCredentials,
         );
         let _ = sender.send(result);
@@ -95,7 +95,7 @@ pub(crate) fn execute(
         Action::Connect(value) => {
             let (provider, key) = ApiKey::parse(value).map_err(Failure::Api)?;
             let models = transport
-                .list_recorded(provider, &key, journal.as_ref(), &operation)
+                .list_recorded(provider.clone(), &key, journal.as_ref(), &operation)
                 .map_err(Failure::Api)?;
             if cancelled.load(Ordering::Acquire) {
                 return Err(Failure::Cancelled);
@@ -127,7 +127,7 @@ pub(crate) fn execute(
                 return Err(Failure::Api(AiError::KeyFormat));
             }
             connection.models = transport
-                .list_recorded(provider, &key, journal.as_ref(), &operation)
+                .list_recorded(provider.clone(), &key, journal.as_ref(), &operation)
                 .map_err(Failure::Api)?;
             connection.checked_at = now();
         }
@@ -235,6 +235,7 @@ pub(crate) mod fixtures {
                 std::thread::sleep(std::time::Duration::from_millis(600));
             }
             Ok(match provider {
+                AiProvider::Other(_) => return Err(AiError::Unsupported),
                 AiProvider::OpenAi => vec![
                     AiModel {
                         id: "gpt-5.6-luna".into(),

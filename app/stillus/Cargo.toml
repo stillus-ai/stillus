@@ -10,6 +10,7 @@ authors.workspace = true
 test-utils = ["stillus-core/test-utils"]
 
 [dependencies]
+stillus-chat = { version = "0.1.0", path = "../../crates/stillus-chat" }
 stillus-engine = { path = "../../crates/stillus-engine" }
 stillus-security = { path = "../../crates/stillus-security" }
 stillus-storage = { path = "../../crates/stillus-storage" }

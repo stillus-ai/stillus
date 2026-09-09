@@ -22,7 +22,8 @@ pub trait CatalogTransport: Send + Sync {
         journal: &dyn RequestJournal,
         operation: &str,
     ) -> Result<Vec<AiModel>, AiError> {
-        let mut record = journal.begin(RequestRecord::catalog(provider, operation, None))?;
+        let mut record =
+            journal.begin(RequestRecord::catalog(provider.clone(), operation, None))?;
         let result = self.list(provider, key);
         record.duration_ms = Some(now_ms().saturating_sub(record.started_ms));
         match &result {
@@ -58,7 +59,7 @@ impl CatalogTransport for HttpsCatalogTransport {
         journal: &dyn RequestJournal,
         operation: &str,
     ) -> Result<Vec<AiModel>, AiError> {
-        if crate::detect_provider(key.expose()) != Some(provider) {
+        if crate::detect_provider(key.expose()) != Some(provider.clone()) {
             return Err(AiError::KeyFormat);
         }
         let config = ureq::Agent::config_builder()
@@ -70,11 +71,12 @@ impl CatalogTransport for HttpsCatalogTransport {
             .build();
         let agent = ureq::Agent::new_with_config(config);
         let start = Instant::now();
-        collect(provider, |cursor| {
+        collect(provider.clone(), |cursor| {
             if start.elapsed() > Duration::from_secs(30) {
                 return Err(AiError::Network);
             }
             let mut request = match provider {
+                AiProvider::Other(_) => return Err(AiError::Unsupported),
                 AiProvider::OpenAi => agent
                     .get("https://api.openai.com/v1/models")
                     .header("Authorization", format!("Bearer {}", key.expose())),
@@ -94,7 +96,7 @@ impl CatalogTransport for HttpsCatalogTransport {
             request = request.header("Accept", "application/json");
             recorded_page(
                 journal,
-                RequestRecord::catalog(provider, operation, cursor),
+                RequestRecord::catalog(provider.clone(), operation, cursor),
                 key,
                 |record| {
                     let mut response = request.call().map_err(|_| AiError::Network)?;
@@ -181,7 +183,7 @@ fn collect(
             return Err(AiError::Response);
         }
         for raw in page.data {
-            if let Some(model) = models::model(provider, &raw)
+            if let Some(model) = models::model(provider.clone(), &raw)
                 && ids.insert(model.id.clone())
             {
                 result.push(model);

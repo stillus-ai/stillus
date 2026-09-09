@@ -46,7 +46,7 @@ pub(crate) struct Summary {
     pub corrupt: bool,
 }
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Default)]
 pub(crate) struct Filter {
     pub provider: Option<AiProvider>,
     pub status: Option<RequestStatus>,
@@ -244,7 +244,8 @@ impl FileJournal {
             };
             if filter
                 .provider
-                .is_some_and(|provider| summary.provider != Some(provider))
+                .as_ref()
+                .is_some_and(|provider| summary.provider.as_ref() != Some(provider))
                 || filter.status.is_some_and(|status| summary.status != status)
             {
                 continue;

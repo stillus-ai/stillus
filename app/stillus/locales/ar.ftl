@@ -393,3 +393,34 @@ AiJournalNewest = الأحدث
 AiJournalOlder = الأقدم
 AiJournalPreviousPart = الجزء السابق
 AiJournalNextPart = الجزء التالي
+
+ChatMenu = دردشة الذكاء الاصطناعي
+ChatNew = دردشة جديدة
+ChatSend = إرسال
+ChatStop = إيقاف
+ChatContinue = متابعة
+ChatPlaceholder = اكتب رسالة…
+ChatLoadEarlier = تحميل الرسائل السابقة
+ChatRunning = جارٍ التنفيذ…
+ChatQueued = في قائمة الانتظار
+ChatPaused = متوقف مؤقتًا
+ChatInterrupted = تمت المقاطعة
+ChatCompleted = مكتمل
+ChatFailed = فشل
+ChatUser = أنت
+ChatAssistant = المساعد
+ChatTool = إجراء
+ChatUnknown = النتيجة غير معروفة
+ChatConnect = فتح إعدادات الذكاء الاصطناعي
+ChatAlias = الاسم البديل للنموذج
+ChatRename = إعادة تسمية الدردشة
+ChatTrash = نقل الدردشة إلى المهملات
+ChatRestore = استعادة الدردشة
+ChatPin = تثبيت الدردشة
+ChatUnpin = إلغاء تثبيت الدردشة
+ChatCategories = فئات الدردشة
+ChatEmpty = ابدأ محادثة. يتم حفظ السجل في مساحة العمل هذه.
+
+ChatAcknowledge = المتابعة دون تكرار هذا الإجراء
+
+ChatUnsupported = هذا المزوّد لا يدعم إنشاء ردود الدردشة بعد.

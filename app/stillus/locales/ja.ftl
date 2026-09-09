@@ -388,3 +388,34 @@ AiJournalNewest = 最新
 AiJournalOlder = 以前
 AiJournalPreviousPart = 前の部分
 AiJournalNextPart = 次の部分
+
+ChatMenu = AIチャット
+ChatNew = 新しいチャット
+ChatSend = 送信
+ChatStop = 停止
+ChatContinue = 続行
+ChatPlaceholder = メッセージを入力…
+ChatLoadEarlier = 以前のメッセージを読み込む
+ChatRunning = 実行中…
+ChatQueued = 待機中
+ChatPaused = 一時停止
+ChatInterrupted = 中断
+ChatCompleted = 完了
+ChatFailed = 失敗
+ChatUser = あなた
+ChatAssistant = アシスタント
+ChatTool = 操作
+ChatUnknown = 結果不明
+ChatConnect = AI設定を開く
+ChatAlias = モデルエイリアス
+ChatRename = チャット名を変更
+ChatTrash = チャットをゴミ箱に移動
+ChatRestore = チャットを復元
+ChatPin = チャットを固定
+ChatUnpin = チャットの固定を解除
+ChatCategories = チャットのカテゴリ
+ChatEmpty = 会話を始めましょう。履歴はこのワークスペースに保存されます。
+
+ChatAcknowledge = この操作を繰り返さずに続行
+
+ChatUnsupported = このプロバイダーはまだチャットの応答生成に対応していません。

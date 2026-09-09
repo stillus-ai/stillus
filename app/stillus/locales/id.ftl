@@ -388,3 +388,34 @@ AiJournalNewest = Terbaru
 AiJournalOlder = Lebih lama
 AiJournalPreviousPart = Bagian sebelumnya
 AiJournalNextPart = Bagian berikutnya
+
+ChatMenu = Obrolan AI
+ChatNew = Obrolan baru
+ChatSend = Kirim
+ChatStop = Hentikan
+ChatContinue = Lanjutkan
+ChatPlaceholder = Tulis pesan…
+ChatLoadEarlier = Muat pesan sebelumnya
+ChatRunning = Sedang bekerja…
+ChatQueued = Dalam antrean
+ChatPaused = Dijeda
+ChatInterrupted = Terputus
+ChatCompleted = Selesai
+ChatFailed = Gagal
+ChatUser = Anda
+ChatAssistant = Asisten
+ChatTool = Tindakan
+ChatUnknown = Hasil tidak diketahui
+ChatConnect = Buka pengaturan AI
+ChatAlias = Alias model
+ChatRename = Ganti nama obrolan
+ChatTrash = Pindahkan obrolan ke sampah
+ChatRestore = Pulihkan obrolan
+ChatPin = Sematkan obrolan
+ChatUnpin = Lepas sematan obrolan
+ChatCategories = Kategori obrolan
+ChatEmpty = Mulai percakapan. Riwayat disimpan di ruang kerja ini.
+
+ChatAcknowledge = Lanjutkan tanpa mengulangi tindakan ini
+
+ChatUnsupported = Penyedia ini belum mendukung pembuatan balasan chat.

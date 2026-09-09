@@ -389,3 +389,34 @@ AiJournalNewest = নতুন
 AiJournalOlder = পুরোনো
 AiJournalPreviousPart = আগের অংশ
 AiJournalNextPart = পরের অংশ
+
+ChatMenu = AI চ্যাট
+ChatNew = নতুন চ্যাট
+ChatSend = পাঠান
+ChatStop = থামান
+ChatContinue = চালিয়ে যান
+ChatPlaceholder = একটি বার্তা লিখুন…
+ChatLoadEarlier = আগের বার্তা লোড করুন
+ChatRunning = কাজ চলছে…
+ChatQueued = সারিতে আছে
+ChatPaused = বিরতিতে
+ChatInterrupted = বাধাপ্রাপ্ত
+ChatCompleted = সম্পূর্ণ
+ChatFailed = ব্যর্থ
+ChatUser = আপনি
+ChatAssistant = সহকারী
+ChatTool = কাজ
+ChatUnknown = ফলাফল অজানা
+ChatConnect = AI সেটিংস খুলুন
+ChatAlias = মডেলের উপনাম
+ChatRename = চ্যাটের নাম বদলান
+ChatTrash = চ্যাট ট্র্যাশে সরান
+ChatRestore = চ্যাট পুনরুদ্ধার করুন
+ChatPin = চ্যাট পিন করুন
+ChatUnpin = চ্যাট আনপিন করুন
+ChatCategories = চ্যাটের বিভাগ
+ChatEmpty = কথোপকথন শুরু করুন। ইতিহাস এই কর্মক্ষেত্রে সংরক্ষিত হয়।
+
+ChatAcknowledge = এই কাজটি পুনরাবৃত্তি না করে চালিয়ে যান
+
+ChatUnsupported = এই প্রদানকারী এখনও চ্যাটের উত্তর তৈরি করতে পারে না।

@@ -48,6 +48,12 @@ pub struct RequestRecord {
     pub output_tokens: Option<u64>,
     pub tool_call: Option<String>,
     pub content_policy: ContentPolicy,
+    #[serde(default)]
+    pub chat: Option<String>,
+    #[serde(default)]
+    pub run: Option<String>,
+    #[serde(default)]
+    pub step: Option<u32>,
 }
 
 impl RequestRecord {
@@ -57,15 +63,16 @@ impl RequestRecord {
             id: String::new(),
             operation: operation.into(),
             started_ms: now_ms(),
-            provider,
+            provider: provider.clone(),
             purpose: "models/list".into(),
             endpoint: match provider {
+                AiProvider::Other(_) => "",
                 AiProvider::OpenAi => "https://api.openai.com/v1/models",
                 AiProvider::Anthropic => "https://api.anthropic.com/v1/models",
             }
             .into(),
             parameters: match provider {
-                AiProvider::OpenAi => serde_json::json!({}),
+                AiProvider::Other(_) | AiProvider::OpenAi => serde_json::json!({}),
                 AiProvider::Anthropic => serde_json::json!({"limit": 1000, "after_id": cursor}),
             },
             request: None,
@@ -79,6 +86,9 @@ impl RequestRecord {
             output_tokens: None,
             tool_call: None,
             content_policy: ContentPolicy::Public,
+            chat: None,
+            run: None,
+            step: None,
         }
     }
 

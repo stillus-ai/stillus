@@ -395,3 +395,34 @@ AiJournalNewest = Новые
 AiJournalOlder = Более ранние
 AiJournalPreviousPart = Предыдущая часть
 AiJournalNextPart = Следующая часть
+
+ChatMenu = ИИ-чат
+ChatNew = Новый чат
+ChatSend = Отправить
+ChatStop = Остановить
+ChatContinue = Продолжить
+ChatPlaceholder = Напишите сообщение…
+ChatLoadEarlier = Загрузить предыдущие сообщения
+ChatRunning = Выполняется…
+ChatQueued = В очереди
+ChatPaused = Приостановлено
+ChatInterrupted = Прервано
+ChatCompleted = Завершено
+ChatFailed = Ошибка
+ChatUser = Вы
+ChatAssistant = Ассистент
+ChatTool = Действие
+ChatUnknown = Исход неизвестен
+ChatConnect = Открыть настройки ИИ
+ChatAlias = Алиас модели
+ChatRename = Переименовать чат
+ChatTrash = Переместить чат в корзину
+ChatRestore = Восстановить чат
+ChatPin = Закрепить чат
+ChatUnpin = Открепить чат
+ChatCategories = Категории чата
+ChatEmpty = Начните разговор. История сохраняется в этом workspace.
+
+ChatAcknowledge = Продолжить без повторения этого действия
+
+ChatUnsupported = Этот провайдер пока не поддерживает генерацию ответов в чате.

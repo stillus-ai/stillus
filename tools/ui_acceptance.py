@@ -8247,7 +8247,149 @@ def ai_journal_scenario(driver: WindowDriver, workspace: Path) -> None:
     if {path: path.read_bytes() for path in original} != original:
         raise AcceptanceFailure("journal changed workspace notes")
 
+def chat_scenario(driver: WindowDriver, workspace: Path) -> None:
+    """Native chat creation, composer persistence and provider streaming without network."""
+    original = {path: path.read_bytes() for path in (workspace / "notes").glob("*.md")}
+    root = workspace / ".stillus" / "engines" / "ai" / "chat"
+    fixture = {"STILLUS_TEST_AI": "1"}
+    driver.start_app(workspace, "chat", environment_overrides=fixture)
+    driver.click("create_menu")
+    driver.click_point(116, 165)
+    wait_until("a chat created through the plus menu", lambda: root.exists() and len(list(root.glob("*/metadata.json"))) == 1)
+    chat = next(root.glob("*/metadata.json")).parent
+    driver.wait_for_stable_frame("empty chat", crop=(260, 40, 960, 500), stable_for=0.2)
+    shutil.copyfile(driver.capture("chat-empty"), Path("/workspace/dist/chat-empty.png"))
+    driver.click_point(480, 670)
+    driver.type_text("First line")
+    driver.key("shift+Return")
+    driver.type_text("second line")
+    wait_until("multiline chat draft persisted", lambda: json.loads((chat / "draft.json").read_text())["data"]["text"] == "First line\nsecond line", timeout=10)
+    driver.close_app()
+    driver.start_app(workspace, "chat-restored", environment_overrides=fixture)
+    driver.wait_for_stable_frame("restored chat composer", crop=(260, 540, 960, 60), stable_for=0.2)
+    state = json.loads((workspace / ".stillus" / "settings.json").read_text())
+    if state.get("selected_chat") != chat.name:
+        raise AcceptanceFailure("chat selection was not restored")
+    driver.click("settings")
+    wait_for_ai_controls(driver)
+    driver.click_point(*AI_SIDEBAR_ITEM)
+    wait_for_ai_controls(driver)
+    luminances = crop_luminances(driver.capture("chat-ai-connect"), (AI_CONTENT_LEFT, 0, 1, SCREEN_HEIGHT))
+    rows = {row for (_x, row), luminance in luminances.items() if luminance <= AI_CARD_BORDER_LUMINANCE}
+    cards = [(start - AI_CARD_CORNER, end + AI_CARD_CORNER) for start, end in column_runs(rows, merge_gap=0) if end-start >= AI_CARD_MIN_HEIGHT]
+    if not cards:
+        raise AcceptanceFailure("AI connection card is missing")
+    before_key = driver.capture("chat-before-key")
+    set_clipboard_text(driver.environment, "sk-proj-abcdefghijklmnopqrstuv")
+    driver.click_point(941, cards[0][0] + 62)
+    driver.wait_for_visual_change("pasted fixture credential", before_key,
+                                  crop=(299, 200, 600, 43), timeout=10)
+    wait_for_ai_controls(driver)
+    # Provider detection inserts a label and moves the Connect action down.
+    actions = shaded_row_runs(driver.capture("chat-connect-action"),
+                              x=AI_PRIMARY_PROBE_X, y=0, height=SCREEN_HEIGHT,
+                              max_luminance=AI_ACCENT_LUMINANCE)
+    actions = [(start, end) for start, end in actions if end - start >= 20]
+    if len(actions) != 1:
+        raise AcceptanceFailure("chat provider Connect action is not enabled")
+    driver.click_point(AI_PRIMARY_PROBE_X, sum(actions[0]) // 2)
+    config = driver.home / ".stillus.cfg"
+    wait_until("fixture provider connected", lambda: json.loads(config.read_text()).get("ai", {}).get("connection") is not None)
+    if json.loads((chat / "draft.json").read_text())["data"]["text"] != "First line\nsecond line":
+        raise AcceptanceFailure("AI settings input reached the hidden chat composer")
+    driver.click("settings_back")
+    driver.wait_for_stable_frame("chat after connecting", crop=(260, 540, 960, 60), stable_for=0.2)
+    driver.click_point(480, 670)
+    driver.key("Return")
+    wait_until("chat generation completed", lambda: (chat / "run.json").exists() and json.loads((chat / "run.json").read_text())["data"]["status"] == "completed", timeout=15)
+    driver.wait_for_stable_frame("native streamed reply", crop=(260, 70, 960, 460), stable_for=0.2)
+    response_frame = driver.capture("chat-response")
+    shutil.copyfile(response_frame, Path("/workspace/dist/chat-preview.png"))
+    copy_rows = shaded_row_runs(response_frame, x=1219, y=100, height=450,
+                                max_luminance=AI_CARD_BORDER_LUMINANCE)
+    if len([(start, end) for start, end in copy_rows if end - start >= 20]) < 2:
+        raise AcceptanceFailure("chat exchanges are not arranged as a vertical history")
+    history = [json.loads(path.read_text())["data"] for path in sorted((chat / "messages").glob("*.json"))]
+    if [message["role"] for message in history] != ["user", "assistant"]:
+        raise AcceptanceFailure("chat did not preserve the linear exchange")
+    if "Ответ сохранён" not in history[-1]["text"]:
+        raise AcceptanceFailure("fixture response is missing from chat history")
+    if json.loads((chat / "metadata.json").read_text())["data"]["common"]["title"] != "First line":
+        raise AcceptanceFailure("first message did not set the chat title")
+    journal = driver.home / ".stillus" / "ai" / "journal"
+    if not any(json.loads(path.read_text()).get("chat") == chat.name for path in journal.glob("*.json")):
+        raise AcceptanceFailure("generation is not linked to the journal")
+    # The chat opens its request directly in the existing journal page.
+    driver.click_point(946, 36)
+    driver.wait_for_stable_frame("chat request journal", crop=(280, 100, 850, 300), stable_for=0.2)
+    shutil.copyfile(driver.capture("chat-journal"), Path("/workspace/dist/chat-journal.png"))
+    driver.click_point(342, 45)
+
+    def create_and_send(text: str) -> Path:
+        before = set(root.glob("*/metadata.json"))
+        driver.click("create_menu")
+        driver.click_point(116, 165)
+        wait_until("another chat created", lambda: len(set(root.glob("*/metadata.json")) - before) == 1)
+        target = next(iter(set(root.glob("*/metadata.json")) - before)).parent
+        driver.wait_for_stable_frame("new chat header", crop=(276, 24, 530, 28), stable_for=0.2)
+        driver.click_point(480, 670)
+        driver.type_text(text)
+        driver.key("Return")
+        wait_until("chat task started", lambda: (target / "run.json").exists() and json.loads((target / "run.json").read_text())["data"]["status"] == "running", timeout=10)
+        return target
+
+    first = create_and_send("slow first")
+    second = create_and_send("slow second")
+    if json.loads((first / "run.json").read_text())["data"]["status"] != "running":
+        raise AcceptanceFailure("two native chat tasks did not overlap")
+    driver.click("settings")
+    for target in (first, second):
+        wait_until("background chat completed", lambda target=target: json.loads((target / "run.json").read_text())["data"]["status"] == "completed", timeout=25)
+        if not json.loads((target / "run.json").read_text())["data"]["unread"]:
+            raise AcceptanceFailure("a hidden chat response was incorrectly marked read")
+    driver.click("settings_back")
+    wait_until("visible response marked read", lambda: not json.loads((second / "run.json").read_text())["data"]["unread"], timeout=10)
+    stopped = create_and_send("slow stopped")
+    before_trash = driver.capture("chat-before-trash")
+    driver.click_point(1204, 36)
+    wait_until("running chat stopped before trash", lambda: json.loads((stopped / "run.json").read_text())["data"]["status"] == "stopped" and json.loads((stopped / "metadata.json").read_text())["data"]["common"]["deleted"], timeout=15)
+    conversation = {path.name: path.read_bytes() for path in (stopped / "messages").glob("*.json")}
+    driver.wait_for_visual_change("chat Restore action", before_trash,
+                                  crop=(1188, 20, 32, 32), timeout=10)
+    driver.wait_for_stable_frame("chat Restore action", crop=(1188, 20, 32, 32), stable_for=0.2)
+    driver.click_point(1204, 36)
+    wait_until("chat restored from trash", lambda: not json.loads((stopped / "metadata.json").read_text())["data"]["common"]["deleted"])
+    if {path.name: path.read_bytes() for path in (stopped / "messages").glob("*.json")} != conversation:
+        raise AcceptanceFailure("restoring a chat rewrote its conversation")
+    driver.wait_for_stable_frame("restored chat toolbar", crop=(1000, 20, 230, 34), stable_for=0.2)
+    driver.click_point(1052, 36)
+    driver.click_point(520, 80)
+    driver.key("ctrl+a")
+    driver.type_text("Organized chat")
+    driver.key("Return")
+    wait_until("chat renamed", lambda: json.loads((stopped / "metadata.json").read_text())["data"]["common"]["title"] == "Organized chat")
+    driver.click_point(1090, 36)
+    driver.click_point(520, 80)
+    driver.key("ctrl+a")
+    driver.type_text("Reading")
+    driver.key("Return")
+    wait_until("chat categorized", lambda: json.loads((stopped / "metadata.json").read_text())["data"]["common"]["categories"] == ["Reading"])
+    driver.click_point(1128, 36)
+    wait_until("chat pinned", lambda: json.loads((stopped / "metadata.json").read_text())["data"]["common"]["pinned"])
+    driver.click_point(1166, 36)
+    wait_until("chat favorited", lambda: json.loads((stopped / "metadata.json").read_text())["data"]["common"]["favorited"])
+    if json.loads((stopped / "metadata.json").read_text())["data"]["automatic_title"]:
+        raise AcceptanceFailure("manual chat title remained automatic")
+    if {path.name: path.read_bytes() for path in (stopped / "messages").glob("*.json")} != conversation:
+        raise AcceptanceFailure("organizing a chat rewrote its conversation")
+    shutil.copyfile(driver.capture("chat-background"), Path("/workspace/dist/chat-background.png"))
+    driver.close_app()
+    if {path: path.read_bytes() for path in original} != original:
+        raise AcceptanceFailure("ordinary chat modified workspace notes")
+
+
 SCENARIOS: dict[str, Callable[[WindowDriver, Path], None]] = {
+    "chat": chat_scenario,
     "ai": ai_settings_scenario,
     "ai_journal": ai_journal_scenario,
     "updates": updates_scenario,

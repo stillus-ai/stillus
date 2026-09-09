@@ -56,6 +56,7 @@ pub(crate) enum TrustedCommand {
 }
 
 pub(crate) enum Command {
+    Chat(super::chat::Command),
     Notes(Action),
     Rss(super::rss::Addressed),
     ExternalOpen {
@@ -129,6 +130,7 @@ pub(crate) enum Command {
 }
 
 pub(crate) enum Query {
+    Chat(super::chat::Query),
     Workspace,
     Settings,
     Notes {
@@ -183,6 +185,10 @@ pub(crate) struct AiSnapshot {
 #[derive(Clone, Serialize)]
 #[serde(untagged)]
 pub(crate) enum QueryResult {
+    Chat(super::chat::Output),
+    Pending {
+        operation: String,
+    },
     Action(ActionResult),
     Settings {
         version: String,
@@ -316,6 +322,7 @@ impl Application {
         }
         let now = self.now_ms();
         let result = match command {
+            Command::Chat(command) => return self.chat_command(caller, command),
             Command::Rss(action) => {
                 let (reply, receiver) = std::sync::mpsc::sync_channel(1);
                 self.workspace
@@ -564,13 +571,14 @@ impl Application {
                 let ordered = items
                     .into_iter()
                     .map(|id| {
-                        if let Some(subscription) = workspace
-                            .rss_subscriptions()
+                        if let Some(item) = workspace
+                            .non_document_items()
                             .iter()
-                            .find(|item| item.subscription.id.as_str() == id)
+                            .find(|item| item.item_id.as_str() == id)
                         {
-                            Ok(stillus_core::CatalogOrderItem::Rss(
-                                subscription.subscription.id.clone(),
+                            Ok(stillus_core::CatalogOrderItem::Engine(
+                                item.engine_id.clone(),
+                                item.item_id.clone(),
                             ))
                         } else {
                             workspace
@@ -681,6 +689,7 @@ impl Application {
     ) -> Result<QueryResult, ActionError> {
         self.authorize(caller)?;
         match query {
+            Query::Chat(query) => return self.chat_query(caller, query),
             Query::Settings => {
                 let settings = self
                     .global
@@ -840,7 +849,7 @@ impl Application {
                     provider: settings
                         .connection
                         .as_ref()
-                        .map(|connection| connection.provider),
+                        .map(|connection| connection.provider.clone()),
                     models: settings
                         .connection
                         .as_ref()
@@ -890,10 +899,11 @@ impl Application {
                 (sort.direction as u8).hash(&mut hash);
             }
         }
-        for item in workspace.rss_subscriptions() {
-            item.subscription.id.hash(&mut hash);
-            item.subscription.revision.hash(&mut hash);
-            item.subscription.order.hash(&mut hash);
+        for item in workspace.non_document_items() {
+            item.engine_id.hash(&mut hash);
+            item.item_id.hash(&mut hash);
+            item.metadata_version.hash(&mut hash);
+            item.metadata.order.hash(&mut hash);
         }
         Ok(format!(
             "catalogue/{:x}/{:x}",

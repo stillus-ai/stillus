@@ -16,6 +16,7 @@ pub(crate) fn model(provider: AiProvider, raw: &Value) -> Option<AiModel> {
     }
     let (name, efforts) = match provider {
         AiProvider::OpenAi => openai(id)?,
+        AiProvider::Other(_) => return None,
         AiProvider::Anthropic => {
             if !id.starts_with("claude-") {
                 return None;

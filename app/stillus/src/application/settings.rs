@@ -307,6 +307,8 @@ pub(crate) struct UiSettings {
     pub(crate) selected_external: Option<String>,
     #[serde(default)]
     pub(crate) selected_rss: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) selected_chat: Option<String>,
 }
 
 impl Default for UiSettings {
@@ -319,6 +321,7 @@ impl Default for UiSettings {
             external_files: Vec::new(),
             selected_external: None,
             selected_rss: None,
+            selected_chat: None,
         }
     }
 }
@@ -1015,6 +1018,7 @@ mod tests {
             }],
             selected_external: Some(external_path.display().to_string()),
             selected_rss: Some("feeds/0123456789abcdef".to_owned()),
+            selected_chat: None,
         };
         assert!(store.stage(settings.clone()));
         assert!(store.has_pending());

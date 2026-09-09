@@ -121,6 +121,7 @@ pub(crate) fn is_current_search_generation(current: u64, incoming: u64) -> bool 
 }
 
 pub(crate) struct Application {
+    pub(super) chats: Option<super::chat::Coordinator>,
     pub(crate) rss_session: u64,
     pub(crate) workspace: WorkspaceSlot,
     pub(crate) error: Option<UiText>,
@@ -261,6 +262,7 @@ impl Application {
             expanded_rss_entry: None,
             rss_refreshing: BTreeSet::new(),
             selected_rss_entry: None,
+            chats: None,
         }
     }
 
@@ -436,6 +438,7 @@ impl Application {
                     expanded_rss_entry: None,
                     rss_refreshing: BTreeSet::new(),
                     selected_rss_entry: None,
+                    chats: None,
                 }
             }
             Err(error) => Self {
@@ -498,6 +501,7 @@ impl Application {
                 expanded_rss_entry: None,
                 rss_refreshing: BTreeSet::new(),
                 selected_rss_entry: None,
+                chats: None,
             },
         }
     }
@@ -1705,6 +1709,13 @@ impl Application {
         scope: &SidebarFilter,
         ordered: &[CatalogOrderItem],
     ) -> Option<bool> {
+        if self
+            .workspace
+            .as_ref()
+            .is_some_and(|w| w.operations.writing())
+        {
+            return None;
+        }
         let order_key = sidebar_note_order_key(scope)?;
         let result = self
             .workspace
@@ -1713,6 +1724,7 @@ impl Application {
             .and_then(|workspace| workspace.set_catalog_order(order_key, ordered));
         match result {
             Ok(changed) => {
+                self.sync_chat_catalog();
                 self.error = None;
                 Some(changed)
             }
@@ -1726,6 +1738,13 @@ impl Application {
     }
 
     pub(crate) fn clear_sidebar_note_order(&mut self, scope: &SidebarFilter) -> Option<bool> {
+        if self
+            .workspace
+            .as_ref()
+            .is_some_and(|w| w.operations.writing())
+        {
+            return None;
+        }
         let order_key = sidebar_note_order_key(scope)?;
         let result = self
             .workspace
@@ -1734,6 +1753,7 @@ impl Application {
             .and_then(|workspace| workspace.clear_catalog_order(order_key));
         match result {
             Ok(changed) => {
+                self.sync_chat_catalog();
                 self.error = None;
                 Some(changed)
             }
@@ -2625,6 +2645,7 @@ impl Application {
             }
         }
         changed |= self.poll_api();
+        changed |= self.poll_chats();
         changed |= self.retry_pending_security_action();
         changed |= self.retry_pending_password_change();
         changed |= self.retry_pending_note_creation();
@@ -2800,6 +2821,7 @@ impl Application {
         changed |= self.poll_rss();
         changed |= self.poll_persistence();
         changed |= self.poll_api();
+        changed |= self.poll_chats();
         let now = self.now_ms();
         if now >= self.external_deadline {
             self.external_deadline = now.saturating_add(1000);
@@ -2827,6 +2849,7 @@ impl Application {
     }
 
     pub(crate) fn shutdown(&mut self) -> Result<(), String> {
+        self.stop_chats();
         if let Some(task) = self.workspace_loader.take() {
             task.gate.store(2, std::sync::atomic::Ordering::Release);
             drop(task.receiver);
@@ -2836,7 +2859,8 @@ impl Application {
         }
         // Writers already past their cancellation point must finish before exit.
         // Keep consuming security/search completions so bounded queues cannot stall them.
-        while self.save_worker_active
+        while self.chats_busy()
+            || self.save_worker_active
             || self.secure_worker_active
             || self.search_security_operation.is_some()
             || self
@@ -2846,6 +2870,10 @@ impl Application {
         {
             self.poll();
             thread::sleep(std::time::Duration::from_millis(1));
+        }
+        if self.chat_unsaved_draft() {
+            self.resume_chat_coordinator();
+            return Err("chat draft could not be saved".into());
         }
         if let Some(worker) = self.search_worker.take() {
             search::shutdown(&self.search_sender, &self.search_receiver, worker)
@@ -2937,6 +2965,12 @@ pub(crate) fn workspace_switch_blocker(model: &Application) -> Option<WorkspaceS
     {
         return Some(WorkspaceSwitchBlocker::Persistence);
     }
+    workspace_content_switch_blocker(model)
+}
+fn workspace_content_switch_blocker(model: &Application) -> Option<WorkspaceSwitchBlocker> {
+    if model.chat_unsaved_draft() {
+        return Some(WorkspaceSwitchBlocker::SaveFailure);
+    }
     if model.save_worker_active
         || model.pending_note_path.is_some()
         || model.pending_external_target.is_some()
@@ -3005,6 +3039,7 @@ pub(crate) fn prepare_workspace_switch(path: &Path) -> Result<PreparedWorkspaceS
         selected_external,
         settings.selected_rss.as_deref(),
     );
+    model.restore_chat_selection(settings.selected_chat.as_deref());
     if model.workspace.is_none() {
         let error = model
             .error
@@ -3249,7 +3284,12 @@ impl Application {
                 WorkspaceSwitchBlocker::Persistence,
             ));
         }
-        if let Some(blocker) = workspace_switch_blocker(self) {
+        if self.chats_busy() {
+            if let Some(blocker) = workspace_content_switch_blocker(self) {
+                return Err(WorkspaceLoadError::blocked(blocker));
+            }
+            self.stop_chats();
+        } else if let Some(blocker) = workspace_switch_blocker(self) {
             return Err(WorkspaceLoadError::blocked(blocker));
         }
         if !path.is_absolute() {
@@ -3362,6 +3402,9 @@ impl Application {
         self.workspace_loaded.take()
     }
     fn poll_workspace_loader(&mut self) -> bool {
+        if self.chats_busy() {
+            return false;
+        }
         let completion =
             self.workspace_loader
                 .as_ref()
@@ -3430,6 +3473,7 @@ impl Application {
             };
             self.unloaded_operation = Some((task.id, status));
         }
+        self.resume_chat_coordinator();
         self.workspace_loaded = Some(result.map_err(|error| error.message));
         true
     }

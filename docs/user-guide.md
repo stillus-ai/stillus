@@ -208,3 +208,35 @@ The password can be changed under Settings → Encryption.
 Changing the password does not re-encrypt existing backup history. Keep the
 previous password if you need to read older encrypted backups. See
 [Storage and security](storage.md) for the recovery and backup details.
+
+## AI chats
+
+Choose **+ → AI Chat** to create a conversation in the current category or
+Favorites. You can create and read chats before connecting a provider. Use the
+chat's **Open AI settings** button to connect OpenAI; Anthropic model catalogs
+remain available, with chat generation planned for a later adapter.
+
+Choose a model alias, type a message and press Enter (Shift+Enter inserts a line
+break). Drafts are saved locally. Each chat keeps its own alias and linear history;
+sending captures the current model, so editing aliases affects later tasks. You
+can edit the next draft while a reply is running. Stop prevents further requests
+and actions; Continue resumes tasks paused at their request/tool limit.
+
+Chats share the note/RSS sidebar controls for renaming, categories, pinning,
+Favorites, sorting, dragging, Trash and restoration. The first message supplies
+a title of up to 64 characters, unless you renamed the chat. A running indicator
+and unread badge help track background replies. Opening and viewing the latest
+reply marks it read. Up to two tasks run concurrently, with six waiting.
+
+Replies render Markdown and copyable code blocks. Expand an action card to see its
+arguments and result, and open its linked request journal record. The assistant
+can use permitted application actions; existing confirmations and protected-note
+restrictions still apply. A save operation is awaited before its result is given
+to the model. Unknown outcomes after a crash require your decision and are never
+repeated automatically.
+
+Chats are stored unencrypted with the workspace; the global journal has independent
+retention. See [storage documentation](storage.md). If journal persistence fails
+after a reply, retry saving from the journal and then Continue. This does not
+resend the completed request. Full conversation remains on disk when older
+context is summarized for a long task.

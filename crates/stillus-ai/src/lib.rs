@@ -11,22 +11,45 @@ use zeroize::Zeroizing;
 
 pub mod journal;
 mod models;
+pub mod openai;
+pub mod provider;
 mod transport;
 pub use transport::{CatalogTransport, HttpsCatalogTransport};
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub enum AiProvider {
     OpenAi,
     Anthropic,
+    Other(String),
 }
-
 impl AiProvider {
-    pub fn name(self) -> &'static str {
+    pub fn id(&self) -> &str {
         match self {
-            Self::OpenAi => "OpenAI",
-            Self::Anthropic => "Anthropic",
+            Self::OpenAi => "openai",
+            Self::Anthropic => "anthropic",
+            Self::Other(id) => id,
         }
+    }
+    pub fn name(&self) -> String {
+        provider::ProviderRegistry::standard()
+            .get(self)
+            .map(|engine| engine.name().to_owned())
+            .unwrap_or_else(|| self.id().to_owned())
+    }
+}
+impl Serialize for AiProvider {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(self.id())
+    }
+}
+impl<'de> Deserialize<'de> for AiProvider {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let id = String::deserialize(d)?;
+        Ok(match id.as_str() {
+            "openai" => Self::OpenAi,
+            "anthropic" => Self::Anthropic,
+            _ => Self::Other(id),
+        })
     }
 }
 
@@ -39,35 +62,24 @@ impl ApiKey {
         let provider = detect_provider(&value).ok_or(AiError::KeyFormat)?;
         Ok((provider, Self(value)))
     }
+    /// Validate credentials with the selected adapter, including injected providers.
+    pub fn for_engine(
+        value: Zeroizing<String>,
+        engine: &dyn provider::AiProviderEngine,
+    ) -> Result<Self, AiError> {
+        let value = Zeroizing::new(value.trim().to_owned());
+        if !engine.recognizes_key(&value) {
+            return Err(AiError::KeyFormat);
+        }
+        Ok(Self(value))
+    }
     pub fn expose(&self) -> &str {
         &self.0
     }
 }
 
 pub fn detect_provider(value: &str) -> Option<AiProvider> {
-    let value = value.trim();
-    if !(24..=4096).contains(&value.len())
-        || !value
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
-    {
-        return None;
-    }
-    if value.starts_with("sk-ant-api") {
-        Some(AiProvider::Anthropic)
-    } else if value.starts_with("sk-ant-")
-        || value.starts_with("sk-or-")
-        || value.starts_with("sk-admin-")
-    {
-        None
-    } else if value.starts_with("sk-proj-")
-        || value.starts_with("sk-svcacct-")
-        || (value.starts_with("sk-") && !value[3..].contains('-'))
-    {
-        Some(AiProvider::OpenAi)
-    } else {
-        None
-    }
+    provider::ProviderRegistry::standard().detect(value.trim())
 }
 
 pub const DEFAULT_ALIAS: &str = "default";
@@ -229,10 +241,9 @@ impl AiSettings {
         };
         // Catalogs do not provide a portable "mini tier" field. Keep reviewed
         // defaults explicit, and prefer an available dated snapshot of that model.
-        let preferred = match connection.provider {
-            AiProvider::OpenAi => "gpt-5.6-luna",
-            AiProvider::Anthropic => "claude-sonnet-5",
-        };
+        let registry = provider::ProviderRegistry::standard();
+        let engine = registry.get(&connection.provider);
+        let preferred = engine.as_ref().map(|p| p.default_model()).unwrap_or("");
         let available = connection
             .models
             .iter()
@@ -299,6 +310,9 @@ pub enum AiError {
     ModelUnavailable,
     EffortRequired,
     Incomplete,
+    Unsupported,
+    Cancelled,
+    ContextLimit,
 }
 
 #[cfg(test)]

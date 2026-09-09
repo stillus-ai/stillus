@@ -138,6 +138,14 @@ pub(super) fn page(
     open: RwSignal<bool>,
     palette: Palette,
 ) -> impl IntoView {
+    page_at(global, open, palette, create_rw_signal(None))
+}
+pub(super) fn page_at(
+    global: Rc<RefCell<GlobalApplication>>,
+    open: RwSignal<bool>,
+    palette: Palette,
+    selected: RwSignal<Option<String>>,
+) -> impl IntoView {
     let view = JournalView {
         global,
         open,
@@ -145,7 +153,7 @@ pub(super) fn page(
         before: create_rw_signal(None),
         provider: create_rw_signal(None),
         status: create_rw_signal(None),
-        selected: create_rw_signal(None),
+        selected,
         detail: create_rw_signal(String::new()),
         error: create_rw_signal(false),
         busy: create_rw_signal(false),
@@ -230,11 +238,17 @@ pub(super) fn page(
                 palette,
                 || true,
                 move || {
-                    provider.set(match provider.get_untracked() {
-                        None => Some(AiProvider::OpenAi),
-                        Some(AiProvider::OpenAi) => Some(AiProvider::Anthropic),
-                        _ => None,
-                    });
+                    let providers = stillus_ai::provider::ProviderRegistry::standard()
+                        .providers()
+                        .map(|p| p.id())
+                        .collect::<Vec<_>>();
+                    let current = provider.get_untracked();
+                    let next = current
+                        .as_ref()
+                        .and_then(|id| providers.iter().position(|p| p == id))
+                        .map(|i| i + 1)
+                        .unwrap_or(0);
+                    provider.set(providers.get(next).cloned());
                     before.set(None);
                 },
             ),
@@ -306,6 +320,7 @@ pub(super) fn page(
                             "{}   {}   {}",
                             timestamp,
                             row.provider
+                                .as_ref()
                                 .map_or_else(|| tr!(AiJournalCorrupt), |p| p.name().into()),
                             status_name(row.status)
                         )

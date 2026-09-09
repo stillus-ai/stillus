@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "crates/stillus-ai",
+    "crates/stillus-chat",
     "app/stillus",
     "crates/stillus-core",
     "crates/stillus-editor",

@@ -5406,6 +5406,7 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "ureq",
  "zeroize",
 ]
@@ -5426,6 +5427,7 @@ dependencies = [
  "serde",
  "serde_json",
  "stillus-ai",
+ "stillus-chat",
  "stillus-core",
  "stillus-editor",
  "stillus-engine",
@@ -5448,9 +5450,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "stillus-chat"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "stillus-engine",
+ "stillus-platform",
+ "tempfile",
+]
+
+[[package]]
 name = "stillus-core"
 version = "0.1.0"
 dependencies = [
+ "stillus-chat",
  "stillus-editor",
  "stillus-engine",
  "stillus-frontmatter",

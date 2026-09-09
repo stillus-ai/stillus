@@ -86,19 +86,36 @@ def main() -> int:
         ):
             fail(f"{relative}: ureq is restricted to RSS, AI and update transport crates")
             errors += 1
+        if relative.parts[:2] == ("crates", "stillus-ai") and re.search(r"\bureq::", text):
+            allowed_urls = {
+                "https://api.openai.com/v1/models",
+                "https://api.anthropic.com/v1/models",
+                "https://api.openai.com/v1/responses",
+            }
+            urls = set(re.findall(r'"(https?://[^"\s]+)"', text))
+            if relative == Path("crates/stillus-ai/src/openai/cancellation_transport.rs"):
+                # This wrapper only polls an already connected TCP transport;
+                # endpoint selection and the standard TLS chain stay in openai.rs.
+                valid = not urls and not re.search(r"\b(?:Agent|TcpConnector|RustlsConnector|DefaultResolver)\b", text)
+            else:
+                valid = relative in (Path("crates/stillus-ai/src/openai.rs"), Path("crates/stillus-ai/src/transport.rs")) and not (urls - allowed_urls) and all(fragment in text for fragment in (".https_only(true)", ".max_redirects(0)", ".proxy(None)"))
+            if not valid:
+                fail(f"{relative}: AI transport violates fixed-endpoint HTTPS boundary")
+                errors += 1
         if re.search(r"\bwebbrowser::", text) and relative.parts[:2] != ("crates", "stillus-rss"):
             fail(f"{relative}: browser handoff is restricted to crates/stillus-rss")
             errors += 1
 
     # Native views may project state and schedule the owner pump, but must not
     # own worker channels, call executors, or borrow mutable core sessions.
-    ui_files = ("main.rs", "ai_settings.rs", "ai_journal_view.rs", "update.rs")
+    ui_files = ("main.rs", "ai_settings.rs", "ai_journal_view.rs", "chat_view.rs", "update.rs")
     ui_forbidden = {
         "mutable workspace access": r"\.workspace\s*\.as_mut\s*\(",
         "mutable document access": r"\.document_mut\s*\(",
         "worker channel access": r"\.(?:save|secure|search)_(?:sender|receiver)\b",
-        "worker launch": r"application::(?:ai|persistence|security|updates)::start\w*\s*\(",
+        "worker launch": r"application::(?:ai|chat|persistence|security|updates)::start\w*\s*\(",
         "journal storage access": r"\bFileJournal\b",
+        "chat storage or provider executor": r"\b(?:ChatStore|ResponsesTransport|AiProviderEngine|SystemCredentials)\b|\.(?:io|tools)_(?:send|receive)\b",
         "settings storage access": r"\b(?:GlobalSettingsStore|UiSettingsStore)\b",
     }
     for name in ui_files:

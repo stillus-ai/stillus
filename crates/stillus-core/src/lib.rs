@@ -36,13 +36,14 @@ use stillus_frontmatter::{
 };
 use stillus_markdown::{MarkdownEngineFactory, markdown_engine_id};
 use stillus_recovery::{RecoveryError, RecoveryKey, RecoveryRecord, RecoveryStore};
+use stillus_rss::RssEngineFactory;
+pub use stillus_rss::rss_engine_id;
 pub use stillus_rss::{
     RssDecision, RssEngine, RssEntry, RssFeedCache, RssFilterError, RssFilterMode, RssPreferences,
     RssReadState, RssRefreshRequest, RssRefreshResult, RssSchedule, RssSubscription,
     RssSubscriptionSummary, execute_refresh as execute_rss_refresh,
     open_original as open_rss_original,
 };
-use stillus_rss::{RssEngineFactory, rss_engine_id};
 use stillus_secure::{MasterPassword, SecureError, decrypt_body};
 use stillus_security::{SecurityError, SecurityStore, VaultId, WorkspaceSecurityState};
 use stillus_storage::{
@@ -228,7 +229,7 @@ impl From<PasswordChangeError> for CoreError {
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum CatalogOrderItem {
     Note(PathBuf),
-    Rss(ItemId),
+    Engine(EngineId, ItemId),
 }
 
 #[derive(Clone, Copy)]
@@ -249,7 +250,8 @@ pub struct WorkspaceSession {
     categories: Vec<CategorySummary>,
     selected_note: Option<usize>,
     selected_external: Option<(EngineId, ItemId)>,
-    selected_rss: Option<ItemId>,
+    selected_engine: Option<(EngineId, ItemId)>,
+    catalog_items: Vec<ItemSummary>,
     document: Option<DocumentSession>,
     recovery_store: RecoveryStore,
     recovery_diagnostics: Vec<String>,
@@ -325,6 +327,20 @@ impl WorkspaceSession {
             .map_err(|error| CoreError::Workspace(error.to_string()))?;
         let rss_engine =
             RssEngine::open(&root).map_err(|error| CoreError::Workspace(error.to_string()))?;
+        engine_registry
+            .register(Arc::new(stillus_chat::ChatEngineFactory))
+            .map_err(|e| CoreError::Workspace(e.to_string()))?;
+        let chat_catalog = match stillus_chat::ChatStore::open(&root).and_then(|store| store.list())
+        {
+            Ok(items) => items,
+            Err(error) => {
+                recovery_scan
+                    .diagnostics
+                    .push(format!("chat catalog: {error:?}"));
+                Vec::new()
+            }
+        };
+        let catalog_items = chat_catalog.into_iter().map(|s| s.item).collect::<Vec<_>>();
         let mut category_counts = BTreeMap::<String, usize>::new();
         for note in notes
             .iter()
@@ -340,6 +356,11 @@ impl WorkspaceSession {
             .filter(|item| !item.deleted)
         {
             for category in &item.categories {
+                *category_counts.entry(category.clone()).or_default() += 1;
+            }
+        }
+        for item in catalog_items.iter().filter(|i| !i.metadata.deleted) {
+            for category in &item.metadata.categories {
                 *category_counts.entry(category.clone()).or_default() += 1;
             }
         }
@@ -375,7 +396,8 @@ impl WorkspaceSession {
             categories,
             selected_note: None,
             selected_external: None,
-            selected_rss: None,
+            selected_engine: None,
+            catalog_items,
             document: None,
             recovery_store,
             recovery_diagnostics: recovery_scan.diagnostics,
@@ -457,7 +479,10 @@ impl WorkspaceSession {
     }
 
     pub fn selected_rss(&self) -> Option<&ItemId> {
-        self.selected_rss.as_ref()
+        self.selected_engine
+            .as_ref()
+            .filter(|(engine, _)| engine == &rss_engine_id())
+            .map(|(_, id)| id)
     }
 
     /// Toolbar controls an engine declares for its items. The UI builds every
@@ -481,6 +506,26 @@ impl WorkspaceSession {
     }
 
     pub fn open_rss(&mut self, item_id: &ItemId) -> Result<(), CoreError> {
+        self.open_engine_item(&rss_engine_id(), item_id)
+    }
+    pub fn selected_engine_item(&self) -> Option<&(EngineId, ItemId)> {
+        self.selected_engine.as_ref()
+    }
+    pub fn non_document_items(&self) -> Vec<ItemSummary> {
+        let mut items = self.rss_engine.items().unwrap_or_default();
+        items.extend(self.catalog_items.clone());
+        items
+    }
+    pub fn accept_engine_items(&mut self, engine: &EngineId, items: Vec<ItemSummary>) {
+        self.catalog_items.retain(|i| &i.engine_id != engine);
+        self.catalog_items.extend(items);
+        self.refresh_catalog_categories();
+    }
+    pub fn open_engine_item(
+        &mut self,
+        engine: &EngineId,
+        item_id: &ItemId,
+    ) -> Result<(), CoreError> {
         self.ensure_no_secure_operation()?;
         if self
             .document
@@ -490,19 +535,47 @@ impl WorkspaceSession {
             return Err(CoreError::UnsavedChanges);
         }
         if !self
-            .rss_engine
-            .subscriptions()
+            .non_document_items()
             .iter()
-            .any(|item| &item.id == item_id)
+            .any(|i| &i.engine_id == engine && &i.item_id == item_id)
         {
-            return Err(CoreError::NoteUnavailable(
-                "unknown RSS subscription".to_owned(),
-            ));
+            return Err(CoreError::NoteUnavailable("unknown engine item".into()));
         }
         self.document = None;
         self.selected_note = None;
         self.selected_external = None;
-        self.selected_rss = Some(item_id.clone());
+        self.selected_engine = Some((engine.clone(), item_id.clone()));
+        Ok(())
+    }
+    pub fn update_engine_metadata(
+        &mut self,
+        engine: &EngineId,
+        id: &ItemId,
+        version: &str,
+        patch: stillus_engine::CommonMetadataPatch,
+    ) -> Result<(), CoreError> {
+        self.ensure_workspace_action_ready()?;
+        if engine == &rss_engine_id() {
+            self.rss_engine
+                .update_metadata(id, version, patch)
+                .map_err(|e| CoreError::Workspace(e.to_string()))?;
+        } else {
+            let factory = self
+                .engine_registry
+                .get(engine)
+                .ok_or_else(|| CoreError::NoteUnavailable("engine unavailable".into()))?;
+            let mut instance = factory
+                .open(&self.root)
+                .map_err(|e| CoreError::Workspace(e.to_string()))?;
+            instance
+                .update_metadata(id, version, patch)
+                .map_err(|e| CoreError::Workspace(e.to_string()))?;
+            let items = instance
+                .items()
+                .map_err(|e| CoreError::Workspace(e.to_string()))?;
+            self.accept_engine_items(engine, items);
+        }
+        self.refresh_catalog_categories();
         Ok(())
     }
 
@@ -526,8 +599,8 @@ impl WorkspaceSession {
 
     pub fn rename_rss(&mut self, title: &str, timestamp: &str) -> Result<(), CoreError> {
         let id = self
-            .selected_rss
-            .clone()
+            .selected_rss()
+            .cloned()
             .ok_or_else(|| CoreError::NoteUnavailable("no RSS subscription is selected".into()))?;
         let version = self
             .rss_engine
@@ -554,8 +627,8 @@ impl WorkspaceSession {
         update: impl FnOnce(&mut stillus_rss::RssSubscription),
     ) -> Result<(), CoreError> {
         let id = self
-            .selected_rss
-            .clone()
+            .selected_rss()
+            .cloned()
             .ok_or_else(|| CoreError::NoteUnavailable("no RSS subscription is selected".into()))?;
         let mut item = self
             .rss_engine
@@ -606,7 +679,7 @@ impl WorkspaceSession {
     }
 
     pub fn mark_rss_read(&mut self, entry_id: &str, timestamp: &str) -> Result<bool, CoreError> {
-        let item_id = self.selected_rss.clone().ok_or_else(|| {
+        let item_id = self.selected_rss().cloned().ok_or_else(|| {
             CoreError::NoteUnavailable("no RSS subscription is selected".to_owned())
         })?;
         self.rss_engine
@@ -627,8 +700,8 @@ impl WorkspaceSession {
     }
 
     pub fn selected_item(&self) -> Option<(EngineId, ItemId)> {
-        if let Some(item_id) = &self.selected_rss {
-            return Some((rss_engine_id(), item_id.clone()));
+        if let Some(selected) = &self.selected_engine {
+            return Some(selected.clone());
         }
         if let Some(selected) = &self.selected_external {
             return Some(selected.clone());
@@ -668,6 +741,7 @@ impl WorkspaceSession {
                 .items()
                 .map_err(|error| CoreError::Workspace(error.to_string()))?,
         );
+        items.extend(self.catalog_items.clone());
         Ok(items)
     }
 
@@ -771,7 +845,7 @@ impl WorkspaceSession {
         )?);
         self.selected_note = None;
         self.selected_external = Some((engine_id.clone(), item_id.clone()));
-        self.selected_rss = None;
+        self.selected_engine = None;
         Ok(())
     }
 
@@ -1164,7 +1238,7 @@ impl WorkspaceSession {
         self.document = None;
         self.selected_note = Some(note_index);
         self.selected_external = None;
-        self.selected_rss = None;
+        self.selected_engine = None;
         self.refresh_catalog_categories();
     }
 
@@ -1449,7 +1523,7 @@ impl WorkspaceSession {
         self.document = Some(document);
         self.selected_note = Some(note_index);
         self.selected_external = None;
-        self.selected_rss = None;
+        self.selected_engine = None;
         self.refresh_catalog_categories();
         Ok(())
     }
@@ -1518,7 +1592,7 @@ impl WorkspaceSession {
             document.target = DocumentTarget::WorkspaceNote(next_index);
             self.selected_note = Some(next_index);
             self.selected_external = None;
-            self.selected_rss = None;
+            self.selected_engine = None;
             self.refresh_catalog_categories();
         }
         if let Some(failure) = integrity_failure {
@@ -1739,7 +1813,7 @@ impl WorkspaceSession {
         self.document = Some(document);
         self.selected_note = Some(note_index);
         self.selected_external = None;
-        self.selected_rss = None;
+        self.selected_engine = None;
         Ok(())
     }
 
@@ -2064,7 +2138,7 @@ impl WorkspaceSession {
         self.document = Some(replacement);
         self.selected_note = Some(note_index);
         self.selected_external = None;
-        self.selected_rss = None;
+        self.selected_engine = None;
         if let Some(note) = self.notes.get_mut(note_index) {
             note.recovery_available = false;
         }
@@ -2146,7 +2220,7 @@ impl WorkspaceSession {
         self.refresh_catalog_categories();
         self.selected_note = Some(index);
         self.selected_external = None;
-        self.selected_rss = None;
+        self.selected_engine = None;
         Ok(index)
     }
 
@@ -2451,15 +2525,6 @@ impl WorkspaceSession {
                 note.tags.iter().any(|tag| tag == &order_key)
             }
         };
-        let matches_rss = |item: &stillus_rss::RssSubscription| {
-            if order_key == FAVORITED_ORDER_KEY {
-                item.favorited
-            } else {
-                item.categories
-                    .iter()
-                    .any(|category| category == &order_key)
-            }
-        };
         let mut expected = BTreeMap::<CatalogOrderItem, bool>::new();
         for note in self
             .notes
@@ -2468,13 +2533,18 @@ impl WorkspaceSession {
         {
             expected.insert(CatalogOrderItem::Note(note.path.clone()), note.pinned);
         }
-        for item in self
-            .rss_engine
-            .subscriptions()
-            .iter()
-            .filter(|item| !item.deleted && matches_rss(item))
-        {
-            expected.insert(CatalogOrderItem::Rss(item.id.clone()), item.pinned);
+        for item in self.non_document_items().iter().filter(|i| {
+            !i.metadata.deleted
+                && if order_key == FAVORITED_ORDER_KEY {
+                    i.metadata.favorited
+                } else {
+                    i.metadata.categories.contains(&order_key)
+                }
+        }) {
+            expected.insert(
+                CatalogOrderItem::Engine(item.engine_id.clone(), item.item_id.clone()),
+                item.metadata.pinned,
+            );
         }
         let supplied = ordered.iter().cloned().collect::<BTreeSet<_>>();
         if ordered.len() != expected.len()
@@ -2488,7 +2558,7 @@ impl WorkspaceSession {
         let mut pinned_rank = 0_u32;
         let mut regular_rank = 0_u32;
         let mut note_ranks = BTreeMap::new();
-        let mut rss_ranks = BTreeMap::new();
+        let mut engine_ranks = BTreeMap::new();
         for item in ordered {
             let pinned = expected.get(item).copied().ok_or_else(|| {
                 CoreError::NoteUnavailable("catalog order target disappeared".to_owned())
@@ -2510,29 +2580,33 @@ impl WorkspaceSession {
                 CatalogOrderItem::Note(path) => {
                     note_ranks.insert(path.clone(), rank);
                 }
-                CatalogOrderItem::Rss(item_id) => {
-                    rss_ranks.insert(item_id.clone(), rank);
+                CatalogOrderItem::Engine(engine_id, item_id) => {
+                    engine_ranks.insert((engine_id.clone(), item_id.clone()), rank);
                 }
             }
         }
         let mut changed =
             self.update_note_order(&order_key, NoteOrderSpec::Ranks(&note_ranks), matches_note)?;
-        for (item_id, rank) in rss_ranks {
-            let current = self
-                .rss_engine
-                .subscriptions()
-                .iter()
-                .find(|item| item.id == item_id)
-                .and_then(|item| item.order.get(&order_key))
-                .copied();
-            if current == Some(rank) {
+        for ((engine, id), rank) in engine_ranks {
+            let item = self
+                .non_document_items()
+                .into_iter()
+                .find(|i| i.engine_id == engine && i.item_id == id)
+                .ok_or_else(|| CoreError::NoteUnavailable("catalog target disappeared".into()))?;
+            let mut order = item.metadata.order;
+            if order.get(&order_key) == Some(&rank) {
                 continue;
             }
-            self.rss_engine
-                .update_subscription(&item_id, |item| {
-                    item.order.insert(order_key.clone(), rank);
-                })
-                .map_err(|error| CoreError::Workspace(error.to_string()))?;
+            order.insert(order_key.clone(), rank);
+            self.update_engine_metadata(
+                &engine,
+                &id,
+                &item.metadata_version,
+                stillus_engine::CommonMetadataPatch {
+                    order: Some(order),
+                    ..Default::default()
+                },
+            )?;
             changed = true;
         }
         Ok(changed)
@@ -2554,28 +2628,30 @@ impl WorkspaceSession {
         };
         let mut changed = self.update_note_order(&order_key, NoteOrderSpec::Clear, matches_note)?;
         let targets = self
-            .rss_engine
-            .subscriptions()
-            .iter()
-            .filter(|item| {
-                !item.deleted
+            .non_document_items()
+            .into_iter()
+            .filter(|i| {
+                !i.metadata.deleted
+                    && i.metadata.order.contains_key(&order_key)
                     && if order_key == FAVORITED_ORDER_KEY {
-                        item.favorited
+                        i.metadata.favorited
                     } else {
-                        item.categories
-                            .iter()
-                            .any(|category| category == &order_key)
+                        i.metadata.categories.contains(&order_key)
                     }
-                    && item.order.contains_key(&order_key)
             })
-            .map(|item| item.id.clone())
             .collect::<Vec<_>>();
-        for item_id in targets {
-            self.rss_engine
-                .update_subscription(&item_id, |item| {
-                    item.order.remove(&order_key);
-                })
-                .map_err(|error| CoreError::Workspace(error.to_string()))?;
+        for item in targets {
+            let mut order = item.metadata.order;
+            order.remove(&order_key);
+            self.update_engine_metadata(
+                &item.engine_id,
+                &item.item_id,
+                &item.metadata_version,
+                stillus_engine::CommonMetadataPatch {
+                    order: Some(order),
+                    ..Default::default()
+                },
+            )?;
             changed = true;
         }
         Ok(changed)
@@ -3106,7 +3182,7 @@ impl WorkspaceSession {
                 self.document = Some(*document);
                 self.selected_note = Some(current_index);
                 self.selected_external = None;
-                self.selected_rss = None;
+                self.selected_engine = None;
                 self.refresh_catalog_categories();
                 match purpose {
                     ProtectedLoadPurpose::Unlock { adopt_password } => {
@@ -3152,7 +3228,7 @@ impl WorkspaceSession {
                     })?;
                 self.selected_note = Some(protected_index);
                 self.selected_external = None;
-                self.selected_rss = None;
+                self.selected_engine = None;
                 Ok(SecureOutcome::Protected(commit.path))
             }
             SecureJobResult::ProtectionDisabled {
@@ -3246,7 +3322,7 @@ impl WorkspaceSession {
                 }
                 self.selected_note = Some(current_index);
                 self.selected_external = None;
-                self.selected_rss = None;
+                self.selected_engine = None;
                 self.refresh_catalog_categories();
                 if deleted_change == Some(true) {
                     self.document = None;
@@ -3414,7 +3490,7 @@ impl WorkspaceSession {
         )?);
         self.selected_note = Some(note_index);
         self.selected_external = None;
-        self.selected_rss = None;
+        self.selected_engine = None;
         Ok(note_index)
     }
 
@@ -3429,13 +3505,12 @@ impl WorkspaceSession {
                 *counts.entry(category.clone()).or_default() += 1;
             }
         }
-        for subscription in self
-            .rss_engine
-            .subscriptions()
+        for item in self
+            .non_document_items()
             .iter()
-            .filter(|subscription| !subscription.deleted)
+            .filter(|i| !i.metadata.deleted)
         {
-            for category in &subscription.categories {
+            for category in &item.metadata.categories {
                 *counts.entry(category.clone()).or_default() += 1;
             }
         }
@@ -8402,7 +8477,7 @@ mod tests {
                 .set_catalog_order(
                     FAVORITED_ORDER_KEY,
                     &[
-                        CatalogOrderItem::Rss(rss_id.clone()),
+                        CatalogOrderItem::Engine(rss_engine_id(), rss_id.clone()),
                         CatalogOrderItem::Note(note_path),
                     ],
                 )

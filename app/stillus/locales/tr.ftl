@@ -388,3 +388,34 @@ AiJournalNewest = En yeni
 AiJournalOlder = Daha eski
 AiJournalPreviousPart = Önceki bölüm
 AiJournalNextPart = Sonraki bölüm
+
+ChatMenu = Yapay zekâ sohbeti
+ChatNew = Yeni sohbet
+ChatSend = Gönder
+ChatStop = Durdur
+ChatContinue = Devam et
+ChatPlaceholder = Bir mesaj yazın…
+ChatLoadEarlier = Önceki mesajları yükle
+ChatRunning = Çalışıyor…
+ChatQueued = Sırada
+ChatPaused = Duraklatıldı
+ChatInterrupted = Kesildi
+ChatCompleted = Tamamlandı
+ChatFailed = Başarısız
+ChatUser = Siz
+ChatAssistant = Asistan
+ChatTool = İşlem
+ChatUnknown = Sonuç bilinmiyor
+ChatConnect = Yapay zekâ ayarlarını aç
+ChatAlias = Model takma adı
+ChatRename = Sohbeti yeniden adlandır
+ChatTrash = Sohbeti çöp kutusuna taşı
+ChatRestore = Sohbeti geri yükle
+ChatPin = Sohbeti sabitle
+ChatUnpin = Sohbeti sabitlemeyi kaldır
+ChatCategories = Sohbet kategorileri
+ChatEmpty = Bir konuşma başlatın. Geçmiş bu çalışma alanında saklanır.
+
+ChatAcknowledge = Bu eylemi tekrarlamadan devam et
+
+ChatUnsupported = Bu sağlayıcı henüz sohbet yanıtı oluşturmayı desteklemiyor.

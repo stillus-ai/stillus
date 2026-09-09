@@ -389,3 +389,34 @@ AiJournalNewest = Mais recentes
 AiJournalOlder = Mais antigas
 AiJournalPreviousPart = Parte anterior
 AiJournalNextPart = Próxima parte
+
+ChatMenu = Chat de IA
+ChatNew = Novo chat
+ChatSend = Enviar
+ChatStop = Parar
+ChatContinue = Continuar
+ChatPlaceholder = Escreva uma mensagem…
+ChatLoadEarlier = Carregar mensagens anteriores
+ChatRunning = Em andamento…
+ChatQueued = Na fila
+ChatPaused = Pausado
+ChatInterrupted = Interrompido
+ChatCompleted = Concluído
+ChatFailed = Falha
+ChatUser = Você
+ChatAssistant = Assistente
+ChatTool = Ação
+ChatUnknown = Resultado desconhecido
+ChatConnect = Abrir configurações de IA
+ChatAlias = Alias do modelo
+ChatRename = Renomear chat
+ChatTrash = Mover chat para a lixeira
+ChatRestore = Restaurar chat
+ChatPin = Fixar chat
+ChatUnpin = Desafixar chat
+ChatCategories = Categorias do chat
+ChatEmpty = Inicie uma conversa. O histórico é salvo neste espaço de trabalho.
+
+ChatAcknowledge = Continuar sem repetir esta ação
+
+ChatUnsupported = Este provedor ainda não oferece geração de respostas no chat.

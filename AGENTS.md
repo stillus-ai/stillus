@@ -31,7 +31,8 @@
   shell. Save conflicts and security operations must block restart.
   The only network exceptions are the restricted `ureq` HTTP/HTTPS client in `stillus-rss`
   (any host or port), the HTTPS client in `stillus-ai` (fixed OpenAI/Anthropic
-  model catalog endpoints only) and the HTTPS client in `stillus-update` (release
+  model catalog endpoints and the fixed OpenAI Responses endpoint only), and the
+  HTTPS client in `stillus-update` (release
   metadata and release assets on a fixed GitHub host allowlist, redirects
   checked per hop); HTTP/HTTPS opening in the system browser is allowed only
   through the RSS crate's dedicated hardened opener. The test-only RSS and

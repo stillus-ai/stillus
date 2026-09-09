@@ -613,6 +613,7 @@ pub(crate) struct SearchItem {
 #[derive(Clone, Serialize)]
 #[serde(untagged)]
 pub(crate) enum OperationOutput {
+    Chat(super::chat::Output),
     Saved {
         saved: bool,
         reconcile_error: Option<ActionError>,
@@ -752,6 +753,20 @@ impl Operations {
             },
         );
         Ok(id)
+    }
+    pub(super) fn claim_catalogue_write(&mut self, id: &str) -> Result<(), ActionError> {
+        if self.writing() {
+            return Err(ActionError::Busy);
+        }
+        let operation = self.entries.get_mut(id).ok_or(ActionError::NotFound)?;
+        if !matches!(
+            operation.state,
+            OperationStatus::Pending | OperationStatus::Running
+        ) {
+            return Err(ActionError::Cancelled);
+        }
+        operation.writes = true;
+        Ok(())
     }
     pub(super) fn import_completion(
         &mut self,

@@ -188,6 +188,9 @@ fn error_key(error: Failure) -> i18n::Key {
             AiError::ModelUnavailable => K::AiUnavailable,
             AiError::EffortRequired => K::AiChooseEffort,
             AiError::Incomplete => K::AiConnectFirst,
+            AiError::Unsupported => K::AiUnavailable,
+            AiError::Cancelled => K::AiResponseError,
+            AiError::ContextLimit => K::AiResponseError,
         },
     }
 }

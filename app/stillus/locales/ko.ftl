@@ -388,3 +388,34 @@ AiJournalNewest = 최신
 AiJournalOlder = 이전
 AiJournalPreviousPart = 이전 부분
 AiJournalNextPart = 다음 부분
+
+ChatMenu = AI 채팅
+ChatNew = 새 채팅
+ChatSend = 보내기
+ChatStop = 중지
+ChatContinue = 계속
+ChatPlaceholder = 메시지를 입력하세요…
+ChatLoadEarlier = 이전 메시지 불러오기
+ChatRunning = 실행 중…
+ChatQueued = 대기 중
+ChatPaused = 일시 중지
+ChatInterrupted = 중단됨
+ChatCompleted = 완료
+ChatFailed = 실패
+ChatUser = 나
+ChatAssistant = 어시스턴트
+ChatTool = 작업
+ChatUnknown = 결과 알 수 없음
+ChatConnect = AI 설정 열기
+ChatAlias = 모델 별칭
+ChatRename = 채팅 이름 변경
+ChatTrash = 채팅을 휴지통으로 이동
+ChatRestore = 채팅 복원
+ChatPin = 채팅 고정
+ChatUnpin = 채팅 고정 해제
+ChatCategories = 채팅 카테고리
+ChatEmpty = 대화를 시작하세요. 기록은 이 작업 공간에 저장됩니다.
+
+ChatAcknowledge = 이 작업을 반복하지 않고 계속
+
+ChatUnsupported = 이 제공자는 아직 채팅 응답 생성을 지원하지 않습니다.

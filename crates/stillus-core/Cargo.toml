@@ -18,6 +18,7 @@ test-utils = [
 path = "src/lib.rs"
 
 [dependencies]
+stillus-chat = { version = "0.1.0", path = "../stillus-chat" }
 stillus-platform = { version = "0.1.0", path = "../stillus-platform" }
 stillus-editor = { version = "0.1.0", path = "../stillus-editor" }
 stillus-engine = { version = "0.1.0", path = "../stillus-engine" }

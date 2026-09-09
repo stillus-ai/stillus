@@ -134,12 +134,14 @@ pub struct EngineCapabilities {
 pub enum ItemPresentation {
     Document,
     Feed,
+    Chat,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum EngineIcon {
     Document,
     Rss,
+    Chat,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]

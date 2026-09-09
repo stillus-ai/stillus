@@ -200,3 +200,43 @@ roll back a live transaction. Recovery writes reject a competing record and
 preserve it; automatic cleanup cannot rely on another process's revision number.
 Conflicting settings changes are reported rather than silently replacing the
 other window's settings.
+
+### AI chat conversations
+
+Chats are workspace data in `.stillus/engines/ai/chat/<opaque chat id>/`. They are
+UTF-8, versioned JSON, independent of both Markdown notes and the global request
+journal. Each directory contains `metadata.json`, `draft.json`, `run.json`, an
+optional `summary.json`, and `messages/<opaque message id>.json`. Metadata carries
+title, categories, pin/favorite/trash state, order and model alias. The run records
+its captured provider/model/parameters, request and tool counters, pending calls,
+continuation phase and unread status. Provider state is stored only with messages;
+API keys and authorization headers are never part of these records.
+
+Every record has a format version and separate content revision. Writes hold a
+short OS file lock, check the expected revision, publish a private temporary file
+atomically and sync its parent. Locks are released before HTTP requests. Partial
+answers are checkpointed periodically; completed messages, tool intents/results
+and state transitions are durable before subsequent steps. Editing metadata does
+not rewrite transcript chunks. A record is limited to 1 MiB; a history page reads
+at most 64 records and 2 MiB. The coordinator has a bounded context working set
+and stores full older conversation on disk.
+
+Opening a workspace does not repair or migrate chat files. Corrupt/unsupported
+records remain on disk and are shown independently of healthy records. After a
+crash, queued/running tasks appear interrupted, and a prepared tool action has
+unknown outcome. There is no automatic resumption or replay. An explicit UI
+acknowledgement can allow later conversation without repeating the ambiguous action.
+
+Chats are **not encrypted** in this release. Messages, drafts, summaries and safe
+tool results can contain ordinary workspace content. Moving a chat to Trash
+retains all its files and conversation. Chat history has no age-based retention;
+clearing the 30-day/100-MB global request journal does not clear chats, and moving
+a chat to Trash does not clear its journal records. Back up the workspace to
+retain conversations; copying global settings does not copy OS-held API keys.
+
+Generation uses the fixed OpenAI Responses HTTPS endpoint, with provider-side
+storage disabled. The request journal includes safe request/response contents,
+model parameters, usage when supplied, and chat/run/step links. Local context
+compression is a separate journaled request. The existing protected-content mode
+omits request, response and associated tool-result content; protected notes are
+not exposed to chat tools at this stage.

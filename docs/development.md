@@ -346,3 +346,21 @@ The additional `make test-rss` target runs the RSS crate's unit and local HTTP
 fixture tests. It is useful when changing shared subscription metadata handlers.
 Ordinary UI scenarios and those needing `test-utils` must use separate build
 groups; do not reuse a feature-enabled binary for ordinary acceptance scenarios.
+
+## AI chat checks
+
+`make test-chat` checks the file engine, independent revisions, drafts, partial
+answers, paged history, corrupt records and crash projections. `make test-actions`
+includes headless chat/tool parity, two active plus six queued tasks, limits and
+continuation, summary persistence, workspace cancellation and a complete
+find/read/create-summary flow that verifies the resulting Markdown on disk.
+`make test-ai` checks fragmented SSE, schemas/name mapping, cancellation, error
+limits, journal failures, redaction and registration of a second provider adapter.
+
+`make ui-click-chat` uses a `test-utils` build and the offline AI transport to
+exercise native creation and organization, composer persistence, streaming,
+two background tasks, unread replies, Stop/Trash/Restore and journal linkage.
+Run ordinary UI scenarios in a separate build group from `test-utils` scenarios.
+The source audit checks the chat UI/application boundary and restricts AI network
+clients to fixed catalog and OpenAI Responses endpoints. No MCP/HTTP listener is
+started. New chat files retain GPL-3.0-only license metadata.
