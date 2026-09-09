@@ -164,14 +164,7 @@ pub(super) fn page(
     open: RwSignal<bool>,
     palette: Palette,
 ) -> impl IntoView {
-    page_at(global, open, palette, create_rw_signal(None))
-}
-pub(super) fn page_at(
-    global: Rc<RefCell<GlobalApplication>>,
-    open: RwSignal<bool>,
-    palette: Palette,
-    selected: RwSignal<Option<String>>,
-) -> impl IntoView {
+    let selected = create_rw_signal(None::<String>);
     let view = JournalView {
         global,
         open,

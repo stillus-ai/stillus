@@ -8880,6 +8880,8 @@ def chat_scenario(driver: WindowDriver, workspace: Path) -> None:
     wait_until("a chat created through the plus menu", lambda: root.exists() and len(list(root.glob("*/metadata.json"))) == 1)
     chat = next(root.glob("*/metadata.json")).parent
     driver.wait_for_stable_frame("empty chat", crop=(260, 40, 960, 500), stable_for=0.2)
+    if dark_pixel_count(driver.capture("chat-toolbar"), crop=(800, 12, 148, 32)):
+        raise AcceptanceFailure("chat toolbar contains a request journal action")
     export_screenshot(driver.capture("chat-empty"), Path("/workspace/dist/chat-empty.png"))
     composer_crop = (280, 620, 900, 105)
     unfocused = driver.wait_for_stable_frame("unfocused placeholder has no blinking caret",
@@ -8971,11 +8973,21 @@ def chat_scenario(driver: WindowDriver, workspace: Path) -> None:
     journal = driver.home / ".stillus" / "ai" / "journal"
     if not any(json.loads(path.read_text()).get("chat") == chat.name for path in journal.glob("*.json")):
         raise AcceptanceFailure("generation is not linked to the journal")
-    # The chat opens its request directly in the existing journal page.
-    driver.click_point(946, 28)
+    # The request journal is available only through AI settings.
+    driver.click("settings")
+    wait_for_ai_controls(driver)
+    driver.click_point(*AI_SIDEBAR_ITEM)
+    wait_for_ai_controls(driver)
+    before_journal = driver.capture("chat-ai-settings")
+    driver.click_point(1140, 54)
+    driver.wait_for_visual_change("request journal opens from AI settings", before_journal,
+                                  crop=(260, 30, 720, 500), timeout=10)
     driver.wait_for_stable_frame("chat request journal", crop=(280, 100, 850, 300), stable_for=0.2)
     export_screenshot(driver.capture("chat-journal"), Path("/workspace/dist/chat-journal.png"))
     driver.click_point(316, 45)
+    wait_for_ai_controls(driver)
+    driver.click("settings_back")
+    driver.wait_for_stable_frame("chat after leaving the journal", crop=(960, 12, 260, 32), stable_for=0.2)
 
     def create_and_send(text: str) -> Path:
         before = set(root.glob("*/metadata.json"))

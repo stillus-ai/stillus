@@ -233,8 +233,8 @@ copyable code blocks; long code lines scroll inside their block. Only the histor
 scrolls, keeping the toolbar and composer visible. The toolbar's up arrow loads
 earlier messages without moving the message you are reading, and the down arrow
 returns to the latest messages. New replies scroll into view only while you are
-at the bottom. The document/list icon opens the request journal; Back returns to
-the chat. Hover over an icon to see its label.
+at the bottom. Open the request journal from **Settings → AI settings →
+Request journal**. Hover over a toolbar icon to see its label.
 
 Expand an action card to see its arguments and result. The assistant
 can use permitted application actions; existing confirmations and protected-note

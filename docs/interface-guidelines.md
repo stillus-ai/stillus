@@ -24,8 +24,9 @@ Copy, Add, Edit, Search, Refresh, Pin, Favorite and Delete are examples of
 standard toolbar actions. A familiar icon must match the actual operation:
 opening the AI request journal, restoring unsaved work and loading the disk
 version need explanatory text. A generic document or recovery icon alone
-does not explain these operations. Menus and expanded navigation retain
-their labels.
+does not explain these operations. The request journal is accessible only
+from AI settings; do not add it to chat or document toolbars. Menus and
+expanded navigation retain their labels.
 
 Input accessories (show/hide password, clear search, remove a selected tag)
 and compact navigation controls are distinct from form action buttons.

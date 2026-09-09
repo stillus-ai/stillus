@@ -87,8 +87,6 @@ pub(super) fn panel(
             limit: 32,
         }),
     );
-    let journal_open = create_rw_signal(false);
-    let journal_selected = create_rw_signal(None::<String>);
     let draft = create_rw_signal(String::new());
     let loaded = create_rw_signal(false);
     let draft_version = create_rw_signal(String::new());
@@ -139,7 +137,6 @@ pub(super) fn panel(
                 && !model.chat_running(&read_id)
                 && follow.get()
                 && !settings.open.get()
-                && !journal_open.get()
                 && view
                     .run
                     .as_ref()
@@ -274,24 +271,6 @@ pub(super) fn panel(
             h_stack_from_iter(controls)
                 .style(|s| s.items_center().gap(TOOLBAR_ACTION_GAP_PX))
                 .into_any()
-        },
-    );
-    let journal_model = model.clone();
-    let journal_button = toolbar_action_button(
-        ButtonAction::Custom(ICON_JOURNAL),
-        || tr!(AiJournal),
-        IconButtonTone::Secondary,
-        palette,
-        || true,
-        move || {
-            journal_selected.set(
-                journal_model
-                    .borrow()
-                    .chat_view()
-                    .and_then(|v| v.run.as_ref())
-                    .and_then(|r| r.value.pending_request.clone()),
-            );
-            journal_open.set(true);
         },
     );
     let rename_model = model.clone();
@@ -460,7 +439,7 @@ pub(super) fn panel(
                 .map(|item| item.metadata.title)
                 .unwrap_or_else(|| tr!(ChatNew))
         },
-        h_stack((journal_button, earlier, newest, toolbar))
+        h_stack((earlier, newest, toolbar))
             .style(|style| style.items_center().gap(TOOLBAR_ACTION_GAP_PX)),
         Some(Rc::new(move || {
             if let Some(item) = item(&title_click_model, &title_click_id) {
@@ -652,13 +631,7 @@ pub(super) fn panel(
     let composer_model = model.clone();
     let composer_id = id.clone();
     let composer = dyn_container(
-        move || {
-            (
-                loaded.get(),
-                composer_epoch.get(),
-                settings.open.get() || journal_open.get(),
-            )
-        },
+        move || (loaded.get(), composer_epoch.get(), settings.open.get()),
         move |(ready, _, hidden)| {
             if !ready || hidden {
                 return empty().into_any();
@@ -670,12 +643,11 @@ pub(super) fn panel(
                 .placeholder(i18n::Key::ChatPlaceholder)
                 .height(116.0)
                 .enabled(move || !sending.get())
-                .visible(move || !settings.open.get() && !journal_open.get())
+                .visible(move || !settings.open.get())
                 .on_submit(move || submit())
                 .build(move |value| {
                     if loaded.try_get_untracked().is_none()
                         || settings.open.get_untracked()
-                        || journal_open.get_untracked()
                         || model.borrow().session_id() != session
                     {
                         return;
@@ -881,24 +853,8 @@ pub(super) fn panel(
             .gap(12.0)
             .background(palette.paper)
     });
-    let body = v_stack((header, body)).style(move |s| {
-        s.width_full()
-            .height_full()
-            .min_width(0.0)
-            .min_height(0.0)
-            .apply_if(journal_open.get(), |s| s.hide())
-    });
-    let journal = model
-        .borrow()
-        .global
-        .as_ref()
-        .map(|g| {
-            crate::ai_journal_view::page_at(g.clone(), journal_open, palette, journal_selected)
-                .into_any()
-        })
-        .unwrap_or_else(|| empty().into_any());
-    stack((body, journal))
-        .style(|s| s.width_full().min_width(0.0).height_full().min_height(0.0))
+    v_stack((header, body))
+        .style(|s| s.width_full().height_full().min_width(0.0).min_height(0.0))
         .into_any()
 }
 
