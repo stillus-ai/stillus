@@ -570,7 +570,7 @@ pub(super) fn panel(
             crate::ai_settings::alias_dropdown(
                 selected,
                 names,
-                |value| format!("{}: {}", tr!(ChatAlias), value.unwrap_or_default()),
+                |value| value.unwrap_or_default(),
                 move |alias| {
                     patch(
                         &model,
@@ -587,6 +587,12 @@ pub(super) fn panel(
         },
     )
     .style(|s| s.width(240.0));
+    let alias = h_stack((
+        label(|| format!("{}:", tr!(AiModelLabel)))
+            .style(move |s| s.font_size(13.0).color(palette.ink).flex_shrink(0.0)),
+        alias,
+    ))
+    .style(|s| s.items_center().gap(8.0).flex_shrink(0.0));
     let submit_model = model.clone();
     let submit_id = id.clone();
     let submit: Rc<dyn Fn()> = Rc::new(move || {
