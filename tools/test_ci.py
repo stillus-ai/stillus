@@ -30,6 +30,42 @@ SHA = "1234567890abcdef1234567890abcdef12345678"
 
 
 class CITests(unittest.TestCase):
+    def test_ai_key_control_waits_for_expected_form_and_painted_readiness(self):
+        for editing in (False, True):
+            for state in ("delayed", "wrong_form", "alias_card", "missing", "unavailable", "moving"):
+                with self.subTest(editing=editing, state=state):
+                    clock = [0.0]
+                    frames = [0]
+                    driver = Mock(spec=ui_acceptance.WindowDriver)
+
+                    def capture(_name):
+                        clock[0] += 0.1
+                        frames[0] += 1
+                        expected = frames[0] > 8 and state != "wrong_form"
+                        expanded = editing if expected else not editing
+                        top = 159 + (frames[0] if state == "moving" else 0)
+                        height = 84 if state == "alias_card" else (180 if expanded else 132)
+                        return Mock(bounds=(top, top + height))
+
+                    def borders(frame, **_kwargs):
+                        top = frame.bounds[0]
+                        return [] if state == "unavailable" else [(top + 49, top + 77)]
+
+                    driver.capture.side_effect = capture
+                    with patch.object(ui_acceptance.time, "monotonic", side_effect=lambda: clock[0]), \
+                            patch.object(ui_acceptance.time, "sleep"), \
+                            patch.object(ui_acceptance, "ai_settings_cards", side_effect=lambda frame: [] if state == "missing" else [frame.bounds]), \
+                            patch.object(ui_acceptance, "shaded_row_runs", side_effect=borders), \
+                            patch.object(ui_acceptance, "crop_luminances", return_value=dict.fromkeys(range(8), 200 if state == "unavailable" else 0)), \
+                            patch.object(ui_acceptance, "image_difference", return_value=0):
+                        if state == "delayed":
+                            frame, y = ui_acceptance.wait_for_ai_key_control(driver, editing=editing, timeout=3)
+                            self.assertEqual(y, frame.bounds[0] + 62 if editing else frame.bounds[1] - 39)
+                            self.assertGreaterEqual(frames[0], 12)
+                        else:
+                            with self.assertRaises(ui_acceptance.AcceptanceFailure):
+                                ui_acceptance.wait_for_ai_key_control(driver, editing=editing, timeout=3)
+
     def test_chat_reading_wait_requires_scroll_acknowledgement_and_stable_text(self):
         for state in ("delayed", "no_scroll", "following", "blank", "changing"):
             with self.subTest(state=state):

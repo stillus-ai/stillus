@@ -7554,6 +7554,64 @@ def wait_for_ai_controls(driver: WindowDriver) -> None:
     driver.wait_for_stable_frame("AI controls", crop=(232, 0, 1008, 800), stable_for=0.15, timeout=10)
 
 
+def ai_settings_cards(frame: Path) -> list[tuple[int, int]]:
+    """Read settings card bounds from one painted frame."""
+    luminances = crop_luminances(frame, (AI_CONTENT_LEFT, 0, 1, SCREEN_HEIGHT))
+    rows = {row for (_x, row), value in luminances.items() if value <= AI_CARD_BORDER_LUMINANCE}
+    return [(start - AI_CARD_CORNER, end + AI_CARD_CORNER)
+            for start, end in column_runs(rows, merge_gap=0)
+            if end - start >= AI_CARD_MIN_HEIGHT]
+
+
+def wait_for_ai_key_control(driver: WindowDriver, *, editing: bool,
+                            timeout: float = 10) -> tuple[Path, int]:
+    """Wait for an enabled Change key action or the actual expanded key field."""
+    previous: Path | None = None
+    previous_bounds: tuple[int, int] | None = None
+    stable_since: float | None = None
+    control_y = 0
+
+    def ready() -> bool:
+        nonlocal previous, previous_bounds, stable_since, control_y
+        frame = driver.capture("ai-key-control")
+        cards = ai_settings_cards(frame)
+        bounds = cards[0] if cards else None
+        acknowledged = False
+        if bounds is not None:
+            top, bottom = bounds
+            if editing:
+                control_y = top + 62
+                borders = shaded_row_runs(frame, x=AI_CARD_CONTENT_LEFT, y=top,
+                                           height=100, max_luminance=AI_CARD_BORDER_LUMINANCE)
+                acknowledged = bottom - top >= 160 and any(
+                    end - start >= 22 and start < control_y < end for start, end in borders)
+            else:
+                control_y = bottom - 39
+                # Probe only the lock icon, excluding the button border. A
+                # saved config can precede the UI clearing its busy state.
+                icon = crop_luminances(frame, (AI_CARD_CONTENT_LEFT + 8, control_y - 8, 16, 16))
+                acknowledged = 120 <= bottom - top < 160 and sum(value < 100 for value in icon.values()) >= 5
+        unchanged = (previous is not None and bounds is not None and bounds == previous_bounds
+                     and image_difference(previous, frame,
+                                          crop=(AI_CARD_CONTENT_LEFT, bounds[0], 680, bounds[1] - bounds[0])) == 0)
+        if previous is not None:
+            previous.unlink(missing_ok=True)
+        previous = frame
+        previous_bounds = bounds
+        if not acknowledged or not unchanged:
+            stable_since = None
+            return False
+        now = time.monotonic()
+        if stable_since is None:
+            stable_since = now
+        return now - stable_since >= 0.15
+
+    wait_until("expanded AI key field" if editing else "enabled AI Change key action",
+               ready, timeout=timeout, interval=0.05)
+    assert previous is not None
+    return previous, control_y
+
+
 def ai_settings_scenario(driver: WindowDriver, workspace: Path) -> None:
     """Real native controls with test-only catalog and credential adapters."""
     original = {path: path.read_bytes() for path in (workspace / "notes").glob("*.md")}
@@ -7592,19 +7650,12 @@ def ai_settings_scenario(driver: WindowDriver, workspace: Path) -> None:
 
     def cards() -> list[tuple[int, int]]:
         """Every settings card of the page, read from its left border."""
-        luminances = crop_luminances(
-            driver.capture("ai-cards"), (AI_CONTENT_LEFT, 0, 1, SCREEN_HEIGHT)
-        )
-        rows = {
-            row
-            for (_x, row), luminance in luminances.items()
-            if luminance <= AI_CARD_BORDER_LUMINANCE
-        }
-        return [
-            (start - AI_CARD_CORNER, end + AI_CARD_CORNER)
-            for start, end in column_runs(rows, merge_gap=0)
-            if end - start >= AI_CARD_MIN_HEIGHT
-        ]
+        return ai_settings_cards(driver.capture("ai-cards"))
+
+    def change_key() -> tuple[Path, int]:
+        _, action_y = wait_for_ai_key_control(driver, editing=False)
+        driver.click_point(345, action_y)
+        return wait_for_ai_key_control(driver, editing=True)
 
     def bounds() -> tuple[int, int]:
         driver.click_point(*AI_SIDEBAR_ITEM)
@@ -7789,12 +7840,9 @@ def ai_settings_scenario(driver: WindowDriver, workspace: Path) -> None:
     if state()["aliases"]["default"] != default:
         raise AcceptanceFailure("deleting another alias changed default")
 
-    rows = all_rows()
+    all_rows()
     saved = state()
-    driver.click_point(345, rows[0][1] - 39)
-    settle()
-    empty_key = driver.capture("ai-provider-empty")
-    key_y = key_field()[1]
+    empty_key, key_y = change_key()
     set_clipboard_text(driver.environment, "sk-ant-api03-abcdefghijklmnopqrstuv")
     driver.click_point(957, key_y)
     driver.wait_for_visual_change("provider key pasted", empty_key,
@@ -7806,13 +7854,11 @@ def ai_settings_scenario(driver: WindowDriver, workspace: Path) -> None:
     settle()
     if state() != saved:
         raise AcceptanceFailure("cancelling provider change changed aliases")
-    driver.click_point(345, cards()[0][1] - 39)
-    settle()
-    empty_key = driver.capture("ai-replacement-empty")
+    empty_key, key_y = change_key()
     set_clipboard_text(driver.environment, "sk-proj-abcdefghijklmnopqrstuv")
-    driver.click_point(957, key_field()[1])
+    driver.click_point(957, key_y)
     driver.wait_for_visual_change("replacement key pasted", empty_key,
-                                  crop=(310, key_field()[1] - 15, 540, 30), timeout=10)
+                                  crop=(310, key_y - 15, 540, 30), timeout=10)
     settle()
     primary(within=cards()[0])
     wait_until("replacement key", lambda: state()["connection"] != saved["connection"])
