@@ -9111,7 +9111,6 @@ fn rss_panel(
     let list = scroll(v_stack((cards,)).style(move |style| {
         style
             .width_full()
-            .max_width(860.0)
             .padding(20.0)
             // Leave room to top-align even the final card in a short feed.
             .padding_bottom(viewport_height.get().max(20.0))

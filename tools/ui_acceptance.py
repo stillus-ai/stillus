@@ -7382,6 +7382,27 @@ def rss_cards_scenario(driver: WindowDriver, workspace: Path) -> None:
     driver.click_point(450, 116)
     wait_until("RSS title opens its original URL once", lambda: opened() == [[article_url]])
     wait_until("RSS title persists the read state", lambda: read_ids() == ["entry/0"])
+    # Measure both selected-card edges in its blank top padding, below the
+    # rounded corners. A capped or overflowing list must fail even if centered.
+    for width in (SCREEN_WIDTH, 960, SCREEN_WIDTH):
+        driver.resize_window(width, SCREEN_HEIGHT)
+        frame = driver.wait_for_stable_frame(
+            f"RSS card layout at width {width}", stable_for=0.3,
+            crop=(SIDEBAR_WIDTH, 80, width - SIDEBAR_WIDTH, 120),
+        )
+        edges = column_runs(near_color_columns(
+            frame, (54, 94, 130),
+            crop=(SIDEBAR_WIDTH, 90, width - SIDEBAR_WIDTH, 4),
+        ), merge_gap=0)
+        if len(edges) != 2 or any(end - start > 1 for start, end in edges):
+            raise AcceptanceFailure(f"RSS card side borders missing at width {width}: {edges}")
+        left = edges[0][0] - SIDEBAR_WIDTH
+        right = width - 1 - edges[1][1]
+        if abs(left - 20) > 1 or abs(right - 20) > 1 or abs(left - right) > 1:
+            raise AcceptanceFailure(
+                f"RSS card must fill content with equal 20px insets at width {width}: "
+                f"left={left}, right={right}"
+            )
     driver.close_app()
     if opened() != [[article_url]] or read_ids() != ["entry/0"]:
         raise AcceptanceFailure("RSS title open/read result changed before shutdown")
