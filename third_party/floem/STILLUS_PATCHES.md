@@ -7,6 +7,8 @@ versions and applies the following narrow layout fixes:
 - `WindowConfig::min_size`: forward a logical minimum inner size to winit.
 - `EditorView::layout`: constrain `WrapMethod::EditorWidth` to the parent viewport,
   preventing a stale intrinsic line width from creating a horizontal scrollbar.
+- `WindowConfig::on_close_requested`: let the application defer native close and
+  quit requests until persistence completes; explicit confirmed close remains available.
 
 Trailing whitespace in upstream documentation comments is normalized.
 

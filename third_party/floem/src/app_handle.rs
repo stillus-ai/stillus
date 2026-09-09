@@ -26,20 +26,28 @@ use crate::{
     inspector::Capture,
     profiler::{Profile, ProfileEvent},
     view::View,
-    window::WindowConfig,
+    window::{CloseRequestHandler, WindowConfig},
     window_handle::WindowHandle,
     window_id::process_window_updates,
 };
 
 pub(crate) struct ApplicationHandle {
     window_handles: HashMap<floem_winit::window::WindowId, WindowHandle>,
+    close_handlers: HashMap<WindowId, CloseRequestHandler>,
     timers: HashMap<TimerToken, Timer>,
+}
+
+fn permits_quit<'a>(handlers: impl Iterator<Item = &'a CloseRequestHandler>) -> bool {
+    handlers.fold(true, |permitted, handler| {
+        handler.permits_close() && permitted
+    })
 }
 
 impl ApplicationHandle {
     pub(crate) fn new() -> Self {
         Self {
             window_handles: HashMap::new(),
+            close_handlers: HashMap::new(),
             timers: HashMap::new(),
         }
     }
@@ -58,7 +66,18 @@ impl ApplicationHandle {
                 self.idle();
             }
             UserEvent::QuitApp => {
-                event_loop.exit();
+                // Call every handler, including after a veto, so all windows
+                // can start their pending save. A veto keeps the app running.
+                let permitted = permits_quit(self.close_handlers.values());
+                if permitted {
+                    let windows = self.window_handles.keys().copied().collect::<Vec<_>>();
+                    for window in windows {
+                        self.close_window(window, event_loop);
+                    }
+                    event_loop.exit();
+                } else {
+                    self.handle_updates_for_all_windows();
+                }
             }
             UserEvent::GpuResourcesUpdate { window_id } => {
                 self.window_handles
@@ -191,7 +210,13 @@ impl ApplicationHandle {
                 window_handle.position(point);
             }
             WindowEvent::CloseRequested => {
-                self.close_window(window_id, event_loop);
+                if self
+                    .close_handlers
+                    .get(&window_id)
+                    .map_or(true, |handler| handler.permits_close())
+                {
+                    self.close_window(window_id, event_loop);
+                }
             }
             WindowEvent::Destroyed => {
                 self.close_window(window_id, event_loop);
@@ -282,6 +307,7 @@ impl ApplicationHandle {
         #[allow(unused_variables)] WindowConfig {
             size,
             min_size,
+            close_requested,
             position,
             show_titlebar,
             transparent,
@@ -436,6 +462,9 @@ impl ApplicationHandle {
             font_embolden,
         );
         self.window_handles.insert(window_id, window_handle);
+        if let Some(handler) = close_requested {
+            self.close_handlers.insert(window_id, handler);
+        }
     }
 
     fn close_window(
@@ -444,6 +473,7 @@ impl ApplicationHandle {
         #[cfg(target_os = "macos")] _event_loop: &EventLoopWindowTarget<UserEvent>,
         #[cfg(not(target_os = "macos"))] event_loop: &EventLoopWindowTarget<UserEvent>,
     ) {
+        self.close_handlers.remove(&window_id);
         if let Some(handle) = self.window_handles.get_mut(&window_id) {
             handle.window = None;
             handle.destroy();
@@ -520,5 +550,47 @@ impl ApplicationHandle {
             self.handle_updates_for_all_windows();
         }
         self.fire_timer(event_loop);
+    }
+}
+
+#[cfg(test)]
+mod close_request_tests {
+    use super::*;
+    use std::cell::Cell;
+
+    #[test]
+    fn quit_checks_every_window_after_a_veto() {
+        let calls = Rc::new(Cell::new(0));
+        let first_calls = calls.clone();
+        let first = WindowConfig::default()
+            .on_close_requested(move || {
+                first_calls.set(first_calls.get() + 1);
+                false
+            })
+            .close_requested
+            .unwrap();
+        let second_calls = calls.clone();
+        let second = WindowConfig::default()
+            .on_close_requested(move || {
+                second_calls.set(second_calls.get() + 1);
+                true
+            })
+            .close_requested
+            .unwrap();
+        assert!(!permits_quit([&first, &second].into_iter()));
+        assert_eq!(calls.get(), 2);
+        assert!(permits_quit(std::iter::empty()));
+    }
+
+    #[test]
+    fn pending_save_can_allow_the_next_request() {
+        let saved = Rc::new(Cell::new(false));
+        let ready = saved.clone();
+        let config = WindowConfig::default().on_close_requested(move || ready.get());
+        assert!(format!("{config:?}").contains("CloseRequestHandler"));
+        let handler = config.close_requested.unwrap();
+        assert!(!handler.permits_close());
+        saved.set(true);
+        assert!(handler.permits_close());
     }
 }

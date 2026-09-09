@@ -10,11 +10,26 @@ use peniko::kurbo::{Point, Size};
 use crate::app::{add_app_update_event, AppUpdateEvent};
 use crate::view::IntoView;
 
+pub(crate) struct CloseRequestHandler(Box<dyn Fn() -> bool>);
+
+impl std::fmt::Debug for CloseRequestHandler {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("CloseRequestHandler")
+    }
+}
+
+impl CloseRequestHandler {
+    pub(crate) fn permits_close(&self) -> bool {
+        (self.0)()
+    }
+}
+
 /// Configures various attributes (e.g. size, position, transparency, etc.) of a window.
 #[derive(Debug)]
 pub struct WindowConfig {
     pub(crate) size: Option<Size>,
     pub(crate) min_size: Option<Size>,
+    pub(crate) close_requested: Option<CloseRequestHandler>,
     pub(crate) position: Option<Point>,
     pub(crate) show_titlebar: bool,
     pub(crate) transparent: bool,
@@ -38,6 +53,7 @@ impl Default for WindowConfig {
         Self {
             size: None,
             min_size: None,
+            close_requested: None,
             position: None,
             show_titlebar: true,
             transparent: false,
@@ -58,6 +74,15 @@ impl Default for WindowConfig {
 }
 
 impl WindowConfig {
+    /// Intercepts a native close request and an application quit request.
+    /// Return `false` to keep this window open, for example while saving work.
+    /// Once the operation finishes, [`close_window`] closes it directly without
+    /// calling this handler again. The callback runs on the UI thread.
+    pub fn on_close_requested(mut self, handler: impl Fn() -> bool + 'static) -> Self {
+        self.close_requested = Some(CloseRequestHandler(Box::new(handler)));
+        self
+    }
+
     /// Minimum inner size, in logical pixels, enforced by the window manager.
     pub fn min_size(mut self, size: impl Into<Size>) -> Self {
         self.min_size = Some(size.into());

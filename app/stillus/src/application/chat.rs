@@ -1481,10 +1481,11 @@ impl Application {
             }
         }
         if let Some(id) = pending {
-            let opened = self
-                .workspace
-                .as_mut()
-                .is_some_and(|w| w.open_engine_item(&engine_id(), &id).is_ok());
+            let opened = !self.deferred_note_action_pending()
+                && self
+                    .workspace
+                    .as_mut()
+                    .is_some_and(|w| w.open_engine_item(&engine_id(), &id).is_ok());
             if opened {
                 self.chats.as_mut().expect("coordinator").pending_open = None;
                 let _ = self.chat_query(
@@ -1497,7 +1498,18 @@ impl Application {
                 );
                 self.effects.push(super::ApplicationEvent::ResetEditor);
                 changed = true;
-            } else if !self.save_worker_active {
+            } else if !self.save_worker_active
+                && self
+                    .workspace
+                    .as_ref()
+                    .and_then(|workspace| workspace.document())
+                    .is_some_and(|document| {
+                        matches!(
+                            document.save_status(),
+                            stillus_core::SaveStatus::Dirty { .. }
+                        )
+                    })
+            {
                 let _ = self.start_chat_document_save();
             }
         }

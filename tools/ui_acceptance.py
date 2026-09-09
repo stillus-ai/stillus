@@ -5315,6 +5315,20 @@ def persistence_scenario(driver: WindowDriver, workspace: Path) -> None:
     assert_no_temporary_files(save_activity_workspace)
     assert_no_temporary_files(retry_workspace)
 
+    close_workspace = create_workspace(driver.temporary_root, "close-dirty-workspace")
+    close_note = close_workspace / "notes" / "Close.md"
+    close_note.write_text("# Close\n\nbody\n", encoding="utf-8")
+    make_workspace_accessible(close_workspace)
+    driver.start_app(close_workspace, "close-dirty")
+    driver.click("editor")
+    driver.key("End")
+    driver.type_text(" saved-before-close")
+    # Send WM_DELETE_WINDOW immediately, without waiting for the autosave timer.
+    driver.close_app()
+    if not any("saved-before-close" in read_text(path) for path in (close_workspace / "notes").glob("*.md")):
+        raise AcceptanceFailure("native close discarded the final edit")
+    assert_no_temporary_files(close_workspace)
+
 
 def recovery_scenario(driver: WindowDriver, workspace: Path) -> None:
     project = workspace / "notes" / "Project Alpha.md"

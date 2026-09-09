@@ -149,8 +149,8 @@ pub(crate) enum ButtonContext {
     Menu,
 }
 
-/// Icon-only buttons retain a title even when unavailable.
-/// The native tooltip handles hover; the same reactive content handles keyboard focus.
+// Icon-only buttons retain a title even when unavailable.
+// Hover and keyboard focus share the same reactive content.
 thread_local! {
     static BUTTON_FOCUS_TARGETS: RefCell<std::collections::HashMap<ViewId, ViewId>> = RefCell::new(std::collections::HashMap::new());
     static POINTER_FOCUS_RESTORE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
@@ -434,6 +434,46 @@ pub(crate) fn enabled_icon_toggle_button(
             compact_size: None,
         },
         enabled,
+        active,
+        action,
+    )
+}
+
+/// A pending operation retains its hover hint while preventing duplicate work.
+pub(crate) fn busy_icon_toggle_button(
+    icon: &'static str,
+    title: impl Fn() -> String + 'static,
+    palette: Palette,
+    enabled: impl Fn() -> bool + 'static,
+    active: impl Fn() -> bool + 'static,
+    busy: impl Fn() -> bool + 'static,
+    action: impl Fn() + 'static,
+) -> AnyView {
+    let busy: Rc<dyn Fn() -> bool> = Rc::new(busy);
+    let busy_icon = busy.clone();
+    let busy_title = busy.clone();
+    button(
+        move || {
+            if busy_icon() {
+                ButtonAction::Refresh.icon()
+            } else {
+                icon
+            }
+        },
+        move || {
+            if busy_title() {
+                tr!(WaitingAutosave)
+            } else {
+                title()
+            }
+        },
+        ButtonStyle {
+            labeled: false,
+            tone: IconButtonTone::Secondary,
+            palette,
+            compact_size: None,
+        },
+        move || enabled() && !busy(),
         active,
         action,
     )

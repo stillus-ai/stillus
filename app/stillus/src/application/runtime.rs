@@ -50,6 +50,304 @@ impl WorkspaceSlot {
     }
 }
 static RSS_UI_SESSION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+#[cfg(test)]
+mod deferred_note_tests {
+    use super::*;
+    use std::{fs, time::Duration};
+
+    struct Fixture {
+        app: Application,
+        root: PathBuf,
+    }
+
+    impl Fixture {
+        fn new() -> Self {
+            static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+            let root = std::env::temp_dir().join(format!(
+                "stillus-deferred-{}-{}",
+                std::process::id(),
+                NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            ));
+            fs::create_dir_all(root.join("notes")).expect("create fixture");
+            fs::write(
+                root.join("notes/Original.md"),
+                "# Original\n\ninitial body\n",
+            )
+            .expect("write note");
+            Self {
+                app: Application::load(&root),
+                root,
+            }
+        }
+
+        fn edit(&mut self) {
+            let end = self
+                .app
+                .workspace
+                .as_ref()
+                .unwrap()
+                .document()
+                .unwrap()
+                .len_bytes();
+            self.app.apply(EditorCommand::SetCaret {
+                offset: end,
+                extend: false,
+            });
+            self.app
+                .apply(EditorCommand::Insert("unsaved body\n".into()));
+        }
+
+        fn pump_until(&mut self, ready: impl Fn(&Application) -> bool) {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while !ready(&self.app) {
+                assert!(
+                    Instant::now() < deadline,
+                    "deferred action did not settle: save={:?}, pending={}, error={:?}",
+                    self.app
+                        .workspace
+                        .as_ref()
+                        .and_then(WorkspaceSession::document)
+                        .map(|document| document.save_status()),
+                    self.app.deferred_note_action_pending(),
+                    self.app.error
+                );
+                self.app.poll_persistence();
+                thread::sleep(Duration::from_millis(2));
+            }
+        }
+    }
+
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            self.app.shutdown().expect("shutdown fixture workers");
+            fs::remove_dir_all(&self.root).expect("remove fixture");
+        }
+    }
+
+    #[test]
+    fn dirty_trash_saves_the_body_before_metadata_and_deduplicates_clicks() {
+        let mut fixture = Fixture::new();
+        fixture.edit();
+        assert!(!fixture.app.set_deleted_selected(true));
+        assert!(!fixture.app.set_deleted_selected(true));
+        assert!(fixture.app.deferred_note_action_busy());
+        fixture.pump_until(|app| !app.deferred_note_action_pending());
+        let workspace = fixture.app.workspace.as_ref().unwrap();
+        let note = &workspace.notes()[0];
+        assert!(note.deleted);
+        assert!(
+            fs::read_to_string(&note.path)
+                .unwrap()
+                .contains("unsaved body")
+        );
+        assert!(fixture.app.error.is_none());
+    }
+
+    #[test]
+    fn dirty_pin_tags_and_rename_preserve_the_latest_saved_body() {
+        let mut fixture = Fixture::new();
+        fixture.edit();
+        assert!(!fixture.app.toggle_pinned_selected());
+        assert!(!fixture.app.toggle_pinned_selected());
+        fixture.pump_until(|app| !app.deferred_note_action_pending());
+        assert!(fixture.app.workspace.as_ref().unwrap().notes()[0].pinned);
+        fixture.edit();
+        assert!(!fixture.app.add_tag_selected("review"));
+        fixture.pump_until(|app| !app.deferred_note_action_pending());
+        assert!(
+            fixture.app.workspace.as_ref().unwrap().notes()[0]
+                .tags
+                .contains(&"review".into())
+        );
+        fixture.edit();
+        assert!(!fixture.app.remove_tag_selected("review"));
+        fixture.pump_until(|app| !app.deferred_note_action_pending());
+        assert!(
+            fixture.app.workspace.as_ref().unwrap().notes()[0]
+                .tags
+                .is_empty()
+        );
+        fixture.edit();
+        assert!(!fixture.app.rename_selected("Renamed"));
+        fixture.pump_until(|app| !app.deferred_note_action_pending());
+        let workspace = fixture.app.workspace.as_ref().unwrap();
+        let note = &workspace.notes()[workspace.selected_note().unwrap()];
+        assert_eq!(note.path.file_name().unwrap(), "Renamed.md");
+        assert!(
+            fs::read_to_string(&note.path)
+                .unwrap()
+                .contains("unsaved body")
+        );
+    }
+
+    #[test]
+    fn save_conflict_keeps_deferred_trash_and_retry_does_not_overwrite_disk() {
+        let mut fixture = Fixture::new();
+        fixture.edit();
+        assert!(!fixture.app.set_deleted_selected(true));
+        let path = fixture.app.workspace.as_ref().unwrap().notes()[0]
+            .path
+            .clone();
+        fs::write(&path, "# Original\n\nexternal change\n").unwrap();
+        fixture.pump_until(|app| app.note_save_failed() && !app.save_worker_active);
+        fixture.app.poll_deferred_note_action();
+        assert!(!fixture.app.deferred_note_action_busy());
+        assert!(fixture.app.deferred_note_action_pending());
+        assert!(fixture.app.retry_deferred_note_action());
+        fixture.app.poll_persistence();
+        fixture.pump_until(|app| app.note_save_failed() && !app.save_worker_active);
+        assert!(fixture.app.deferred_note_action_pending());
+        assert!(!fixture.app.workspace.as_ref().unwrap().notes()[0].deleted);
+        assert!(
+            fs::read_to_string(&path)
+                .unwrap()
+                .contains("external change")
+        );
+        fixture
+            .app
+            .discard_local_and_reload()
+            .expect("explicit conflict resolution");
+        fixture.app.retry_deferred_note_action();
+        fixture.pump_until(|app| !app.deferred_note_action_pending());
+        let workspace = fixture.app.workspace.as_ref().unwrap();
+        let note = &workspace.notes()[0];
+        assert!(note.deleted);
+        assert!(
+            fs::read_to_string(&note.path)
+                .unwrap()
+                .contains("external change")
+        );
+    }
+
+    #[test]
+    fn navigation_waits_for_deferred_metadata_on_the_original_note() {
+        let mut fixture = Fixture::new();
+        fixture
+            .app
+            .request_note_creation(SidebarFilter::All, "Other".into());
+        fixture.app.open_note(0);
+        fixture.edit();
+        let original = fixture
+            .app
+            .workspace
+            .as_ref()
+            .unwrap()
+            .selected_note()
+            .unwrap();
+        assert!(!fixture.app.toggle_pinned_selected());
+        fixture.app.open_note(1 - original);
+        fixture.pump_until(|app| {
+            !app.deferred_note_action_pending() && app.pending_note_path.is_none()
+        });
+        let workspace = fixture.app.workspace.as_ref().unwrap();
+        assert!(workspace.notes()[original].pinned);
+        assert!(!workspace.notes()[1 - original].pinned);
+        assert_eq!(workspace.selected_note(), Some(1 - original));
+    }
+
+    #[test]
+    fn active_save_finishes_and_saves_newer_edits_before_trash() {
+        let mut fixture = Fixture::new();
+        fixture.edit();
+        let now = fixture.app.now_ms();
+        let workspace = fixture.app.workspace.as_mut().unwrap();
+        workspace.retry_autosave(now);
+        let job = workspace
+            .begin_autosave(now, "2026-09-09T00:00:00Z".into())
+            .unwrap()
+            .map(PersistenceJob::Save)
+            .expect("first canonical save starts");
+        fixture.app.save_worker_active = true;
+        fixture
+            .app
+            .apply(EditorCommand::Insert("newer edit\n".into()));
+        assert!(!fixture.app.set_deleted_selected(true));
+        fixture.app.save_sender.send(job.execute()).unwrap();
+        fixture.pump_until(|app| !app.deferred_note_action_pending());
+        let workspace = fixture.app.workspace.as_ref().unwrap();
+        let note = &workspace.notes()[0];
+        assert!(note.deleted);
+        let saved = fs::read_to_string(&note.path).unwrap();
+        assert!(saved.contains("unsaved body"));
+        assert!(saved.contains("newer edit"));
+    }
+
+    #[test]
+    fn native_close_waits_for_dirty_persistence_and_can_be_cancelled() {
+        let mut fixture = Fixture::new();
+        fixture.edit();
+        assert!(!fixture.app.request_close_after_save());
+        fixture.pump_until(Application::close_after_save_ready);
+        let workspace = fixture.app.workspace.as_ref().unwrap();
+        assert!(
+            fs::read_to_string(&workspace.notes()[0].path)
+                .unwrap()
+                .contains("unsaved body")
+        );
+        fixture.app.cancel_close_after_save();
+        assert!(!fixture.app.close_after_save_ready());
+    }
+
+    #[test]
+    fn rss_navigation_waits_for_the_dirty_note_to_save() {
+        let mut fixture = Fixture::new();
+        let id = fixture
+            .app
+            .create_rss("https://example.com/feed.xml", &SidebarFilter::All)
+            .expect("feed created");
+        fixture.app.open_note(0);
+        fixture.edit();
+        assert!(
+            fixture
+                .app
+                .workspace
+                .as_ref()
+                .unwrap()
+                .selected_note()
+                .is_some()
+        );
+        assert!(
+            fixture
+                .app
+                .workspace
+                .as_ref()
+                .unwrap()
+                .document()
+                .unwrap()
+                .has_unsaved_work()
+        );
+        assert!(!fixture.app.open_rss(&id));
+        assert!(fixture.app.pending_rss_open.is_some());
+        fixture.pump_until(|app| app.pending_rss_open.is_none());
+        let workspace = fixture.app.workspace.as_ref().unwrap();
+        assert_eq!(workspace.selected_rss(), Some(&id));
+        assert!(
+            fs::read_to_string(&workspace.notes()[0].path)
+                .unwrap()
+                .contains("unsaved body")
+        );
+        assert!(fixture.app.error.is_none());
+    }
+
+    #[test]
+    fn cancelling_a_deferred_action_keeps_saving_without_applying_its_metadata() {
+        let mut fixture = Fixture::new();
+        fixture.edit();
+        assert!(!fixture.app.toggle_pinned_selected());
+        assert!(fixture.app.cancel_deferred_note_action());
+        fixture.pump_until(|app| {
+            app.workspace
+                .as_ref()
+                .unwrap()
+                .document()
+                .is_some_and(|document| matches!(document.save_status(), SaveStatus::Clean { .. }))
+        });
+        assert!(!fixture.app.workspace.as_ref().unwrap().notes()[0].pinned);
+        assert!(!fixture.app.deferred_note_action_pending());
+        assert!(!fixture.app.cancel_deferred_note_action());
+    }
+}
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum SecurityActionOutcome {
     Completed,
@@ -120,6 +418,24 @@ pub(crate) fn is_current_search_generation(current: u64, incoming: u64) -> bool 
     current == incoming
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum DeferredNoteAction {
+    Deleted(bool),
+    Pin,
+    Favorite,
+    AddTag(String),
+    RemoveTag(String),
+    Rename(String),
+}
+
+struct PendingNoteAction {
+    session: u64,
+    path: PathBuf,
+    action: DeferredNoteAction,
+    failed: bool,
+    executing: bool,
+}
+
 pub(crate) struct Application {
     pub(super) chats: Option<super::chat::Coordinator>,
     pub(crate) rss_session: u64,
@@ -164,6 +480,9 @@ pub(crate) struct Application {
     pub(crate) blocked_password_change_workspace: Option<PathBuf>,
     pub(crate) secure_ui_operation: Option<SecureUiOperation>,
     pub(crate) pending_note_path: Option<PathBuf>,
+    pending_note_action: Option<PendingNoteAction>,
+    pending_rss_open: Option<(u64, ItemId)>,
+    close_after_save: bool,
     pub(crate) pending_note_creation: Option<(SidebarFilter, String)>,
     pub(crate) note_creation_focus_pending: bool,
     pub(crate) pending_external_target: Option<DocumentTarget>,
@@ -236,6 +555,9 @@ impl Application {
             secure_ui_operation: None,
 
             pending_note_path: None,
+            pending_note_action: None,
+            pending_rss_open: None,
+            close_after_save: false,
             pending_note_creation: None,
             note_creation_focus_pending: false,
             pending_external_target: None,
@@ -412,6 +734,9 @@ impl Application {
                     secure_ui_operation: None,
 
                     pending_note_path: None,
+                    pending_note_action: None,
+                    pending_rss_open: None,
+                    close_after_save: false,
                     pending_note_creation: None,
                     note_creation_focus_pending: false,
                     pending_external_target: None,
@@ -475,6 +800,9 @@ impl Application {
                 secure_ui_operation: None,
 
                 pending_note_path: None,
+                pending_note_action: None,
+                pending_rss_open: None,
+                close_after_save: false,
                 pending_note_creation: None,
                 note_creation_focus_pending: false,
                 pending_external_target: None,
@@ -511,6 +839,15 @@ impl Application {
     }
 
     pub(crate) fn open_rss(&mut self, item_id: &ItemId) -> bool {
+        self.pending_note_path = None;
+        self.pending_external_target = None;
+        if self.deferred_note_action_pending() {
+            self.pending_rss_open = self
+                .workspace
+                .as_ref()
+                .map(|workspace| (workspace.session_id(), item_id.clone()));
+            return false;
+        }
         let result = self
             .workspace
             .as_mut()
@@ -518,18 +855,57 @@ impl Application {
             .and_then(|workspace| workspace.open_rss(item_id));
         match result {
             Ok(()) => {
+                self.pending_rss_open = None;
                 self.selected_rss_entry = None;
                 self.expanded_rss_entry = None;
                 self.error = None;
                 true
             }
+            Err(CoreError::UnsavedChanges) => {
+                self.pending_rss_open = self
+                    .workspace
+                    .as_ref()
+                    .map(|workspace| (workspace.session_id(), item_id.clone()));
+                self.accelerate_dirty_save();
+                if self.note_save_failed() {
+                    self.error = Some(msg!(ResolveSaveFirst).into());
+                }
+                false
+            }
             Err(error) => {
+                self.pending_rss_open = None;
                 self.error = Some(UiText::Failure {
                     details: error.to_string(),
                 });
                 false
             }
         }
+    }
+
+    fn poll_pending_rss_open(&mut self) -> bool {
+        let Some((session, id)) = self.pending_rss_open.clone() else {
+            return false;
+        };
+        if self
+            .workspace
+            .as_ref()
+            .is_none_or(|workspace| workspace.session_id() != session)
+        {
+            self.pending_rss_open = None;
+            return true;
+        }
+        if self.note_save_failed() {
+            let error = Some(UiText::from(msg!(ResolveSaveFirst)));
+            let changed = self.error != error;
+            self.error = error;
+            return changed;
+        }
+        if self.note_action_waiting() || self.deferred_note_action_pending() {
+            self.accelerate_dirty_save();
+            return false;
+        }
+        self.open_rss(&id);
+        self.pending_rss_open.is_none()
     }
 
     pub(crate) fn create_rss(&mut self, url: &str, active: &SidebarFilter) -> Option<ItemId> {
@@ -1108,6 +1484,14 @@ impl Application {
     }
 
     pub(crate) fn open_note(&mut self, index: usize) {
+        self.pending_rss_open = None;
+        if self.pending_note_action.is_some() {
+            self.pending_note_path = self
+                .workspace
+                .as_ref()
+                .and_then(|workspace| workspace.notes().get(index).map(|note| note.path.clone()));
+            return;
+        }
         self.pending_external_target = None;
         let now_ms = self.now_ms();
         let Some(workspace) = self.workspace.as_mut() else {
@@ -1309,6 +1693,11 @@ impl Application {
     }
 
     pub(crate) fn open_external_target(&mut self, target: DocumentTarget) -> bool {
+        self.pending_rss_open = None;
+        if self.pending_note_action.is_some() {
+            self.pending_external_target = Some(target);
+            return true;
+        }
         let DocumentTarget::ExternalFile { engine_id, item_id } = &target else {
             return false;
         };
@@ -1343,6 +1732,9 @@ impl Application {
     }
 
     pub(crate) fn open_pending_external(&mut self) -> bool {
+        if self.pending_note_action.is_some() {
+            return false;
+        }
         let Some(target) = self.pending_external_target.clone() else {
             return false;
         };
@@ -1490,6 +1882,9 @@ impl Application {
     }
 
     pub(crate) fn open_pending_note(&mut self) -> bool {
+        if self.pending_note_action.is_some() {
+            return false;
+        }
         let Some(target_path) = self.pending_note_path.clone() else {
             return false;
         };
@@ -1626,6 +2021,10 @@ impl Application {
     }
 
     pub(crate) fn request_note_creation(&mut self, active: SidebarFilter, title: String) -> bool {
+        if self.pending_note_action.is_some() {
+            self.pending_note_creation = Some((active, title));
+            return false;
+        }
         let title = title.as_str();
         let result = format_utc_timestamp(self.clock.wall_time()).and_then(|timestamp| {
             self.workspace
@@ -1676,6 +2075,9 @@ impl Application {
     }
 
     pub(crate) fn retry_pending_note_creation(&mut self) -> bool {
+        if self.pending_note_action.is_some() {
+            return false;
+        }
         let Some((active, title)) = self.pending_note_creation.clone() else {
             return false;
         };
@@ -1766,7 +2168,207 @@ impl Application {
         }
     }
 
+    /// UI metadata requests keep their original owner while canonical persistence runs.
+    /// The slot is bounded and repeated clicks never replace the accepted request.
+    fn defer_note_action(&mut self, action: DeferredNoteAction) -> bool {
+        if self.pending_note_action.is_some() {
+            return true;
+        }
+        if !self.note_action_waiting() {
+            return false;
+        }
+        let Some(workspace) = self.workspace.as_ref() else {
+            return false;
+        };
+        let Some(path) = workspace
+            .selected_note()
+            .and_then(|index| workspace.notes().get(index))
+            .map(|note| note.path.clone())
+        else {
+            return false;
+        };
+        self.pending_note_action = Some(PendingNoteAction {
+            session: workspace.session_id(),
+            path,
+            action,
+            failed: false,
+            executing: false,
+        });
+        self.accelerate_dirty_save();
+        self.state_dirty = true;
+        true
+    }
+
+    fn accelerate_dirty_save(&mut self) {
+        let now = self.now_ms();
+        if let Some(workspace) = self.workspace.as_mut()
+            && workspace
+                .document()
+                .is_some_and(|document| matches!(document.save_status(), SaveStatus::Dirty { .. }))
+        {
+            workspace.retry_autosave(now);
+        }
+    }
+
+    fn note_action_waiting(&self) -> bool {
+        self.save_worker_active
+            || self.secure_worker_active
+            || self.secure_ui_operation.is_some()
+            || self.pending_security_action.is_some()
+            || self.pending_password_change.is_some()
+            || self.search_security_operation.is_some()
+            || self.workspace.as_ref().is_some_and(|workspace| {
+                workspace.actions_busy()
+                    || workspace.secure_operation_pending()
+                    || workspace.integrity_failure().is_some()
+                    || workspace.document().is_some_and(|document| {
+                        !matches!(document.save_status(), SaveStatus::Clean { .. })
+                    })
+            })
+    }
+
+    fn note_save_failed(&self) -> bool {
+        self.workspace.as_ref().is_some_and(|workspace| {
+            workspace.integrity_failure().is_some()
+                || workspace.document().is_some_and(|document| {
+                    matches!(
+                        document.save_status(),
+                        SaveStatus::Error { .. } | SaveStatus::Conflict { .. }
+                    )
+                })
+        })
+    }
+
+    pub(crate) fn deferred_note_action_pending(&self) -> bool {
+        self.pending_note_action.is_some()
+    }
+
+    pub(crate) fn deferred_note_action_busy(&self) -> bool {
+        self.pending_note_action
+            .as_ref()
+            .is_some_and(|pending| !pending.failed)
+            && !self.note_save_failed()
+    }
+
+    pub(crate) fn retry_deferred_note_action(&mut self) -> bool {
+        let Some(pending) = self.pending_note_action.as_mut() else {
+            return self.retry_save();
+        };
+        pending.failed = false;
+        self.retry_save();
+        self.state_dirty = true;
+        true
+    }
+
+    pub(crate) fn cancel_deferred_note_action(&mut self) -> bool {
+        if self
+            .pending_note_action
+            .as_ref()
+            .is_none_or(|pending| pending.executing)
+        {
+            return false;
+        }
+        self.pending_note_action = None;
+        self.state_dirty = true;
+        true
+    }
+
+    fn poll_deferred_note_action(&mut self) -> bool {
+        let Some(pending) = self.pending_note_action.as_ref() else {
+            return false;
+        };
+        if pending.failed {
+            return false;
+        }
+        if pending.executing {
+            if self.secure_worker_active || self.secure_ui_operation.is_some() {
+                return false;
+            }
+            if self.error.is_some() {
+                let pending = self
+                    .pending_note_action
+                    .as_mut()
+                    .expect("pending action exists");
+                pending.executing = false;
+                pending.failed = true;
+            } else {
+                self.pending_note_action = None;
+            }
+            return true;
+        }
+        // Never let a stale selection or a replacement workspace retarget an action.
+        let owner_matches = self.workspace.as_ref().is_some_and(|workspace| {
+            workspace.session_id() == pending.session
+                && workspace
+                    .selected_note()
+                    .and_then(|index| workspace.notes().get(index))
+                    .is_some_and(|note| note.path == pending.path)
+        });
+        if !owner_matches {
+            self.pending_note_action = None;
+            self.error = Some(msg!(ResolveSaveFirst).into());
+            return true;
+        }
+        if self.note_save_failed() {
+            self.pending_note_action
+                .as_mut()
+                .expect("pending action exists")
+                .failed = true;
+            self.error = Some(msg!(ResolveSaveFirst).into());
+            return true;
+        }
+        if self.note_action_waiting() {
+            self.accelerate_dirty_save();
+            return false;
+        }
+        let mut pending = self
+            .pending_note_action
+            .take()
+            .expect("pending action exists");
+        self.error = None;
+        match &pending.action {
+            DeferredNoteAction::Deleted(deleted) => self.set_deleted_selected(*deleted),
+            DeferredNoteAction::Pin => self.toggle_pinned_selected(),
+            DeferredNoteAction::Favorite => self.toggle_favorited_selected(),
+            DeferredNoteAction::AddTag(tag) => self.add_tag_selected(tag),
+            DeferredNoteAction::RemoveTag(tag) => self.remove_tag_selected(tag),
+            DeferredNoteAction::Rename(title) => self.rename_selected(title),
+        };
+        if self.error.is_some() {
+            pending.failed = true;
+            self.pending_note_action = Some(pending);
+        } else if self.secure_worker_active {
+            pending.executing = true;
+            self.pending_note_action = Some(pending);
+        }
+        true
+    }
+
+    /// Returns true only when a native close can be committed now.
+    pub(crate) fn request_close_after_save(&mut self) -> bool {
+        self.close_after_save = true;
+        self.accelerate_dirty_save();
+        if self.note_save_failed() {
+            self.error = Some(msg!(ResolveSaveFirst).into());
+        }
+        self.close_after_save_ready()
+    }
+
+    pub(crate) fn close_after_save_ready(&self) -> bool {
+        self.close_after_save
+            && !self.deferred_note_action_pending()
+            && workspace_switch_blocker(self).is_none()
+            && !self.chats_busy()
+    }
+
+    pub(crate) fn cancel_close_after_save(&mut self) {
+        self.close_after_save = false;
+    }
+
     pub(crate) fn add_tag_selected(&mut self, tag: &str) -> bool {
+        if self.defer_note_action(DeferredNoteAction::AddTag(tag.to_owned())) {
+            return false;
+        }
         let protected = self
             .workspace
             .as_ref()
@@ -1788,6 +2390,9 @@ impl Application {
     }
 
     pub(crate) fn remove_tag_selected(&mut self, tag: &str) -> bool {
+        if self.defer_note_action(DeferredNoteAction::RemoveTag(tag.to_owned())) {
+            return false;
+        }
         let protected = self
             .workspace
             .as_ref()
@@ -1811,6 +2416,9 @@ impl Application {
     }
 
     pub(crate) fn toggle_pinned_selected(&mut self) -> bool {
+        if self.defer_note_action(DeferredNoteAction::Pin) {
+            return false;
+        }
         let protected = self
             .workspace
             .as_ref()
@@ -1834,6 +2442,9 @@ impl Application {
     }
 
     pub(crate) fn toggle_favorited_selected(&mut self) -> bool {
+        if self.defer_note_action(DeferredNoteAction::Favorite) {
+            return false;
+        }
         let protected = self
             .workspace
             .as_ref()
@@ -1888,6 +2499,9 @@ impl Application {
     }
 
     pub(crate) fn set_deleted_selected(&mut self, deleted: bool) -> bool {
+        if self.defer_note_action(DeferredNoteAction::Deleted(deleted)) {
+            return false;
+        }
         let protected = self
             .workspace
             .as_ref()
@@ -2628,6 +3242,11 @@ impl Application {
                     if self.pending_note_path.as_deref() == Some(old_path) {
                         self.pending_note_path = Some(new_path.to_path_buf());
                     }
+                    if let Some(pending) = self.pending_note_action.as_mut()
+                        && pending.path == old_path
+                    {
+                        pending.path = new_path.to_path_buf();
+                    }
                 }
                 self.request_search_reconcile();
             }
@@ -2648,10 +3267,15 @@ impl Application {
         changed |= self.poll_chats();
         changed |= self.retry_pending_security_action();
         changed |= self.retry_pending_password_change();
+        changed |= self.poll_deferred_note_action();
+        changed |= self.poll_pending_rss_open();
         changed |= self.retry_pending_note_creation();
         changed |= self.open_pending_note();
         changed |= self.open_pending_external();
         changed |= self.finish_pending_external_close();
+        if self.close_after_save {
+            self.accelerate_dirty_save();
+        }
         let persistence_allowed = self.pending_password_change.as_ref().is_none_or(|request| {
             matches!(
                 request.state,
@@ -2895,6 +3519,22 @@ pub(crate) fn category_path_is_same_or_descendant(candidate: &str, ancestor: &st
 
 impl Application {
     pub(crate) fn rename_selected(&mut self, title: &str) -> bool {
+        if self.defer_note_action(DeferredNoteAction::Rename(title.to_owned())) {
+            return false;
+        }
+        if self
+            .workspace
+            .as_ref()
+            .is_some_and(WorkspaceSession::selected_is_protected)
+        {
+            let result = format_utc_timestamp(self.clock.wall_time()).and_then(|timestamp| {
+                self.workspace
+                    .as_mut()
+                    .ok_or_else(|| CoreError::Workspace("workspace is not open".to_owned()))?
+                    .begin_rename_protected_selected(title, &timestamp)
+            });
+            return self.start_metadata_job(result);
+        }
         self.run_workspace_action(|workspace, timestamp| {
             workspace.rename_selected(title, timestamp)
         })
@@ -2972,7 +3612,10 @@ fn workspace_content_switch_blocker(model: &Application) -> Option<WorkspaceSwit
         return Some(WorkspaceSwitchBlocker::SaveFailure);
     }
     if model.save_worker_active
+        || model.pending_note_action.is_some()
+        || model.pending_rss_open.is_some()
         || model.pending_note_path.is_some()
+        || model.pending_note_creation.is_some()
         || model.pending_external_target.is_some()
         || model.pending_external_close.is_some()
     {

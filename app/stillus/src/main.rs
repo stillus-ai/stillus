@@ -334,6 +334,8 @@ fn main() -> Result<(), LaunchError> {
         operations: launch.smoke_operations,
     };
     let initial_window = settings.window;
+    let close_requested = create_rw_signal(false);
+    let close_model = model.clone();
     let build_view = move |_| {
         app_view(
             model,
@@ -342,6 +344,7 @@ fn main() -> Result<(), LaunchError> {
             settings,
             startup_prompt,
             UiLaunch {
+                close_requested,
                 smoke,
                 external_paths: launch.external_paths,
                 restart_request,
@@ -350,6 +353,13 @@ fn main() -> Result<(), LaunchError> {
     };
     let window_config = Some(
         WindowConfig::default()
+            .on_close_requested(move || {
+                let ready = close_model.borrow_mut().request_close_after_save();
+                if !ready {
+                    close_requested.set(true);
+                }
+                ready
+            })
             .title("Stillus")
             .size((initial_window.width, initial_window.height))
             .min_size((settings::MIN_WINDOW_WIDTH, settings::MIN_WINDOW_HEIGHT))
@@ -1666,6 +1676,10 @@ fn autosave_tick(model: Rc<RefCell<AppModel>>, revision: RwSignal<u64>, generati
     if changed {
         revision.update(|value| *value += 1);
     }
+    if model.borrow().close_after_save_ready() {
+        quit_app();
+        return;
+    }
     schedule_autosave(model, revision);
 }
 
@@ -1898,6 +1912,7 @@ fn apply_workspace_projection(
 }
 
 struct UiLaunch {
+    close_requested: RwSignal<bool>,
     smoke: SmokeOptions,
     external_paths: Vec<PathBuf>,
     restart_request: Rc<RefCell<Option<restart::PendingRestart>>>,
@@ -1912,11 +1927,20 @@ fn app_view(
     launch: UiLaunch,
 ) -> impl IntoView {
     let UiLaunch {
+        close_requested,
         smoke,
         external_paths,
         restart_request,
     } = launch;
     let revision = create_rw_signal(0_u64);
+    let close_poll_model = model.clone();
+    create_effect(move |_| {
+        if close_requested.get() {
+            close_requested.set(false);
+            revision.update(|value| *value = value.saturating_add(1));
+            schedule_autosave(close_poll_model.clone(), revision);
+        }
+    });
     let sidebar_width = create_rw_signal(initial_settings.sidebar.width);
     let sidebar_state = create_rw_signal({
         let model = model.borrow();
@@ -9351,7 +9375,8 @@ fn editor_panel(
             };
             let retry = workspace
                 .document()
-                .is_some_and(|document| matches!(document.save_status(), SaveStatus::Error { .. }));
+                .is_some_and(|document| matches!(document.save_status(), SaveStatus::Error { .. }))
+                || (model.deferred_note_action_pending() && !model.deferred_note_action_busy());
             let reload = workspace.document().is_some_and(|document| {
                 matches!(document.save_status(), SaveStatus::Conflict { .. })
             });
@@ -9392,7 +9417,11 @@ fn editor_panel(
                     move || {
                         let should_retry = {
                             let mut model = retry_model.borrow_mut();
-                            model.retry_save()
+                            if model.deferred_note_action_pending() {
+                                model.retry_deferred_note_action()
+                            } else {
+                                model.retry_save()
+                            }
                         };
                         if should_retry {
                             revision.update(|value| *value += 1);
@@ -10021,6 +10050,12 @@ fn editor_panel(
         },
     );
     let metadata_visibility_model = model.clone();
+    let dismiss_error_model = model.clone();
+    let error_visibility_model = model.clone();
+    let error_icon_model = model.clone();
+    let operation_busy_model = model.clone();
+    let pin_busy_model = model.clone();
+    let favorite_busy_model = model.clone();
     v_stack((
         h_stack((
             h_stack((
@@ -10028,9 +10063,8 @@ fn editor_panel(
                 h_stack((
                     tag_action,
                     protection_action,
-                    enabled_toolbar_control(
+                    busy_note_toolbar_control(
                         ToolbarAction::Pin,
-                        ToolbarSubject::Note,
                         palette,
                         move || {
                             revision.get();
@@ -10041,14 +10075,17 @@ fn editor_panel(
                             selected_note_flag(&pin_label_model, |note| note.pinned)
                         },
                         move || {
+                            revision.get();
+                            pin_busy_model.borrow().deferred_note_action_busy()
+                        },
+                        move || {
                             pin_model.borrow_mut().toggle_pinned_selected();
                             pin_revision.update(|value| *value += 1);
                             schedule_autosave(pin_model.clone(), pin_revision);
                         },
                     ),
-                    enabled_toolbar_control(
+                    busy_note_toolbar_control(
                         ToolbarAction::Favorite,
-                        ToolbarSubject::Note,
                         palette,
                         move || {
                             revision.get();
@@ -10057,6 +10094,10 @@ fn editor_panel(
                         move || {
                             revision.get();
                             selected_note_flag(&favorite_label_model, |note| note.favorited)
+                        },
+                        move || {
+                            revision.get();
+                            favorite_busy_model.borrow().deferred_note_action_busy()
                         },
                         move || {
                             favorite_model.borrow_mut().toggle_favorited_selected();
@@ -10071,18 +10112,24 @@ fn editor_panel(
                         },
                         move |deleted| {
                             let action_model = deleted_action_model.clone();
-                            toolbar_control(
+                            let busy_model = deleted_action_model.clone();
+                            busy_note_toolbar_control(
                                 if deleted {
                                     ToolbarAction::Restore
                                 } else {
                                     ToolbarAction::Delete
                                 },
-                                ToolbarSubject::Note,
                                 palette,
+                                || true,
                                 || false,
+                                move || {
+                                    revision.get();
+                                    busy_model.borrow().deferred_note_action_busy()
+                                },
                                 move || {
                                     action_model.borrow_mut().set_deleted_selected(!deleted);
                                     deleted_revision.update(|value| *value += 1);
+                                    schedule_autosave(action_model.clone(), deleted_revision);
                                 },
                             )
                             .into_any()
@@ -10160,6 +10207,42 @@ fn editor_panel(
             }),
             empty().style(|style| style.flex_grow(1.0)),
             recovery_actions,
+            svg(ICON_WARNING).style(move |s| {
+                revision.get();
+                s.size(16.0, 16.0)
+                    .color(palette.danger)
+                    .flex_shrink(0.0)
+                    .apply_if(error_icon_model.borrow().error.is_none(), |s| s.hide())
+            }),
+            label(move || {
+                revision.get();
+                if operation_busy_model.borrow().deferred_note_action_busy() {
+                    tr!(WaitingAutosave)
+                } else {
+                    String::new()
+                }
+            })
+            .style(move |s| s.color(palette.muted).flex_shrink(0.0)),
+            icon_button(
+                ButtonAction::Close.icon(),
+                || tr!(Close),
+                IconButtonTone::Status,
+                palette,
+                move || {
+                    let mut model = dismiss_error_model.borrow_mut();
+                    model.error = None;
+                    model.cancel_close_after_save();
+                    model.cancel_deferred_note_action();
+                    drop(model);
+                    revision.update(|value| *value += 1);
+                },
+            )
+            .style(move |s| {
+                revision.get();
+                s.apply_if(error_visibility_model.borrow().error.is_none(), |s| {
+                    s.hide()
+                })
+            }),
         ))
         .style(move |style| {
             style
@@ -11566,6 +11649,27 @@ fn toolbar_control(
     on_press: impl Fn() + 'static,
 ) -> AnyView {
     enabled_toolbar_control(action, subject, palette, || true, active, on_press)
+}
+
+fn busy_note_toolbar_control(
+    action: ToolbarAction,
+    palette: Palette,
+    enabled: impl Fn() -> bool + 'static,
+    active: impl Fn() -> bool + 'static,
+    busy: impl Fn() -> bool + 'static,
+    on_press: impl Fn() + 'static,
+) -> AnyView {
+    let active: Rc<dyn Fn() -> bool> = Rc::new(active);
+    let title_active = active.clone();
+    busy_icon_toggle_button(
+        toolbar_action_icon(action),
+        move || toolbar_action_title(action, ToolbarSubject::Note, title_active()),
+        palette,
+        enabled,
+        move || active(),
+        busy,
+        on_press,
+    )
 }
 
 fn enabled_toolbar_control(
