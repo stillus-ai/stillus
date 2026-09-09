@@ -4,6 +4,7 @@
 #![forbid(unsafe_code)]
 
 mod password_change;
+mod permanent_delete;
 #[cfg(any(windows, test))]
 mod replace_retry;
 mod secure_backups;
@@ -14,6 +15,7 @@ pub use password_change::{
     SecurityRotationProgress, SecurityRotationTarget, SecurityRotationTargets,
     change_master_password, recover_password_change, rotate_workspace_security,
 };
+pub use permanent_delete::delete_trashed_note_versioned;
 pub use secure_backups::{
     IntegrityFailure, SecureBackupRecord, VerifiedSave, load_pending_integrity_failure,
     restore_secure_backup,

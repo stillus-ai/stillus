@@ -24,14 +24,14 @@ DEMO_WORKSPACE ?= /workspace/examples/demo-workspace
 endif
 UI_JOBS ?= 2
 
-UI_ACCEPTANCE_STANDARD := ui-click-external ui-click-localization ui-click-rss-cards ui-click-rss-keyboard ui-click-workspace ui-click-compatibility ui-click-categories ui-click-interaction ui-click-lifecycle ui-click-tags ui-click-editor ui-click-context-menu ui-click-selection ui-click-persistence ui-click-recovery ui-click-conflict ui-click-search ui-click-find ui-click-resize ui-click-visual
-UI_ACCEPTANCE_SECURE := ui-click-components ui-click-chat ui-click-rss-filters ui-click-ai ui-click-ai-journal ui-click-updates ui-click-crash ui-click-password-change ui-click-secure ui-click-secure-recovery ui-click-secure-conflict ui-click-secure-integrity
+UI_ACCEPTANCE_STANDARD := ui-click-creation ui-click-external ui-click-localization ui-click-rss-cards ui-click-rss-keyboard ui-click-workspace ui-click-compatibility ui-click-categories ui-click-interaction ui-click-lifecycle ui-click-tags ui-click-editor ui-click-context-menu ui-click-sidebar-context ui-click-selection ui-click-persistence ui-click-recovery ui-click-conflict ui-click-search ui-click-find ui-click-resize ui-click-visual
+UI_ACCEPTANCE_SECURE := ui-click-password ui-click-components ui-click-chat ui-click-rss-filters ui-click-ai ui-click-ai-journal ui-click-updates ui-click-crash ui-click-password-change ui-click-secure ui-click-secure-recovery ui-click-secure-conflict ui-click-secure-integrity
 
 .PHONY: all help check clean build build-windows test-windows-build build-macos build-linux build-linux-smoke build-container native-smoke native-external-smoke demo-data test-demo-data check-macos test test-release lint fmt fmt-check lock tree audit audit-source audit-dependencies audit-vulnerabilities \
 	diff-check status log diff-stat diff image benchmark-generate \
 	benchmark-ropey benchmark-lapce benchmark benchmark-editor test-editor \
 	benchmark-viewport benchmark-search test-frontmatter test-storage test-core test-recovery test-search test-secure test-update ui-check ui-smoke ui-autosave-smoke ui-recovery-smoke ui-conflict-smoke \
-	ui-build ui-build-test-utils ui-operations-smoke ui-click-creation ui-click-workspace ui-click-compatibility ui-click-categories ui-click-interaction ui-click-lifecycle ui-click-tags ui-click-caret ui-click-editor ui-click-context-menu ui-click-selection ui-click-persistence ui-click-recovery ui-click-conflict ui-click-search ui-click-find ui-click-resize ui-click-visual ui-click-password ui-click-password-change ui-click-updates ui-click-secure ui-click-secure-recovery ui-click-secure-conflict ui-click-secure-integrity ui-acceptance package-macos package-macos-smoke
+	ui-build ui-build-test-utils ui-operations-smoke ui-click-creation ui-click-workspace ui-click-compatibility ui-click-categories ui-click-interaction ui-click-lifecycle ui-click-tags ui-click-caret ui-click-editor ui-click-context-menu ui-click-sidebar-context ui-click-selection ui-click-persistence ui-click-recovery ui-click-conflict ui-click-search ui-click-find ui-click-resize ui-click-visual ui-click-password ui-click-password-change ui-click-updates ui-click-secure ui-click-secure-recovery ui-click-secure-conflict ui-click-secure-integrity ui-acceptance package-macos package-macos-smoke
 
 all: check build native-external-smoke
 
@@ -325,6 +325,9 @@ ui-click-editor: ui-build
 ui-click-context-menu: ui-build
 	$(RUN) python3 -B tools/ui_acceptance.py context_menu
 
+ui-click-sidebar-context: ui-build
+	$(RUN) python3 -B tools/ui_acceptance.py sidebar_context
+
 ui-click-selection: ui-build
 	$(RUN) python3 -B tools/ui_acceptance.py selection
 
@@ -373,9 +376,12 @@ ui-click-secure-integrity: ui-build-test-utils
 # -o suppresses build prerequisites in workers; every scenario gets its own container.
 # Caret blink snapshots are timing-sensitive, so run them before parallel workers.
 ui-acceptance: ui-build ui-click-caret
-	$(MAKE) -j$(UI_JOBS) UI_ACCEPTANCE_PARALLEL=1 -o ui-build $(UI_ACCEPTANCE_STANDARD)
-	$(MAKE) ui-build-test-utils
-	$(MAKE) -j$(UI_JOBS) UI_ACCEPTANCE_PARALLEL=1 -o ui-build-test-utils $(UI_ACCEPTANCE_SECURE)
+	@status=0; \
+	$(MAKE) -j$(UI_JOBS) UI_ACCEPTANCE_PARALLEL=1 -o ui-build $(UI_ACCEPTANCE_STANDARD) || status=$$?; \
+	if $(MAKE) ui-build-test-utils; then \
+		$(MAKE) -j$(UI_JOBS) UI_ACCEPTANCE_PARALLEL=1 -o ui-build-test-utils $(UI_ACCEPTANCE_SECURE) || status=$$?; \
+	else status=$$?; fi; \
+	exit $$status
 
 ui-check: ui-smoke ui-autosave-smoke ui-recovery-smoke ui-conflict-smoke ui-operations-smoke ui-acceptance
 

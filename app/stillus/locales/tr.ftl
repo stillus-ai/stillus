@@ -432,3 +432,9 @@ ChatEmpty = Bir konuşma başlatın. Geçmiş bu çalışma alanında saklanır.
 ChatAcknowledge = Bu eylemi tekrarlamadan devam et
 
 ChatUnsupported = Bu sağlayıcı henüz sohbet yanıtı oluşturmayı desteklemiyor.
+
+RenameCategory = Kategoriyi yeniden adlandır
+DeleteCategory = Kategoriyi sil
+DeleteCategoryHint = Notlar ve içerikleri korunacaktır. Bu kategorinin ve alt kategorilerinin etiketleri kaldırılacaktır.
+DeletePermanently = Kalıcı olarak sil
+DeletePermanentlyHint = Bu not kalıcı olarak silinecek. Bu işlem geri alınamaz.

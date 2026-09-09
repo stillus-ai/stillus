@@ -6,12 +6,16 @@
 //! Platform-independent workspace, document-session and viewport orchestration.
 
 mod addressed;
+mod catalog_categories;
+mod catalog_note_metadata;
 mod delete_diagnostics;
 mod document_title;
+mod permanent_delete;
 pub use addressed::{
     AddressedEdit, MAX_ACTION_TEXT, NoteEdit, NoteEditJob, NoteMetadataEdit, NoteRead,
     NoteRestoreJob, NoteVersion,
 };
+pub use permanent_delete::PermanentNoteDeletion;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;

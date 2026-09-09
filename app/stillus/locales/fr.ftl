@@ -433,3 +433,9 @@ ChatEmpty = Commencez une conversation. L’historique est enregistré dans cet 
 ChatAcknowledge = Continuer sans répéter cette action
 
 ChatUnsupported = Ce fournisseur ne prend pas encore en charge les réponses de chat.
+
+RenameCategory = Renommer la catégorie
+DeleteCategory = Supprimer la catégorie
+DeleteCategoryHint = Les notes et leur contenu seront conservés. Les étiquettes de cette catégorie et de ses sous-catégories seront supprimées.
+DeletePermanently = Supprimer définitivement
+DeletePermanentlyHint = Cette note sera supprimée définitivement. Cette action est irréversible.

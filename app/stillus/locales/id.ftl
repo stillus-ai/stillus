@@ -432,3 +432,9 @@ ChatEmpty = Mulai percakapan. Riwayat disimpan di ruang kerja ini.
 ChatAcknowledge = Lanjutkan tanpa mengulangi tindakan ini
 
 ChatUnsupported = Penyedia ini belum mendukung pembuatan balasan chat.
+
+RenameCategory = Ubah nama kategori
+DeleteCategory = Hapus kategori
+DeleteCategoryHint = Catatan dan isinya akan disimpan. Tag kategori ini dan subkategorinya akan dihapus.
+DeletePermanently = Hapus permanen
+DeletePermanentlyHint = Catatan ini akan dihapus permanen. Tindakan ini tidak dapat dibatalkan.

@@ -4987,6 +4987,103 @@ def context_menu_scenario(driver: WindowDriver, workspace: Path) -> None:
     assert_no_temporary_files(context_workspace)
 
 
+
+def sidebar_context_scenario(driver: WindowDriver, workspace: Path) -> None:
+    del workspace
+    workspace = create_workspace(driver.temporary_root, "sidebar-context-workspace")
+    first = workspace / "notes/A Selected.md"
+    target = workspace / "notes/B Target.md"
+    write_tagged_note(first, "A Selected", ["Work"])
+    write_tagged_note(target, "B Target", ["Work"])
+    target_body = note_body(target)
+    counts = {"all": 2, "favorites": 0, "Work": 2, "trash": 0}
+    layout = {"categories": ("Work",), "counts": counts}
+
+    def context_at(point: tuple[int, int], row: int) -> None:
+        if driver.window_id is None:
+            raise AcceptanceFailure("sidebar context window is missing")
+        driver.xdotool("mousemove", "--sync", "--window", driver.window_id,
+                       str(point[0]), str(point[1]), "click", "3")
+        time.sleep(EVENT_SETTLE_SECONDS)
+        for _ in range(row):
+            driver.key("Down")
+        driver.key("Return")
+
+    driver.start_app(workspace, "sidebar-context")
+    driver.wait_for_stable_frame("sidebar before addressed context actions")
+    # Seven note entries: Open, Pin, Favorite, Tags, Protect, Rename, Trash.
+    context_at(note_row_center(1, **layout), 1)
+    wait_until("context pin changes the addressed note", lambda: "pinned: true" in read_text(target))
+    driver.click("editor")
+    driver.key("ctrl+End")
+    driver.type_text("\nselection stays here")
+    wait_until("context pin retains the original editor", lambda: "selection stays here" in note_body(first))
+    if note_body(target) != target_body:
+        raise AcceptanceFailure("context pin opened or edited the addressed sibling")
+
+    # The pinned target is now first. Right click does not select it; Escape
+    # returns keyboard focus to that row, where Shift+F10 opens the same menu.
+    point = note_row_center(0, **layout)
+    driver.xdotool("mousemove", "--sync", "--window", driver.window_id,
+                   str(point[0]), str(point[1]), "click", "3")
+    driver.key("Escape")
+    driver.key("shift+F10")
+    driver.key("Down")
+    driver.key("Down")
+    driver.key("Return")
+    wait_until("keyboard context favorite changes its captured target", lambda: "favorited: true" in read_text(target))
+    counts["favorites"] = 1
+
+    context_at(group_row_center("Work", **layout), 0)
+    driver.key("ctrl+a")
+    driver.type_text("Renamed")
+    driver.key("Return")
+    wait_until("category context rename preserves both notes", lambda: "Renamed" in read_text(first) and "Renamed" in read_text(target))
+    counts.pop("Work")
+    counts["Renamed"] = 2
+    layout["categories"] = ("Renamed",)
+
+    context_at(note_row_center(0, **layout), 6)
+    wait_until("seventh note entry moves the target to trash", lambda: "deleted: true" in read_text(target))
+    counts.update({"all": 1, "favorites": 0, "Renamed": 1, "trash": 1})
+    driver.click_point(*group_row_center("trash", **layout))
+    trash_layout = {**layout, "expanded": "trash", "expanded_groups": ("all", "trash")}
+    trash_point = note_row_center(0, **trash_layout)
+    context_at(trash_point, 2)
+    driver.key("Escape")
+    if not target.is_file():
+        raise AcceptanceFailure("cancelling permanent deletion removed the note")
+    context_at(trash_point, 2)
+    driver.key("Tab")
+    driver.key("Return")
+    wait_until("confirmed permanent deletion removes only the addressed note", lambda: not target.exists())
+    if "selection stays here" not in note_body(first):
+        raise AcceptanceFailure("permanent deletion changed the unrelated editor")
+    driver.close_app()
+    assert_no_temporary_files(workspace)
+
+    # Feed context actions operate on its captured id without opening the feed.
+    feed_workspace, config, _ = cached_rss_workspace(driver, "sidebar-context-feed", [])
+    driver.start_app(feed_workspace, "sidebar-context-feed")
+    feed_counts = {"all": 1, "favorites": 0, "trash": 1}
+    feed_layout = {"categories": (), "counts": feed_counts}
+    driver.click_point(*group_row_center("trash", **feed_layout))
+    feed_point = note_row_center(0, expanded="trash", expanded_groups=("all", "trash"), **feed_layout)
+    context_at(feed_point, 2)
+    driver.key("ctrl+a")
+    driver.type_text("Context renamed feed")
+    driver.key("Return")
+    wait_until("feed context rename is addressed", lambda: json.loads(config.read_text())["subscriptions"][0]["title_override"] == "Context renamed feed")
+    context_at(feed_point, 1)
+    driver.key("Escape")
+    driver.click("editor")
+    driver.key("ctrl+End")
+    driver.type_text("\nfeed context kept the note")
+    note = feed_workspace / "notes/Note.md"
+    wait_until("feed context keeps the note selected", lambda: "feed context kept the note" in note_body(note))
+    driver.close_app()
+
+
 def selection_scenario(driver: WindowDriver, workspace: Path) -> None:
     """Pointer selection: double-click word, triple-click line, drag lifecycle.
 
@@ -9230,6 +9327,7 @@ SCENARIOS: dict[str, Callable[[WindowDriver, Path], None]] = {
     "caret": caret_scenario,
     "editor": editor_scenario,
     "context_menu": context_menu_scenario,
+    "sidebar_context": sidebar_context_scenario,
     "selection": selection_scenario,
     "persistence": persistence_scenario,
     "recovery": recovery_scenario,

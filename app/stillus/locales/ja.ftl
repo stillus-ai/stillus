@@ -432,3 +432,9 @@ ChatEmpty = 会話を始めましょう。履歴はこのワークスペース�
 ChatAcknowledge = この操作を繰り返さずに続行
 
 ChatUnsupported = このプロバイダーはまだチャットの応答生成に対応していません。
+
+RenameCategory = カテゴリ名を変更
+DeleteCategory = カテゴリを削除
+DeleteCategoryHint = ノートとその内容は保持されます。このカテゴリとサブカテゴリのタグは削除されます。
+DeletePermanently = 完全に削除
+DeletePermanentlyHint = このノートは完全に削除されます。この操作は取り消せません。

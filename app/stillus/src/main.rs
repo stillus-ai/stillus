@@ -19,6 +19,7 @@ mod native_diagnostics;
 mod restart;
 mod rss_card;
 mod rss_filters;
+mod sidebar_context;
 use application::global::GlobalApplication;
 use application::preferences::Preferences as UiPreferences;
 use application::rss as rss_service;
@@ -7665,48 +7666,74 @@ fn sidebar_panel(
                 title,
                 count,
                 depth,
-            } => sidebar_group_row(
-                (filter, title, count, depth),
-                tree_view_model.clone(),
-                sidebar_state,
-                category_drag,
-                revision,
-                palette,
-            )
-            .into_any(),
+            } => {
+                let target = filter.clone();
+                let row = sidebar_group_row(
+                    (filter, title, count, depth),
+                    tree_view_model.clone(),
+                    sidebar_state,
+                    category_drag,
+                    revision,
+                    palette,
+                )
+                .into_any();
+                sidebar_context::category(
+                    row,
+                    target,
+                    tree_view_model.clone(),
+                    sidebar_state,
+                    revision,
+                    palette,
+                )
+            }
             SidebarItem::Note {
                 parent,
                 depth,
                 note,
-            } => sidebar_note_row(
-                parent,
-                depth,
-                note,
-                tree_view_model.clone(),
-                SidebarNoteSignals {
+            } => {
+                let target = note.clone();
+                let row = sidebar_note_row(
+                    parent,
+                    depth,
+                    note,
+                    tree_view_model.clone(),
+                    SidebarNoteSignals {
+                        sidebar_state,
+                        note_drag,
+                        revision,
+                    },
+                    palette,
+                )
+                .into_any();
+                sidebar_context::note(
+                    row,
+                    target,
+                    tree_view_model.clone(),
                     sidebar_state,
-                    note_drag,
                     revision,
-                },
-                palette,
-            )
-            .into_any(),
+                    palette,
+                )
+            }
             SidebarItem::Engine {
                 parent,
                 depth,
                 summary,
-            } => engine_sidebar_row(
-                parent,
-                depth,
-                summary,
-                tree_view_model.clone(),
-                SidebarNoteSignals {
-                    sidebar_state,
-                    note_drag,
-                    revision,
-                },
-                palette,
-            ),
+            } => {
+                let target = summary.clone();
+                let row = engine_sidebar_row(
+                    parent,
+                    depth,
+                    summary,
+                    tree_view_model.clone(),
+                    SidebarNoteSignals {
+                        sidebar_state,
+                        note_drag,
+                        revision,
+                    },
+                    palette,
+                );
+                sidebar_context::engine(row, target, tree_view_model.clone(), revision, palette)
+            }
             SidebarItem::Separator => empty()
                 .style(|style| style.width_full().height(SIDEBAR_SECTION_GAP_PX))
                 .into_any(),

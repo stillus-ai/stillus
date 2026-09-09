@@ -13,6 +13,81 @@ use stillus_secure::MasterPassword;
 use stillus_security::{SecurityStore, WorkspaceSecurityState};
 use stillus_storage::IntegrityFailure;
 
+impl Workspace {
+    pub(crate) fn rename_category(
+        &mut self,
+        source: &str,
+        target: &str,
+        timestamp: &str,
+    ) -> Result<usize, CoreError> {
+        if self.operations.writing() {
+            return Err(CoreError::UnsavedChanges);
+        }
+        let result = self.core.rename_category(source, target, timestamp);
+        self.actions_dirty = true;
+        result
+    }
+
+    pub(crate) fn remove_category(
+        &mut self,
+        source: &str,
+        timestamp: &str,
+    ) -> Result<usize, CoreError> {
+        if self.operations.writing() {
+            return Err(CoreError::UnsavedChanges);
+        }
+        let result = self.core.remove_category(source, timestamp);
+        self.actions_dirty = true;
+        result
+    }
+
+    pub(crate) fn prepare_note_deletion(
+        &self,
+        path: &Path,
+    ) -> Result<PermanentNoteDeletion, CoreError> {
+        if self.operations.writing() {
+            return Err(CoreError::UnsavedChanges);
+        }
+        self.core.prepare_note_deletion(path)
+    }
+
+    pub(crate) fn delete_note_permanently(
+        &mut self,
+        request: PermanentNoteDeletion,
+    ) -> Result<(), CoreError> {
+        if self.operations.writing() {
+            return Err(CoreError::UnsavedChanges);
+        }
+        let result = self.core.delete_note_permanently(request);
+        self.targets.retain(|_, path| {
+            self.core.notes().iter().any(|note| note.path == *path)
+                || self
+                    .core
+                    .external_files()
+                    .iter()
+                    .any(|file| file.path == *path)
+        });
+        self.actions_dirty = true;
+        result
+    }
+
+    pub(crate) fn update_catalog_note_metadata(
+        &mut self,
+        path: &Path,
+        edit: NoteMetadataEdit,
+        timestamp: &str,
+    ) -> Result<(), CoreError> {
+        if self.operations.writing() {
+            return Err(CoreError::UnsavedChanges);
+        }
+        let result = self
+            .core
+            .update_catalog_note_metadata(path, edit, timestamp);
+        self.actions_dirty = true;
+        result
+    }
+}
+
 enum ReadVersion {
     Note {
         target: String,

@@ -437,3 +437,9 @@ ChatEmpty = ابدأ محادثة. يتم حفظ السجل في مساحة ال
 ChatAcknowledge = المتابعة دون تكرار هذا الإجراء
 
 ChatUnsupported = هذا المزوّد لا يدعم إنشاء ردود الدردشة بعد.
+
+RenameCategory = إعادة تسمية الفئة
+DeleteCategory = حذف الفئة
+DeleteCategoryHint = ستُحفظ الملاحظات ومحتوياتها. ستُزال وسوم هذه الفئة وفئاتها الفرعية.
+DeletePermanently = حذف نهائي
+DeletePermanentlyHint = ستُحذف هذه الملاحظة نهائيًا. لا يمكن التراجع عن هذا الإجراء.

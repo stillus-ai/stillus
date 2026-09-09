@@ -433,3 +433,9 @@ ChatEmpty = Inicie uma conversa. O histórico é guardado neste espaço de traba
 ChatAcknowledge = Continuar sem repetir esta ação
 
 ChatUnsupported = Este fornecedor ainda não suporta a geração de respostas no chat.
+
+RenameCategory = Renomear categoria
+DeleteCategory = Eliminar categoria
+DeleteCategoryHint = As notas e o seu conteúdo serão mantidos. As etiquetas desta categoria e das suas subcategorias serão removidas.
+DeletePermanently = Eliminar permanentemente
+DeletePermanentlyHint = Esta nota será eliminada permanentemente. Esta ação não pode ser anulada.

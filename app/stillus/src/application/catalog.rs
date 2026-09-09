@@ -99,3 +99,273 @@ catalogue! {
     OperationProgress => ("operations/progress", "Read unified operation status and progress", Access::Tool),
     OperationCancel => ("operations/cancel", "Cancel before an irreversible write starts", Access::Tool),
 }
+
+impl super::runtime::Application {
+    pub(crate) fn edit_catalog_note_title(
+        &mut self,
+        path: &std::path::Path,
+        title: &str,
+    ) -> Result<(), crate::i18n::UiText> {
+        if !self.catalog_note_is_selected(path) {
+            return Err(crate::i18n::msg!(SelectionNotOpen).into());
+        }
+        if self.edit_note_title(title) || self.title_edit_pending(title) {
+            Ok(())
+        } else {
+            Err(self
+                .error
+                .clone()
+                .unwrap_or_else(|| crate::i18n::msg!(ResolveSaveFirst).into()))
+        }
+    }
+
+    fn catalog_change<T>(
+        &mut self,
+        change: impl FnOnce(
+            &mut super::workspace::Workspace,
+            &str,
+        ) -> Result<T, stillus_core::CoreError>,
+    ) -> Result<T, crate::i18n::UiText> {
+        self.update_action_clock();
+        let result = self
+            .workspace
+            .as_mut()
+            .ok_or_else(|| {
+                stillus_core::CoreError::NoteUnavailable("workspace is unavailable".into())
+            })
+            .and_then(|workspace| {
+                let timestamp = stillus_core::format_utc_timestamp(workspace.wall_time)?;
+                change(workspace, &timestamp)
+            });
+        // Batch category changes can stop after a version conflict; reconcile the
+        // committed prefix too, while preserving the explicit failure for retry.
+        self.sync_chat_catalog();
+        self.request_search_reconcile();
+        self.state_dirty = true;
+        match result {
+            Ok(value) => {
+                self.error = None;
+                Ok(value)
+            }
+            Err(error) => {
+                let error = crate::i18n::UiText::Failure {
+                    details: error.to_string(),
+                };
+                self.error = Some(error.clone());
+                Err(error)
+            }
+        }
+    }
+
+    pub(crate) fn rename_catalog_category(&mut self, source: &str, target: &str) -> bool {
+        self.catalog_change(|workspace, timestamp| {
+            workspace.rename_category(source, target, timestamp)
+        })
+        .is_ok()
+    }
+
+    pub(crate) fn remove_catalog_category(&mut self, source: &str) -> bool {
+        self.catalog_change(|workspace, timestamp| workspace.remove_category(source, timestamp))
+            .is_ok()
+    }
+
+    pub(crate) fn prepare_catalog_note_deletion(
+        &self,
+        path: &std::path::Path,
+    ) -> Result<stillus_core::PermanentNoteDeletion, crate::i18n::UiText> {
+        self.workspace
+            .as_ref()
+            .ok_or_else(|| {
+                stillus_core::CoreError::NoteUnavailable("workspace is unavailable".into())
+            })
+            .and_then(|workspace| workspace.prepare_note_deletion(path))
+            .map_err(|error| crate::i18n::UiText::Failure {
+                details: error.to_string(),
+            })
+    }
+
+    pub(crate) fn delete_catalog_note_permanently(
+        &mut self,
+        request: stillus_core::PermanentNoteDeletion,
+    ) -> bool {
+        self.catalog_change(|workspace, _| workspace.delete_note_permanently(request))
+            .is_ok()
+    }
+
+    fn catalog_note_is_selected(&self, path: &std::path::Path) -> bool {
+        self.workspace.as_ref().is_some_and(|workspace| {
+            workspace
+                .selected_note()
+                .and_then(|index| workspace.notes().get(index))
+                .is_some_and(|note| note.path == path)
+        })
+    }
+
+    pub(crate) fn set_catalog_note_pinned(&mut self, path: &std::path::Path, pinned: bool) -> bool {
+        if self.catalog_note_is_selected(path) {
+            if self.workspace.as_ref().is_some_and(|workspace| {
+                workspace
+                    .notes()
+                    .iter()
+                    .any(|note| note.path == path && note.pinned == pinned)
+            }) {
+                return true;
+            }
+            return self.toggle_pinned_selected();
+        }
+        self.catalog_change(|workspace, timestamp| {
+            workspace.update_catalog_note_metadata(
+                path,
+                stillus_core::NoteMetadataEdit {
+                    pinned: Some(pinned),
+                    ..Default::default()
+                },
+                timestamp,
+            )
+        })
+        .is_ok()
+    }
+
+    pub(crate) fn set_catalog_note_favorited(
+        &mut self,
+        path: &std::path::Path,
+        favorited: bool,
+    ) -> bool {
+        if self.catalog_note_is_selected(path) {
+            if self.workspace.as_ref().is_some_and(|workspace| {
+                workspace
+                    .notes()
+                    .iter()
+                    .any(|note| note.path == path && note.favorited == favorited)
+            }) {
+                return true;
+            }
+            return self.toggle_favorited_selected();
+        }
+        self.catalog_change(|workspace, timestamp| {
+            workspace.update_catalog_note_metadata(
+                path,
+                stillus_core::NoteMetadataEdit {
+                    favorited: Some(favorited),
+                    ..Default::default()
+                },
+                timestamp,
+            )
+        })
+        .is_ok()
+    }
+
+    pub(crate) fn set_catalog_note_deleted(
+        &mut self,
+        path: &std::path::Path,
+        deleted: bool,
+    ) -> bool {
+        if self.catalog_note_is_selected(path) {
+            return self.set_deleted_selected(deleted);
+        }
+        self.catalog_change(|workspace, timestamp| {
+            workspace.update_catalog_note_metadata(
+                path,
+                stillus_core::NoteMetadataEdit {
+                    deleted: Some(deleted),
+                    ..Default::default()
+                },
+                timestamp,
+            )
+        })
+        .is_ok()
+    }
+}
+
+#[cfg(test)]
+mod sidebar_action_tests {
+    use super::super::runtime::Application;
+    use std::{fs, path::PathBuf};
+    use stillus_core::EditorCommand;
+
+    struct Fixture {
+        app: Application,
+        root: PathBuf,
+    }
+    impl Fixture {
+        fn new() -> Self {
+            static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+            let root = std::env::temp_dir().join(format!(
+                "stillus-sidebar-actions-{}-{}",
+                std::process::id(),
+                NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            ));
+            fs::create_dir_all(root.join("notes")).unwrap();
+            fs::write(root.join("notes/A.md"), "# A\n\nfirst body\n").unwrap();
+            fs::write(root.join("notes/B.md"), "# B\n\nsecond body\n").unwrap();
+            let mut app = Application::load(&root);
+            app.open_note(0);
+            Self { app, root }
+        }
+    }
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            self.app.shutdown().unwrap();
+            fs::remove_dir_all(&self.root).unwrap();
+        }
+    }
+
+    #[test]
+    fn sidebar_metadata_keeps_another_dirty_note_selected_and_is_not_a_toggle() {
+        let mut fixture = Fixture::new();
+        let workspace = fixture.app.workspace.as_ref().unwrap();
+        let selected = workspace.selected_note().unwrap();
+        let selected_path = workspace.notes()[selected].path.clone();
+        let target = workspace.notes()[1 - selected].path.clone();
+        let end = workspace.document().unwrap().len_bytes();
+        fixture.app.apply(EditorCommand::SetCaret {
+            offset: end,
+            extend: false,
+        });
+        fixture
+            .app
+            .apply(EditorCommand::Insert("dirty text".into()));
+        let revision = fixture
+            .app
+            .workspace
+            .as_ref()
+            .unwrap()
+            .document()
+            .unwrap()
+            .content_revision();
+        assert!(fixture.app.set_catalog_note_pinned(&target, true));
+        assert!(fixture.app.set_catalog_note_pinned(&target, true));
+        assert!(fixture.app.set_catalog_note_favorited(&target, true));
+        assert!(fixture.app.set_catalog_note_deleted(&target, true));
+        let workspace = fixture.app.workspace.as_ref().unwrap();
+        assert_eq!(
+            workspace.notes()[workspace.selected_note().unwrap()].path,
+            selected_path
+        );
+        assert_eq!(workspace.document().unwrap().content_revision(), revision);
+        assert!(workspace.document().unwrap().has_unsaved_work());
+        let note = workspace
+            .notes()
+            .iter()
+            .find(|note| note.path == target)
+            .unwrap();
+        assert!(note.pinned && note.favorited && note.deleted);
+        assert!(fs::read_to_string(target).unwrap().contains("second body"));
+        assert!(
+            !fs::read_to_string(selected_path)
+                .unwrap()
+                .contains("dirty text")
+        );
+    }
+
+    #[test]
+    fn stale_sidebar_path_does_not_mutate_the_current_note() {
+        let mut fixture = Fixture::new();
+        let missing = fixture.root.join("notes/Missing.md");
+        assert!(!fixture.app.set_catalog_note_pinned(&missing, true));
+        assert!(fixture.app.error.is_some());
+        let workspace = fixture.app.workspace.as_ref().unwrap();
+        assert_eq!(workspace.selected_note(), Some(0));
+        assert!(workspace.notes().iter().all(|note| !note.pinned));
+    }
+}

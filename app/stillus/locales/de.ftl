@@ -433,3 +433,9 @@ ChatEmpty = Beginne ein Gespräch. Der Verlauf wird in diesem Arbeitsbereich ges
 ChatAcknowledge = Ohne Wiederholung dieser Aktion fortfahren
 
 ChatUnsupported = Dieser Anbieter unterstützt noch keine Chatantworten.
+
+RenameCategory = Kategorie umbenennen
+DeleteCategory = Kategorie löschen
+DeleteCategoryHint = Notizen und ihre Inhalte bleiben erhalten. Tags dieser Kategorie und ihrer Unterkategorien werden entfernt.
+DeletePermanently = Endgültig löschen
+DeletePermanentlyHint = Diese Notiz wird endgültig gelöscht. Dies kann nicht rückgängig gemacht werden.

@@ -432,3 +432,9 @@ ChatEmpty = 開始對話。歷史記錄儲存在此工作區。
 ChatAcknowledge = 繼續，不重複此操作
 
 ChatUnsupported = 此提供商暫不支援產生聊天回覆。
+
+RenameCategory = 重新命名分類
+DeleteCategory = 刪除分類
+DeleteCategoryHint = 筆記及其內容將保留。此分類及其子分類的標籤將被移除。
+DeletePermanently = 永久刪除
+DeletePermanentlyHint = 此筆記將被永久刪除。此操作無法復原。

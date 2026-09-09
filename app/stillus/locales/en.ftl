@@ -437,3 +437,9 @@ ChatEmpty = Start a conversation. Your history is saved in this workspace.
 ChatAcknowledge = Continue without repeating this action
 
 ChatUnsupported = This provider does not support chat generation yet.
+
+RenameCategory = Rename category
+DeleteCategory = Delete category
+DeleteCategoryHint = Notes and their contents will be kept. Tags in this category and its subcategories will be removed.
+DeletePermanently = Delete permanently
+DeletePermanentlyHint = This note will be permanently deleted. This cannot be undone.
