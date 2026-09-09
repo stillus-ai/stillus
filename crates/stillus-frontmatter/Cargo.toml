@@ -1,0 +1,10 @@
+[package]
+name = "stillus-frontmatter"
+version = "0.1.0"
+edition = "2024"
+publish = false
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+serde_yaml_ng = "=0.10.0"

@@ -1,0 +1,24 @@
+/target/
+/bench-output/
+/dist/
+/.host-build/
+/.ci/
+/examples/
+.DS_Store
+/error.log
+
+# Local workspace data, never source fixtures.
+/notes/
+.stillus/
+.stillus_security/
+.stillus_backups/
+.stillus.cfg
+
+# Local credentials; a sanitized example may be committed.
+.env
+.env.*
+!.env.example
+
+# Python caches in any project directory.
+__pycache__/
+*.py[cod]

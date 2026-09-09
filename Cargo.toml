@@ -1,0 +1,30 @@
+[workspace]
+members = [
+    "crates/stillus-ai",
+    "app/stillus",
+    "crates/stillus-core",
+    "crates/stillus-editor",
+    "crates/stillus-engine",
+    "crates/stillus-frontmatter",
+    "crates/stillus-markdown",
+    "crates/stillus-platform",
+    "crates/stillus-recovery",
+    "crates/stillus-rss",
+    "crates/stillus-search",
+    "crates/stillus-secure",
+    "crates/stillus-security",
+    "crates/stillus-storage",
+    "crates/stillus-update",
+    "tools/stillus-buffer-probe",
+    "tools/stillus-editor-probe",
+    "tools/stillus-search-probe",
+    "tools/stillus-ui-probe",
+]
+resolver = "3"
+
+[workspace.package]
+license = "GPL-3.0-only"
+authors = ["Evgeniy Udodov"]
+
+[patch.crates-io]
+floem-winit = { git = "https://github.com/stillus-ai/winit", rev = "2e2dc2f5555b7f1df465a72ebef578a4ae01e010" }

@@ -1,0 +1,23 @@
+services:
+  toolchain:
+    image: stillus-toolchain
+    build:
+      context: .
+      dockerfile: docker/rust/Dockerfile
+    working_dir: /workspace
+    environment:
+      # Keep useful backtraces and incremental builds without full debug data.
+      CARGO_PROFILE_DEV_DEBUG: ${CARGO_PROFILE_DEV_DEBUG:-line-tables-only}
+      CARGO_PROFILE_TEST_DEBUG: ${CARGO_PROFILE_TEST_DEBUG:-line-tables-only}
+    volumes:
+      - .:/workspace
+      - cargo-registry:/usr/local/cargo/registry
+      - cargo-git:/usr/local/cargo/git
+      - cargo-target:/var/cache/stillus/target
+      - benchmark-data:/var/cache/stillus/benchmark-data
+
+volumes:
+  cargo-registry:
+  cargo-git:
+  cargo-target:
+  benchmark-data:

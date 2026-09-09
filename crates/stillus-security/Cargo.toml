@@ -1,0 +1,22 @@
+[package]
+name = "stillus-security"
+version = "0.1.0"
+edition = "2024"
+publish = false
+license.workspace = true
+authors.workspace = true
+
+[features]
+test-utils = ["stillus-secure/test-utils"]
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+stillus-platform = { version = "0.1.0", path = "../stillus-platform" }
+stillus-engine = { version = "0.1.0", path = "../stillus-engine" }
+stillus-secure = { version = "0.1.0", path = "../stillus-secure" }
+rand = "=0.8.6"
+serde = { version = "=1.0.228", features = ["derive"] }
+serde_json = "=1.0.151"
+zeroize = "=1.8.1"

@@ -1,0 +1,11 @@
+[package]
+name = "stillus-buffer-probe"
+version = "0.0.0"
+edition = "2024"
+publish = false
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+lapce-xi-rope = "=0.4.0"
+ropey = "=1.6.1"

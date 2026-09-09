@@ -1,0 +1,21 @@
+[package]
+name = "stillus-search"
+version = "0.1.0"
+edition = "2024"
+publish = false
+license.workspace = true
+authors.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+stillus-platform = { version = "0.1.0", path = "../stillus-platform" }
+stillus-frontmatter = { version = "0.1.0", path = "../stillus-frontmatter" }
+stillus-storage = { version = "0.1.0", path = "../stillus-storage" }
+tantivy = { version = "=0.26.1", default-features = false, features = ["lz4-compression", "mmap"] }
+unicode-normalization = "=0.1.25"
+unicode-segmentation = "=1.13.3"
+
+[dev-dependencies]
+stillus-secure = { version = "0.1.0", path = "../stillus-secure", features = ["test-utils"] }

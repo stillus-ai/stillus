@@ -1,0 +1,31 @@
+[package]
+name = "stillus-platform"
+version = "0.1.0"
+edition = "2024"
+publish = false
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+zeroize = "=1.8.1"
+uuid = { version = "=1.26.0", features = ["v4"], optional = true }
+serde = { version = "=1.0.228", features = ["derive"] }
+fs4 = { version = "=0.13.1", default-features = false, features = ["sync"] }
+
+[features]
+test-utils = []
+credentials = ["dep:keyring", "dep:uuid"]
+
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "=3.6.3", features = ["apple-native"], optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "=3.6.3", features = ["sync-secret-service", "crypto-rust", "vendored"], optional = true }
+
+[target.'cfg(windows)'.dependencies]
+keyring = { version = "=3.6.3", features = ["windows-native"], optional = true }
+sha2 = "=0.10.9"
+winapi-util = "=0.1.11"
+atomicwrites = "=0.4.4"
+windows-acl = "=0.3.0"
+windows-permissions = "=0.2.4"

@@ -1,0 +1,66 @@
+[graph]
+targets = [
+    "aarch64-apple-darwin",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-pc-windows-gnu",
+]
+all-features = true
+
+[advisories]
+ignore = []
+
+[licenses]
+allow = [
+    "0BSD",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "CDLA-Permissive-2.0",
+    "CC0-1.0",
+    "GPL-3.0-only",
+    "ISC",
+    "MIT",
+    "MIT-0",
+    "MPL-2.0",
+    "NCSA",
+    "OpenSSL",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "Unlicense",
+    "Zlib",
+]
+confidence-threshold = 0.93
+
+[licenses.private]
+ignore = false
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+highlight = "all"
+workspace-default-features = "allow"
+external-default-features = "allow"
+deny = [
+    { crate = "boa_engine", reason = "JavaScript runtime is outside the MVP contract" },
+    { crate = "curl", reason = "application runtime must not have a network client" },
+    { crate = "deno_core", reason = "JavaScript runtime is outside the MVP contract" },
+    { crate = "diesel", reason = "database-backed note storage is forbidden" },
+    { crate = "hyper", reason = "application runtime must not have an HTTP client/server" },
+    { crate = "quick-js", reason = "JavaScript runtime is outside the MVP contract" },
+    { crate = "reqwest", reason = "application runtime must not have a network client" },
+    { crate = "rusqlite", reason = "database-backed note storage is forbidden" },
+    { crate = "sqlx", reason = "database-backed note storage is forbidden" },
+    { crate = "sqlite", reason = "database-backed note storage is forbidden" },
+    { crate = "surf", reason = "application runtime must not have a network client" },
+    { crate = "v8", reason = "JavaScript runtime is outside the MVP contract" },
+    { crate = "webkit2gtk", reason = "WebView is outside the MVP contract" },
+    { crate = "wry", reason = "WebView is outside the MVP contract" },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = ["https://github.com/stillus-ai/winit"]

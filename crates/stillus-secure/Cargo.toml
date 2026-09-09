@@ -1,0 +1,14 @@
+[package]
+name = "stillus-secure"
+version = "0.1.0"
+edition = "2024"
+publish = false
+license.workspace = true
+authors.workspace = true
+
+[features]
+test-utils = []
+
+[dependencies]
+age = { version = "=0.12.1", default-features = false, features = ["armor"] }
+rand = "=0.8.6"

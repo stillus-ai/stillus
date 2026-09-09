@@ -1,0 +1,36 @@
+[package]
+name = "stillus-core"
+version = "0.1.0"
+edition = "2024"
+publish = false
+license.workspace = true
+authors.workspace = true
+
+[features]
+test-utils = [
+    "stillus-recovery/test-utils",
+    "stillus-secure/test-utils",
+    "stillus-security/test-utils",
+    "stillus-storage/test-utils",
+]
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+stillus-platform = { version = "0.1.0", path = "../stillus-platform" }
+stillus-editor = { version = "0.1.0", path = "../stillus-editor" }
+stillus-engine = { version = "0.1.0", path = "../stillus-engine" }
+stillus-frontmatter = { version = "0.1.0", path = "../stillus-frontmatter" }
+stillus-markdown = { version = "0.1.0", path = "../stillus-markdown" }
+stillus-recovery = { version = "0.1.0", path = "../stillus-recovery" }
+stillus-rss = { version = "0.1.0", path = "../stillus-rss" }
+stillus-secure = { version = "0.1.0", path = "../stillus-secure" }
+stillus-security = { version = "0.1.0", path = "../stillus-security" }
+stillus-storage = { version = "0.1.0", path = "../stillus-storage" }
+
+[dev-dependencies]
+stillus-recovery = { version = "0.1.0", path = "../stillus-recovery", features = ["test-utils"] }
+stillus-secure = { version = "0.1.0", path = "../stillus-secure", features = ["test-utils"] }
+stillus-security = { version = "0.1.0", path = "../stillus-security", features = ["test-utils"] }
+stillus-storage = { version = "0.1.0", path = "../stillus-storage", features = ["test-utils"] }

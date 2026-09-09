@@ -1,0 +1,314 @@
+# Copyright 2026 Evgeniy Udodov
+# SPDX-License-Identifier: GPL-3.0-only
+name: CI
+
+on:
+  pull_request:
+    branches: [master]
+  push:
+    branches: [master]
+    tags: [latest]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  SOURCE_REVISION: ${{ github.sha }}
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
+
+jobs:
+  linux:
+    name: Linux / full check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      COMPOSE_FILE: compose.yaml:compose.ci.yaml
+      DOCKER_BUILD_RECORD_UPLOAD: "false"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Initialize report
+        run: python3 tools/ci.py init linux
+      - name: Free unused SDK space on the disposable runner
+        run: |
+          df -h
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet
+          df -h
+      - name: Cache downloaded Cargo sources
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            .ci/cargo/registry
+            .ci/cargo/git
+          key: cargo-linux-${{ runner.arch }}-${{ hashFiles('Cargo.lock', 'docker/rust/Dockerfile') }}
+          restore-keys: cargo-linux-${{ runner.arch }}-
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+      - name: Build and load the Compose toolchain with layer cache
+        uses: docker/bake-action@d3418bd7d0e9324001bca92fa8ba175ea7e6dc9b # v7.3.0
+        with:
+          source: .
+          files: |
+            compose.yaml
+            compose.ci.yaml
+          targets: toolchain
+          load: true
+      - name: Linux Makefile checks and package
+        run: make ci-linux
+      - name: Linux build
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: stillus-linux
+          path: .ci/artifacts/linux/*.tar.gz
+          retention-days: 1
+          overwrite: true
+          if-no-files-found: error
+          compression-level: 0
+      - name: Record job outcome
+        if: always()
+        run: python3 tools/ci.py finish linux "${{ job.status }}"
+      - name: Reports and sanitized diagnostics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: reports-linux
+          path: .ci/reports/linux/
+          retention-days: 1
+          overwrite: true
+          if-no-files-found: warn
+      - name: Remaining disk space
+        if: always()
+        run: df -h
+      - name: Prepare Cargo cache for archiving
+        if: always()
+        run: |
+          if [ -d .ci/cargo ]; then
+            sudo chown -R -- "$(id -u):$(id -g)" .ci/cargo
+          fi
+
+  ui:
+    name: Linux / UI acceptance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      COMPOSE_FILE: compose.yaml:compose.ci.yaml
+      DOCKER_BUILD_RECORD_UPLOAD: "false"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Initialize report
+        run: python3 tools/ci.py init linux
+      - name: Free unused SDK space on the disposable runner
+        run: |
+          df -h
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet
+          df -h
+      - name: Cache downloaded Cargo sources
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            .ci/cargo/registry
+            .ci/cargo/git
+          key: cargo-ui-${{ runner.arch }}-${{ hashFiles('Cargo.lock', 'docker/rust/Dockerfile') }}
+          restore-keys: |
+            cargo-ui-${{ runner.arch }}-
+            cargo-linux-${{ runner.arch }}-
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+      - name: Build and load the Compose toolchain with layer cache
+        uses: docker/bake-action@d3418bd7d0e9324001bca92fa8ba175ea7e6dc9b # v7.3.0
+        with:
+          source: .
+          files: |
+            compose.yaml
+            compose.ci.yaml
+          targets: toolchain
+          load: true
+      - name: UI smoke and acceptance checks
+        run: make ci-ui
+      - name: Record job outcome
+        if: always()
+        run: python3 tools/ci.py finish linux "${{ job.status }}"
+      - name: Reports and sanitized diagnostics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: reports-ui
+          path: .ci/reports/linux/
+          retention-days: 1
+          overwrite: true
+          if-no-files-found: warn
+      - name: Remaining disk space
+        if: always()
+        run: df -h
+      - name: Prepare Cargo cache for archiving
+        if: always()
+        run: |
+          if [ -d .ci/cargo ]; then
+            sudo chown -R -- "$(id -u):$(id -g)" .ci/cargo
+          fi
+
+  windows-build:
+    name: Windows / cross-build and test package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      COMPOSE_FILE: compose.yaml:compose.ci.yaml
+      DOCKER_BUILD_RECORD_UPLOAD: "false"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Initialize report
+        run: python3 tools/ci.py init windows-tests
+      - name: Free unused SDK space on the disposable runner
+        run: |
+          df -h
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet
+          df -h
+      - name: Cache downloaded Cargo sources
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            .ci/cargo/registry
+            .ci/cargo/git
+          key: cargo-windows-build-${{ runner.arch }}-${{ hashFiles('Cargo.lock', 'docker/rust/Dockerfile') }}
+          restore-keys: |
+            cargo-windows-build-${{ runner.arch }}-
+            cargo-linux-${{ runner.arch }}-
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+      - name: Build and load the Compose toolchain with layer cache
+        uses: docker/bake-action@d3418bd7d0e9324001bca92fa8ba175ea7e6dc9b # v7.3.0
+        with:
+          source: .
+          files: |
+            compose.yaml
+            compose.ci.yaml
+          targets: toolchain
+          load: true
+      - name: Build Windows application and native test kit through Makefile
+        run: make ci-windows-build
+      - name: Windows build
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: stillus-windows
+          path: .ci/artifacts/windows/*.zip
+          retention-days: 1
+          overwrite: true
+          if-no-files-found: error
+          compression-level: 0
+      - name: Windows test package for this run
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-test-package
+          path: .ci/artifacts/windows-tests/*.zip
+          retention-days: 1
+          overwrite: true
+          if-no-files-found: error
+          compression-level: 0
+      - name: Record job outcome
+        if: always()
+        run: python3 tools/ci.py finish windows-tests "${{ job.status }}"
+      - name: Reports and sanitized diagnostics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: reports-windows-build
+          path: .ci/reports/windows-tests/
+          retention-days: 1
+          overwrite: true
+          if-no-files-found: warn
+      - name: Remaining disk space
+        if: always()
+        run: df -h
+      - name: Prepare Cargo cache for archiving
+        if: always()
+        run: |
+          if [ -d .ci/cargo ]; then
+            sudo chown -R -- "$(id -u):$(id -g)" .ci/cargo
+          fi
+
+  macos:
+    name: macOS / Apple Silicon native
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Initialize report
+        run: python3 tools/ci.py init macos
+      - name: Cache downloaded Cargo sources
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            .host-build/cargo/registry
+            .host-build/cargo/git
+          key: cargo-macos-${{ runner.arch }}-${{ hashFiles('Cargo.lock', 'tools/build_macos.sh') }}
+          restore-keys: cargo-macos-${{ runner.arch }}-
+      - name: Pinned native build and Makefile smoke checks without Docker
+        run: make NATIVE=1 ci-macos
+      - name: macOS build with executable permissions
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: stillus-macos
+          path: .ci/artifacts/macos/*.tar.gz
+          retention-days: 1
+          overwrite: true
+          if-no-files-found: error
+          compression-level: 0
+      - name: Record job outcome
+        if: always()
+        run: python3 tools/ci.py finish macos "${{ job.status }}"
+      - name: Reports and sanitized diagnostics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: reports-macos
+          path: .ci/reports/macos/
+          retention-days: 1
+          overwrite: true
+          if-no-files-found: warn
+
+  windows:
+    name: Windows / x64 native
+    needs: windows-build
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Initialize report
+        run: python tools/ci.py init windows
+      - name: Verify checkout revision
+        run: python tools/source_revision.py "$env:SOURCE_REVISION"
+      - name: Download the test package from this workflow run
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: windows-test-package
+          path: .ci/download/
+      - name: Verify source SHA and run the existing native Windows kit
+        run: python tools/ci.py windows .ci/download/stillus-windows-tests-x86_64.zip
+      - name: Record job outcome
+        if: always()
+        run: python tools/ci.py finish windows "${{ job.status }}"
+      - name: Reports and sanitized diagnostics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: reports-windows
+          path: .ci/reports/windows/
+          retention-days: 1
+          overwrite: true
+          if-no-files-found: warn

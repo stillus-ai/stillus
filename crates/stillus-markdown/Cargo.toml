@@ -1,0 +1,20 @@
+[package]
+name = "stillus-markdown"
+version = "0.1.0"
+edition = "2024"
+publish = false
+license.workspace = true
+authors.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+stillus-engine = { version = "0.1.0", path = "../stillus-engine" }
+stillus-frontmatter = { version = "0.1.0", path = "../stillus-frontmatter" }
+stillus-search = { version = "0.1.0", path = "../stillus-search" }
+stillus-storage = { version = "0.1.0", path = "../stillus-storage" }
+sha2 = "=0.10.9"
+
+[dev-dependencies]
+tempfile = "3.26.0"

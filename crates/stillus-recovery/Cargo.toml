@@ -1,0 +1,17 @@
+[package]
+name = "stillus-recovery"
+version = "0.1.0"
+edition = "2024"
+publish = false
+license.workspace = true
+authors.workspace = true
+
+[features]
+test-utils = ["stillus-secure/test-utils"]
+
+[dependencies]
+stillus-platform = { version = "0.1.0", path = "../stillus-platform" }
+stillus-secure = { version = "0.1.0", path = "../stillus-secure" }
+
+[dev-dependencies]
+stillus-secure = { version = "0.1.0", path = "../stillus-secure", features = ["test-utils"] }

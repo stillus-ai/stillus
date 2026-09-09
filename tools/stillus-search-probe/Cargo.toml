@@ -1,0 +1,10 @@
+[package]
+name = "stillus-search-probe"
+version = "0.1.0"
+edition = "2024"
+publish = false
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+stillus-search = { version = "0.1.0", path = "../../crates/stillus-search" }

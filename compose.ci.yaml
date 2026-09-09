@@ -1,0 +1,21 @@
+# Copyright 2026 Evgeniy Udodov
+# SPDX-License-Identifier: GPL-3.0-only
+# Overlay for disposable GitHub-hosted runners; local named volumes are unchanged.
+services:
+  toolchain:
+    image: stillus-toolchain:ci
+    build:
+      cache_from:
+        - type=gha,scope=stillus-toolchain
+      cache_to:
+        - type=gha,scope=stillus-toolchain,mode=max
+    environment:
+      SOURCE_REVISION: ${SOURCE_REVISION:?Set SOURCE_REVISION to the checked-out commit SHA}
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+    volumes:
+      - ./.ci/cargo/registry:/usr/local/cargo/registry
+      - ./.ci/cargo/git:/usr/local/cargo/git
+      # The target volume lives only on this disposable runner, never in Actions cache.
+

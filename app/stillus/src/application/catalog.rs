@@ -1,0 +1,89 @@
+// Copyright 2026 Evgeniy Udodov
+// SPDX-License-Identifier: GPL-3.0-only
+#![forbid(unsafe_code)]
+
+//! Every public action declares its typed handler and its trust boundary here.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Access {
+    Tool,
+    Ui(&'static str),
+}
+macro_rules! catalogue {
+    ($( $kind:ident => ($name:literal, $description:literal, $access:expr) ),+ $(,)?) => {
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        pub(crate) enum Handler { $( $kind ),+ }
+        pub(crate) const ACTIONS:&[Definition] = &[$(Definition { handler:Handler::$kind, name:$name, description:$description, access:$access }),+];
+    }
+}
+pub(crate) struct Definition {
+    pub handler: Handler,
+    pub name: &'static str,
+    pub description: &'static str,
+    pub access: Access,
+}
+catalogue! {
+    WorkspaceState => ("workspace/state", "Read the current workspace session", Access::Tool),
+    WorkspaceOpen => ("workspace/open", "Open and switch workspace", Access::Ui("Workspace selection belongs to trusted UI")),
+    WorkspaceInitialize => ("workspace/initialize", "Initialize a workspace", Access::Ui("Workspace selection belongs to trusted UI")),
+    NotesList => ("notes/list", "List workspace notes", Access::Tool),
+    NotesRead => ("notes/read", "Read current note content and its version", Access::Tool),
+    NotesUpdate => ("notes/update", "Replace a UTF-8 range at the expected version", Access::Tool),
+    NotesCreate => ("notes/create", "Create a note without changing selection", Access::Tool),
+    NotesRename => ("notes/rename", "Rename at the expected version", Access::Tool),
+    NotesMetadata => ("notes/metadata", "Set categories, pin, favorite or trash state", Access::Tool),
+    NotesOpen => ("notes/open", "Open a plain document", Access::Tool),
+    NotesSave => ("notes/save", "Save the open document; completion is tracked", Access::Tool),
+    NotesRestore => ("notes/restore", "Restore unsaved recovery work", Access::Tool),
+    NotesDiscard => ("notes/discard", "Discard local changes and reload disk", Access::Ui("Requires the existing destructive-action confirmation")),
+    ExternalList => ("external/list", "List attached external files", Access::Tool),
+    ExternalOpen => ("external/open", "Open a supported external file by absolute path", Access::Tool),
+    ExternalClose => ("external/close", "Close an external file preserving unsaved work", Access::Tool),
+    EditorUndo => ("editor/undo", "Undo in the open document at the expected revision", Access::Tool),
+    EditorRedo => ("editor/redo", "Redo in the open document at the expected revision", Access::Tool),
+    EditorInput => ("editor/input", "Apply native editor input and selection", Access::Ui("Clipboard, focus and selection belong to native UI")),
+    Categories => ("catalog/categories", "Read categories and ordering version", Access::Tool),
+    CatalogOrder => ("catalog/order", "Set manual ordering in a category", Access::Tool),
+    CatalogOrderClear => ("catalog/order/clear", "Clear manual ordering", Access::Tool),
+    CatalogSort => ("catalog/sort", "Save category sort preferences", Access::Tool),
+    CategoriesOrder => ("catalog/categories/order", "Set category display order", Access::Tool),
+    SearchQuery => ("search/query", "Search the local workspace index", Access::Tool),
+    SearchRebuild => ("search/rebuild", "Rebuild the workspace search index", Access::Tool),
+    SearchDocument => ("search/document", "Find matches in the current document buffer", Access::Tool),
+    RssList => ("rss/list", "List RSS subscriptions", Access::Tool),
+    RssRefresh => ("rss/refresh", "Refresh RSS and report its actual outcome", Access::Tool),
+    RssCreate => ("rss/create", "Create an RSS subscription", Access::Tool),
+    RssMetadata => ("rss/metadata", "Change RSS title, categories, pin, favorite or trash", Access::Tool),
+    RssRead => ("rss/read", "Read entries and their state", Access::Tool),
+    RssMarkRead => ("rss/mark/read", "Mark an RSS entry read", Access::Tool),
+    RssFilters => ("rss/filters", "Change RSS filter preferences", Access::Tool),
+    SettingsUi => ("settings/ui", "Persist native view preferences", Access::Ui("Window geometry and navigation belong to UI")),
+    SettingsRead => ("settings/read", "Read ordinary settings and their version", Access::Tool),
+    SettingsLocale => ("settings/locale", "Set the application language", Access::Tool),
+    AiSettings => ("ai/settings", "Read model aliases without credentials", Access::Tool),
+    AiRefresh => ("ai/refresh", "Refresh the model catalogue", Access::Tool),
+    AiDisconnect => ("ai/disconnect", "Disconnect the AI provider", Access::Tool),
+    AiCleanup => ("ai/cleanup", "Retry deferred credential removal", Access::Tool),
+    AiAliasSave => ("ai/alias/save", "Save a model alias at the expected settings version", Access::Tool),
+    AiAliasRemove => ("ai/alias/remove", "Remove a non-default model alias", Access::Tool),
+    AiConnect => ("ai/connect", "Check and store an API key", Access::Ui("Secrets are accepted only by non-serializable trusted commands")),
+    SecurityLock => ("security/lock", "Lock the selected protected note", Access::Ui("Protected document versions are not exposed to tools")),
+    SecurityProtect => ("security/protect", "Protect a document", Access::Ui("Requires trusted password input and search purge")),
+    SecurityUnlock => ("security/unlock", "Unlock a document", Access::Ui("Requires trusted password input")),
+    SecurityDisable => ("security/disable", "Request removal of protection in UI", Access::Tool),
+    SecurityPassword => ("security/password", "Change the master password", Access::Ui("Requires trusted password input")),
+    SecurityIntegrity => ("security/integrity", "Resolve an integrity failure", Access::Ui("Requires the existing recovery confirmation")),
+    SecurityRecovery => ("security/recovery", "Retry password-change recovery", Access::Ui("Recovery decisions belong to trusted UI")),
+    UpdatesState => ("updates/state", "Read update progress", Access::Tool),
+    UpdatesCheck => ("updates/check", "Check available releases", Access::Tool),
+    UpdatesInstall => ("updates/install", "Install the available verified release", Access::Tool),
+    UpdatesAutomatic => ("updates/automatic", "Set automatic update checks", Access::Tool),
+    UpdatesDismiss => ("updates/dismiss", "Remember a declined release", Access::Ui("Controls the native update prompt")),
+    UpdatesRestart => ("updates/restart", "Restart an installed update", Access::Ui("An explicit Restart click is mandatory")),
+    JournalList => ("journal/list", "Read a bounded journal page", Access::Tool),
+    JournalRead => ("journal/read", "Read a journal record", Access::Tool),
+    JournalRetry => ("journal/retry", "Persist retained results without repeating HTTP", Access::Tool),
+    JournalClear => ("journal/clear", "Clear completed request history", Access::Ui("Requires the existing confirmation dialog")),
+    OperationStatus => ("operations/status", "Read operation progress and final result", Access::Tool),
+    OperationProgress => ("operations/progress", "Read unified operation status and progress", Access::Tool),
+    OperationCancel => ("operations/cancel", "Cancel before an irreversible write starts", Access::Tool),
+}

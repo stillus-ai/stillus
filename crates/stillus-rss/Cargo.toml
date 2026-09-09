@@ -1,0 +1,27 @@
+[package]
+name = "stillus-rss"
+version = "0.1.0"
+edition = "2024"
+publish = false
+license.workspace = true
+authors.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+regex = "=1.13.1"
+stillus-platform = { version = "0.1.0", path = "../stillus-platform" }
+chrono = { version = "=0.4.45", default-features = false, features = ["clock"] }
+feed-rs = "=2.4.0"
+html2text = "=0.17.1"
+stillus-engine = { version = "0.1.0", path = "../stillus-engine" }
+serde = { version = "=1.0.228", features = ["derive"] }
+serde_json = "=1.0.151"
+sha2 = "=0.10.9"
+ureq = { version = "=3.4.0", default-features = false, features = ["rustls", "gzip"] }
+url = "=2.5.8"
+webbrowser = { version = "=1.2.4", features = ["hardened"] }
+
+[dev-dependencies]
+tempfile = "=3.26.0"
