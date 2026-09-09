@@ -438,3 +438,6 @@ DeleteCategory = 카테고리 삭제
 DeleteCategoryHint = 노트와 내용은 유지됩니다. 이 카테고리와 하위 카테고리의 태그가 제거됩니다.
 DeletePermanently = 영구 삭제
 DeletePermanentlyHint = 이 노트가 영구적으로 삭제됩니다. 이 작업은 취소할 수 없습니다.
+
+AiJournalDetails = 기술 세부 정보
+AiJournalSummary = 작업: { $operation } · { $status } · { $duration } ms · 모델: { $model }

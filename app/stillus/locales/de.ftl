@@ -439,3 +439,6 @@ DeleteCategory = Kategorie löschen
 DeleteCategoryHint = Notizen und ihre Inhalte bleiben erhalten. Tags dieser Kategorie und ihrer Unterkategorien werden entfernt.
 DeletePermanently = Endgültig löschen
 DeletePermanentlyHint = Diese Notiz wird endgültig gelöscht. Dies kann nicht rückgängig gemacht werden.
+
+AiJournalDetails = Technische Details
+AiJournalSummary = Vorgang: { $operation } · { $status } · { $duration } ms · Modell: { $model }

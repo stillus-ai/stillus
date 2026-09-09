@@ -37,6 +37,7 @@ pub(crate) fn select<T: Clone + 'static>(
     let accept = Rc::new(accept);
     let enabled = Rc::new(enabled);
     let selected_display = display.clone();
+    let tooltip_display = display.clone();
     let open_items = items.clone();
     let open_display = display.clone();
     let open_enabled = enabled.clone();
@@ -131,6 +132,11 @@ pub(crate) fn select<T: Clone + 'static>(
             s.color(palette.muted).cursor(CursorStyle::Default)
         }
     });
+    let trigger = anchored_tooltip(
+        trigger,
+        Rc::new(move || tooltip_display(value.get())),
+        palette,
+    );
     anchored_popover(trigger, open, 0.0, 8.0, true, move || {
         let row_ids = Rc::new(RefCell::new(Vec::<ViewId>::new()));
         let rows = items
@@ -139,12 +145,37 @@ pub(crate) fn select<T: Clone + 'static>(
             .enumerate()
             .map(|(index, item)| {
                 let title = display(Some(item.clone()));
+                let hint = title.clone();
+                let selected_title = title.clone();
+                let selected_display = display.clone();
                 let accept = accept.clone();
                 let keyboard_accept = accept.clone();
                 let keyboard_items = items.clone();
                 let keyboard_ids = row_ids.clone();
                 let view = PrimaryPointerView::new(
-                    text(title).style(|s| s.width_full().text_ellipsis().selectable(false)),
+                    h_stack((
+                        label(move || {
+                            if selected_display(value.get()) == selected_title {
+                                "✓"
+                            } else {
+                                ""
+                            }
+                        })
+                        .style(|s| s.width(16.0).flex_shrink(0.0)),
+                        text(title).style(|s| {
+                            s.min_width(0.0)
+                                .flex_grow(1.0)
+                                .text_ellipsis()
+                                .selectable(false)
+                        }),
+                    ))
+                    .style(|s| {
+                        rtl_row(s)
+                            .width_full()
+                            .min_width(0.0)
+                            .items_center()
+                            .gap(6.0)
+                    }),
                     move |_| {
                         open.set(false);
                         accept(item.clone());
@@ -195,7 +226,7 @@ pub(crate) fn select<T: Clone + 'static>(
                         .hover(|s| s.background(palette.accent_soft))
                 });
                 row_ids.borrow_mut().push(view.id());
-                view
+                anchored_tooltip(view, Rc::new(move || hint.clone()), palette)
             })
             .collect::<Vec<_>>();
         let rows_count = items.len().min(SELECT_VISIBLE_ROWS);

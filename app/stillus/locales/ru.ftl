@@ -445,3 +445,6 @@ DeleteCategory = Удалить категорию
 DeleteCategoryHint = Заметки и их содержимое останутся. Теги этой категории и её подкатегорий будут удалены.
 DeletePermanently = Удалить навсегда
 DeletePermanentlyHint = Заметка будет удалена навсегда. Это действие нельзя отменить.
+
+AiJournalDetails = Технические подробности
+AiJournalSummary = Операция: { $operation } · { $status } · { $duration } ms · Модель: { $model }

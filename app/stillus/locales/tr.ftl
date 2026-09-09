@@ -438,3 +438,6 @@ DeleteCategory = Kategoriyi sil
 DeleteCategoryHint = Notlar ve içerikleri korunacaktır. Bu kategorinin ve alt kategorilerinin etiketleri kaldırılacaktır.
 DeletePermanently = Kalıcı olarak sil
 DeletePermanentlyHint = Bu not kalıcı olarak silinecek. Bu işlem geri alınamaz.
+
+AiJournalDetails = Teknik ayrıntılar
+AiJournalSummary = İşlem: { $operation } · { $status } · { $duration } ms · Model: { $model }

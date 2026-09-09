@@ -438,3 +438,6 @@ DeleteCategory = カテゴリを削除
 DeleteCategoryHint = ノートとその内容は保持されます。このカテゴリとサブカテゴリのタグは削除されます。
 DeletePermanently = 完全に削除
 DeletePermanentlyHint = このノートは完全に削除されます。この操作は取り消せません。
+
+AiJournalDetails = 技術的な詳細
+AiJournalSummary = 操作: { $operation } · { $status } · { $duration } ms · モデル: { $model }

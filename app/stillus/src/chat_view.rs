@@ -1026,33 +1026,34 @@ fn message_view(
     } else {
         markdown_blocks(&message.text, message_width, palette)
     };
-    let links = pulldown_cmark::Parser::new(&message.text)
-        .filter_map(|event| match event {
-            pulldown_cmark::Event::Start(pulldown_cmark::Tag::Link { dest_url, .. }) => {
-                rss_card::article_url(&dest_url)
-            }
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    let link_views = links
+    let link_views = message_links(&message.text)
         .into_iter()
-        .map(|url| {
+        .map(|(url, title)| {
             let model = model.clone();
-            let label = url.clone();
-            selectable_row(
-                wrapped_text(
-                    label,
-                    move || message_width.get(),
-                    palette.accent,
-                    crate::ui::FONT_BODY as f32,
-                ),
-                move || {
-                    if let Err(e) = open_rss_original(&url) {
-                        model.borrow_mut().error = Some(e.to_string().into());
-                    }
-                },
+            let hint = url.clone();
+            anchored_tooltip(
+                selectable_row(
+                    wrapped_text(
+                        title,
+                        move || message_width.get(),
+                        palette.accent,
+                        crate::ui::FONT_BODY as f32,
+                    ),
+                    move || {
+                        if let Err(e) = open_rss_original(&url) {
+                            model.borrow_mut().error = Some(e.to_string().into());
+                        }
+                    },
+                )
+                .style(move |s| {
+                    s.width_full()
+                        .min_width(0.0)
+                        .cursor(CursorStyle::Pointer)
+                        .focus_visible(|s| s.background(palette.accent_soft))
+                }),
+                Rc::new(move || hint.clone()),
+                palette,
             )
-            .into_any()
         })
         .collect::<Vec<_>>();
     let content = message.text.clone();
@@ -1097,6 +1098,42 @@ fn message_view(
         .into_any()
 }
 
+fn message_links(source: &str) -> Vec<(String, String)> {
+    use pulldown_cmark::{Event, Tag, TagEnd};
+    let mut links = Vec::new();
+    let mut active = None::<(String, String)>;
+    let mut seen = HashSet::new();
+    for event in pulldown_cmark::Parser::new(source) {
+        match event {
+            Event::Start(Tag::Link { dest_url, .. }) => {
+                active = rss_card::article_url(&dest_url).map(|url| (url, String::new()));
+            }
+            Event::Text(text) | Event::Code(text) => {
+                if let Some((_, label)) = &mut active {
+                    label.push_str(&text);
+                }
+            }
+            Event::End(TagEnd::Link) => {
+                if let Some((url, label)) = active.take()
+                    && seen.insert(url.clone())
+                {
+                    let label = if label.trim().is_empty() || label == url {
+                        url::Url::parse(&url)
+                            .ok()
+                            .and_then(|url| url.host_str().map(str::to_owned))
+                            .unwrap_or_else(|| url.clone())
+                    } else {
+                        label
+                    };
+                    links.push((url, label));
+                }
+            }
+            _ => {}
+        }
+    }
+    links
+}
+
 fn markdown_blocks(source: &str, width: floem::reactive::Memo<f64>, palette: Palette) -> AnyView {
     use pulldown_cmark::{Event, Tag, TagEnd};
     let mut blocks = Vec::new();
@@ -1116,9 +1153,16 @@ fn markdown_blocks(source: &str, width: floem::reactive::Memo<f64>, palette: Pal
                     blocks.push(markdown_prose(&source[cursor..start], width, palette));
                 }
                 let content = code.clone();
-                let scrollbar_visible = create_rw_signal(false);
-                let scrollbar_generation = create_rw_signal(0_u64);
-                let scroll_origin = create_rw_signal(None::<Point>);
+                let hovered = create_rw_signal(false);
+                let focused = create_rw_signal(false);
+                let measured = create_rw_signal(0.0_f64);
+                let viewport_width =
+                    floem::reactive::create_memo(move |_| (width.get() - 64.0).max(1.0));
+                let overflow = floem::reactive::create_memo(move |_| {
+                    measured.get() > viewport_width.get() + 0.5
+                });
+                let scroll_origin = create_rw_signal(Point::ZERO);
+                let requested_scroll = create_rw_signal(None::<Point>);
                 let copy = action_button(
                     ButtonAction::Copy,
                     || tr!(Copy),
@@ -1130,42 +1174,63 @@ fn markdown_blocks(source: &str, width: floem::reactive::Memo<f64>, palette: Pal
                     },
                 );
                 blocks.push(
-                    v_stack((
-                        h_stack((empty().style(|s| s.flex_grow(1.0)), copy)),
-                        scroll(text(code.clone()).style(move |s| {
-                            s.text_clip()
-                                // The 8px handle occupies its own strip after an 8px gap.
-                                .padding_bottom(16.0)
-                                .font_family(crate::ui::MONO_FONT_FAMILY.to_owned())
-                                .font_size(crate::ui::FONT_BODY as f32)
-                                .color(palette.ink)
-                        }))
-                        .on_scroll(move |viewport| {
-                            let origin = viewport.origin();
-                            if scroll_origin
-                                .get_untracked()
-                                .is_some_and(|previous| previous != origin)
-                            {
-                                show_scrollbar_temporarily(scrollbar_visible, scrollbar_generation);
-                            }
-                            scroll_origin.set(Some(origin));
+                    h_stack((
+                        scroll(
+                            text(code.clone())
+                                .style(move |s| {
+                                    s.text_clip()
+                                        .padding_bottom(if overflow.get() { 16.0 } else { 0.0 })
+                                        .font_family(crate::ui::MONO_FONT_FAMILY.to_owned())
+                                        .font_size(crate::ui::FONT_BODY as f32)
+                                        .color(palette.ink)
+                                })
+                                .on_resize(move |rect| measured.set(rect.width())),
+                        )
+                        .on_scroll(move |viewport| scroll_origin.set(viewport.origin()))
+                        .scroll_to(move || requested_scroll.get())
+                        .keyboard_navigable()
+                        .on_event_cont(EventListener::FocusGained, move |_| focused.set(true))
+                        .on_event_cont(EventListener::FocusLost, move |_| focused.set(false))
+                        .on_event(EventListener::KeyDown, move |event| {
+                            let floem::event::Event::KeyDown(key) = event else {
+                                return EventPropagation::Continue;
+                            };
+                            let maximum = (measured.get_untracked()
+                                - viewport_width.get_untracked())
+                            .max(0.0);
+                            let x = match key.key.logical_key {
+                                Key::Named(NamedKey::ArrowLeft) => {
+                                    (scroll_origin.get_untracked().x - 60.0).max(0.0)
+                                }
+                                Key::Named(NamedKey::ArrowRight) => {
+                                    (scroll_origin.get_untracked().x + 60.0).min(maximum)
+                                }
+                                Key::Named(NamedKey::Home) => 0.0,
+                                Key::Named(NamedKey::End) => maximum,
+                                _ => return EventPropagation::Continue,
+                            };
+                            requested_scroll.set(Some(Point::new(x, 0.0)));
+                            EventPropagation::Stop
                         })
                         .scroll_style(move |s| {
                             s.handle_thickness(8.0)
-                                .handle_background(Color::rgba8(
-                                    palette.muted.r,
-                                    palette.muted.g,
-                                    palette.muted.b,
-                                    128,
-                                ))
-                                .hide_bars(!scrollbar_visible.get())
+                                .handle_background(palette.muted)
+                                .hide_bars(!overflow.get() || !(hovered.get() || focused.get()))
                         })
-                        .style(move |s| s.width((width.get() - 24.0).max(1.0)).min_width(0.0)),
+                        .style(move |s| {
+                            s.width(viewport_width.get())
+                                .min_width(0.0)
+                                .focus_visible(|s| s.background(palette.accent_soft))
+                        }),
+                        copy,
                     ))
+                    .on_event_cont(EventListener::PointerEnter, move |_| hovered.set(true))
+                    .on_event_cont(EventListener::PointerLeave, move |_| hovered.set(false))
                     .style(move |s| {
                         s.width_full()
                             .padding(12.0)
-                            .gap(6.0)
+                            .gap(8.0)
+                            .items_start()
                             .background(palette.canvas)
                             .border_radius(6.0)
                     })
@@ -1300,6 +1365,23 @@ mod tests {
             }),
             diagnostic: None,
         }
+    }
+
+    #[test]
+    fn message_links_preserve_labels_deduplicate_and_reject_unsafe_urls() {
+        let links = message_links(
+            "[Read **more**](https://example.com/a) [again](https://example.com/a) [bad](file:///tmp/private) <https://example.com/long>",
+        );
+        assert_eq!(
+            links,
+            vec![
+                ("https://example.com/a".to_owned(), "Read more".to_owned()),
+                (
+                    "https://example.com/long".to_owned(),
+                    "example.com".to_owned()
+                )
+            ]
+        );
     }
 
     #[test]

@@ -45,6 +45,8 @@ message_keys! {
     RssFilterSaveApply,
 
     AiJournal,
+    AiJournalDetails,
+    AiJournalSummary,
     AiJournalBack,
     AiJournalHint,
     AiJournalError,

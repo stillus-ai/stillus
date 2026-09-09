@@ -3,6 +3,7 @@
 #![forbid(unsafe_code)]
 
 use super::*;
+use floem::kurbo::{Rect, Size};
 
 #[derive(Clone)]
 struct OpenLayer {
@@ -116,6 +117,7 @@ pub(crate) struct AnchoredPopover {
     align_start: bool,
     point: Option<(RwSignal<Point>, RwSignal<f64>)>,
     window_origin: Option<Point>,
+    geometry: RwSignal<(Rect, Size)>,
 }
 
 pub(crate) fn anchored_popover<V, C, CV>(
@@ -194,6 +196,7 @@ where
         align_start,
         point,
         window_origin: None,
+        geometry: create_rw_signal((Rect::ZERO, Size::ZERO)),
     }
     .on_cleanup(move || {
         unregister(id);
@@ -228,6 +231,17 @@ pub(crate) fn menu_position(
         point.x.clamp(8.0, (window_width - width - 8.0).max(8.0)),
         point.y.clamp(8.0, (window_height - height - 8.0).max(8.0)),
     )
+}
+
+fn vertical_placement(anchor: Rect, desired: f64, window: f64, gap: f64) -> (f64, f64) {
+    let below = (window - anchor.y1 - gap - 8.0).max(1.0);
+    let above = (anchor.y0 - gap - 8.0).max(1.0);
+    if desired <= below || below >= above {
+        (anchor.y1 + gap, desired.min(below).max(1.0))
+    } else {
+        let height = desired.min(above).max(1.0);
+        ((anchor.y0 - gap - height).max(8.0), height)
+    }
 }
 
 /// The backdrop keeps pointer capture through the release even though the card
@@ -322,46 +336,15 @@ impl View for AnchoredPopover {
                 {
                     return;
                 }
-                let Some(origin) = self.window_origin else {
+                let Some(_) = self.window_origin else {
                     self.open.set(false);
                     return;
                 };
-                let layout = self.id.get_layout().unwrap_or_default();
-                let mut root = self.id;
-                while let Some(parent) = root.parent() {
-                    root = parent;
-                }
-                let window = root.get_layout().unwrap_or_default();
-                let window_width = f64::from(window.size.width).max(16.0);
-                let window_height = f64::from(window.size.height).max(16.0);
-                let width = if self.width > 0.0 {
-                    self.width
-                } else {
-                    f64::from(layout.size.width)
-                }
-                .min((window_width - 16.0).max(1.0));
-                let mut left = popover_left(
-                    origin.x,
-                    f64::from(layout.size.width),
-                    width,
-                    window_width,
-                    self.align_start,
-                    i18n::current().is_rtl(),
-                );
-                let mut top = origin.y + f64::from(layout.size.height) + self.gap.max(8.0);
-                if let Some((point, height)) = self.point {
-                    let point = origin + point.get_untracked().to_vec2();
-                    let position = menu_position(
-                        point,
-                        width,
-                        height.get_untracked(),
-                        window_width,
-                        window_height,
-                    );
-                    left = position.x;
-                    top = position.y;
-                }
-                let height = (window_height - top - 8.0).max(1.0);
+                let geometry = self.geometry;
+                let preferred_width = self.width;
+                let gap = self.gap.max(8.0);
+                let align_start = self.align_start;
+                let point = self.point;
                 let content = self.content.clone();
                 let layer = OpenLayer {
                     owner: self.id,
@@ -377,15 +360,72 @@ impl View for AnchoredPopover {
                         layer: backdrop_layer,
                         pressed: false,
                     }
-                    .style(move |s| s.width(window_width).height(window_height))
+                    .style(move |s| {
+                        let (_, window) = geometry.get();
+                        s.width(window.width).height(window.height)
+                    })
                 });
-                let card = add_overlay(Point::new(left, top), move |_| {
+                let card = add_overlay(Point::ZERO, move |overlay| {
+                    let measured_height = create_rw_signal(1.0_f64);
+                    let width = floem::reactive::create_memo(move |_| {
+                        let (anchor, window) = geometry.get();
+                        let desired = if preferred_width > 0.0 {
+                            preferred_width
+                        } else {
+                            anchor.width()
+                        };
+                        desired.min((window.width - 16.0).max(1.0))
+                    });
+                    let bounds = floem::reactive::create_memo(move |_| {
+                        let (anchor, window) = geometry.get();
+                        let width = width.get();
+                        let desired = measured_height.get();
+                        let (top, height) = vertical_placement(anchor, desired, window.height, gap);
+                        let left = popover_left(
+                            anchor.x0,
+                            anchor.width(),
+                            width,
+                            window.width,
+                            align_start,
+                            i18n::current().is_rtl(),
+                        );
+                        if let Some((point, _)) = point {
+                            let height = desired.min((window.height - 16.0).max(1.0));
+                            let pos = menu_position(
+                                anchor.origin() + point.get().to_vec2(),
+                                width,
+                                height,
+                                window.width,
+                                window.height,
+                            );
+                            Rect::from_origin_size(pos, Size::new(width, height))
+                        } else {
+                            Rect::from_origin_size(Point::new(left, top), Size::new(width, height))
+                        }
+                    });
+                    // Move the overlay itself: margins would make the transparent
+                    // area above a bottom-anchored menu intercept outside clicks.
+                    create_effect(move |_| overlay.update_state(bounds.get().origin()));
                     let id = ViewId::new();
                     id.set_children(vec![
-                        content().style(move |s| s.width(width).max_height(height)),
+                        scroll(
+                            content()
+                                .style(move |s| s.width(width.get()).flex_shrink(0.0))
+                                .on_resize(move |rect| {
+                                    if (measured_height.get_untracked() - rect.height()).abs() > 0.5
+                                    {
+                                        measured_height.set(rect.height());
+                                    }
+                                }),
+                        )
+                        .style(move |s| s.width(width.get()).height(bounds.get().height()))
+                        .into_any(),
                     ]);
                     PopoverClip { id }
-                        .style(move |s| s.width(width).max_height(height))
+                        .style(move |s| {
+                            let bounds = bounds.get();
+                            s.width(bounds.width()).height(bounds.height())
+                        })
                         .on_event(EventListener::KeyDown, |event| {
                             if popover_handle_escape(event) {
                                 EventPropagation::Stop
@@ -405,6 +445,22 @@ impl View for AnchoredPopover {
         cx: &mut floem::context::ComputeLayoutCx,
     ) -> Option<floem::kurbo::Rect> {
         self.window_origin = Some(cx.window_origin());
+        let layout = self.id.get_layout().unwrap_or_default();
+        let mut root = self.id;
+        while let Some(parent) = root.parent() {
+            root = parent;
+        }
+        let window = root.get_size().unwrap_or(Size::ZERO);
+        let geometry = (
+            Rect::from_origin_size(
+                cx.window_origin(),
+                Size::new(f64::from(layout.size.width), f64::from(layout.size.height)),
+            ),
+            window,
+        );
+        if self.geometry.get_untracked() != geometry {
+            self.geometry.set(geometry);
+        }
         let mut layout_rect: Option<floem::kurbo::Rect> = None;
         for child in self.id.children() {
             if let Some(child_layout) = cx.compute_view_layout(child) {
@@ -419,6 +475,21 @@ impl View for AnchoredPopover {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn anchored_panel_flips_and_constrains_height() {
+        assert_eq!(
+            vertical_placement(Rect::new(20.0, 540.0, 260.0, 580.0), 274.0, 600.0, 8.0),
+            (258.0, 274.0)
+        );
+        assert_eq!(
+            vertical_placement(Rect::new(20.0, 40.0, 260.0, 80.0), 274.0, 600.0, 8.0),
+            (88.0, 274.0)
+        );
+        let (top, height) =
+            vertical_placement(Rect::new(20.0, 300.0, 260.0, 340.0), 900.0, 600.0, 8.0);
+        assert_eq!((top, height), (8.0, 284.0));
+    }
 
     #[test]
     fn context_menu_position_keeps_layout_and_hit_test_inside_window() {

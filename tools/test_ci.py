@@ -332,6 +332,15 @@ class CITests(unittest.TestCase):
         offset = (12 * 64 + 6) * 3
         adjacent_glyph[offset:offset + 3] = bytes((35, 39, 45))
         self.assertFalse(ui_acceptance.editor_pixels_equal_except_caret(bytes(adjacent_glyph), visible, 64))
+        antialiased = bytearray(hidden)
+        gray = bytearray(hidden)
+        for y in range(4, 24):
+            for x in (4, 5):
+                offset = (y * 64 + x) * 3
+                antialiased[offset:offset + 3] = bytes((104, 134, 161))
+                gray[offset:offset + 3] = bytes((134, 134, 134))
+        self.assertTrue(ui_acceptance.editor_pixels_equal_except_caret(hidden, bytes(antialiased), 64))
+        self.assertFalse(ui_acceptance.editor_pixels_equal_except_caret(hidden, bytes(gray), 64))
 
     def test_search_editor_wait_handles_slow_alternating_blink_samples(self):
         for state in ("blink", "text_changes", "blank", "strict"):
@@ -813,7 +822,8 @@ class CITests(unittest.TestCase):
         for call in command.call_args_list:
             arguments = call.args[0]
             self.assertEqual(arguments[0], "import")
-            self.assertEqual(arguments[arguments.index("-crop") + 1], "4x20+444+438")
+            # Confirmation is centered at y=457; the focus strip starts 10px above it.
+            self.assertEqual(arguments[arguments.index("-crop") + 1], "4x20+444+447")
             self.assertEqual(arguments[-1], "histogram:info:-")
         capture.assert_not_called()
 
@@ -824,10 +834,13 @@ class CITests(unittest.TestCase):
                 frames = [0]
 
                 def capture(_name):
-                    clock[0] += 0.05
+                    # Slow screenshots cross a blink boundary during the wait.
+                    clock[0] += 0.3
                     frames[0] += 1
-                    return Mock(caret=int(clock[0] / 0.5) % 2,
-                                content=frames[0] if changing_content else 0)
+                    caret = int(clock[0] / 0.5) % 2
+                    return Mock(caret=caret, content=frames[0] if changing_content else 0,
+                                pixels=self.editor_frame(caret_x=4 if caret else None,
+                                    text_shift=frames[0] % 2 if changing_content else 0))
 
                 def advance(seconds):
                     clock[0] += seconds
@@ -841,6 +854,9 @@ class CITests(unittest.TestCase):
                 with patch.object(ui_acceptance.time, "monotonic", side_effect=lambda: clock[0]), \
                         patch.object(ui_acceptance.time, "sleep", side_effect=advance), \
                         patch.object(ui_acceptance, "image_difference", side_effect=difference), \
+                        patch.object(ui_acceptance, "editor_frames_equal_except_caret",
+                            side_effect=lambda a, b, _crop:
+                                ui_acceptance.editor_pixels_equal_except_caret(a.pixels, b.pixels, 64)), \
                         patch.object(ui_acceptance, "dark_pixel_count", return_value=100), \
                         patch.object(ui_acceptance, "mean_luminance", return_value=0.8):
                     if changing_content:
@@ -849,7 +865,7 @@ class CITests(unittest.TestCase):
                     else:
                         ui_acceptance.wait_for_ai_controls(driver)
                         self.assertGreaterEqual(frames[0], 3)
-                        self.assertLess(clock[0], 0.5)
+                        self.assertLess(clock[0], 2.0)
 
     def test_replace_retry_diagnostics_reject_invalid_attempts_and_payloads(self):
         accepted = [

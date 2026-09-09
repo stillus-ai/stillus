@@ -438,3 +438,6 @@ DeleteCategory = Hapus kategori
 DeleteCategoryHint = Catatan dan isinya akan disimpan. Tag kategori ini dan subkategorinya akan dihapus.
 DeletePermanently = Hapus permanen
 DeletePermanentlyHint = Catatan ini akan dihapus permanen. Tindakan ini tidak dapat dibatalkan.
+
+AiJournalDetails = Detail teknis
+AiJournalSummary = Operasi: { $operation } · { $status } · { $duration } ms · Model: { $model }

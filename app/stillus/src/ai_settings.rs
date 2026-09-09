@@ -32,7 +32,6 @@ struct Controller {
     key_revision: RwSignal<u64>,
     visible_key: RwSignal<bool>,
     validate_key: RwSignal<bool>,
-    selected_key: RwSignal<bool>,
     generation: Rc<Cell<u64>>,
     global: Rc<RefCell<GlobalApplication>>,
     active: Rc<Cell<Option<ProjectionRequest>>>,
@@ -52,7 +51,6 @@ impl Controller {
         self.key_revision.update(|revision| *revision += 1);
         self.visible_key.set(false);
         self.validate_key.set(false);
-        self.selected_key.set(false);
     }
 
     fn paste_key(&self) {
@@ -68,7 +66,6 @@ impl Controller {
                 if value.trim().len() <= 4096 {
                     self.key.borrow_mut().zeroize();
                     self.key.borrow_mut().push_str(value.trim());
-                    self.selected_key.set(false);
                     self.key_revision.update(|revision| *revision += 1);
                 } else {
                     self.feedback.set(Some(i18n::Key::AiKeyFormat));
@@ -216,7 +213,6 @@ pub(super) fn page(
         key_revision: create_rw_signal(0),
         visible_key: create_rw_signal(false),
         validate_key: create_rw_signal(false),
-        selected_key: create_rw_signal(false),
         generation: Rc::new(Cell::new(0)),
         global,
         active: Rc::new(Cell::new(None)),
@@ -595,78 +591,57 @@ fn secret_input(controller: Controller, palette: Palette) -> impl IntoView {
     let revision = controller.key_revision;
     let visible = controller.visible_key;
     let busy = controller.busy;
-    let selected = controller.selected_key;
     let validate = controller.validate_key;
-    let focused = create_rw_signal(false);
     let display = controller.key.clone();
     let empty_key = controller.key.clone();
     let input = controller.clone();
-    let field = MaskedPasswordView::new(
-        label(move || {
-            revision.get();
-            let key = display.borrow();
-            if key.is_empty() {
-                tr!(AiPasteCredential)
-            } else if visible.get() {
-                key.to_string()
+    let command = controller.clone();
+    let focused = create_rw_signal(false);
+    let field = SecretInput::new(
+        move || display.borrow().clone(),
+        move |range, insert| {
+            let accepted = insert.is_ascii()
+                && replace_secret(&mut input.key.borrow_mut(), range, insert, 4096);
+            input.validate_key.set(false);
+            input.feedback.set(if accepted {
+                None
             } else {
-                "•".repeat(key.len().min(32))
-            }
-        })
-        .style(|style| style.min_width(0.0).max_width_full().selectable(false)),
-        || {},
-        move |event| {
-            if busy.get_untracked() {
-                return EventPropagation::Stop;
-            }
-            let Event::KeyDown(event) = event else {
-                return EventPropagation::Stop;
-            };
-            let shortcut = event.modifiers.meta() || event.modifiers.control();
-            match &event.key.logical_key {
-                Key::Named(NamedKey::Tab) => return EventPropagation::Continue,
-                Key::Named(NamedKey::Enter) => {
-                    input.connect();
-                    return EventPropagation::Stop;
-                }
-                Key::Character(value) if shortcut && value.eq_ignore_ascii_case("v") => {
-                    input.paste_key();
-                    return EventPropagation::Stop;
-                }
-                Key::Character(value) if shortcut && value.eq_ignore_ascii_case("a") => {
-                    selected.set(true);
-                    return EventPropagation::Stop;
-                }
-                Key::Named(NamedKey::Escape) => input.clear_key(),
-                Key::Named(NamedKey::Backspace) | Key::Named(NamedKey::Delete) => {
-                    if selected.get_untracked() {
-                        input.key.borrow_mut().zeroize();
-                    } else {
-                        input.key.borrow_mut().pop();
-                    }
-                    selected.set(false);
-                }
-                Key::Character(value) if !shortcut => {
-                    if selected.get_untracked() {
-                        input.key.borrow_mut().zeroize();
-                    }
-                    selected.set(false);
-                    let mut entry = input.key.borrow_mut();
-                    if entry.len() + value.len() <= 4096
-                        && value.is_ascii()
-                        && !value.chars().any(char::is_control)
-                    {
-                        entry.push_str(value);
-                    }
-                }
-                _ => return EventPropagation::Stop,
-            }
-            validate.set(false);
-            input.feedback.set(None);
+                Some(i18n::Key::AiKeyFormat)
+            });
             revision.update(|r| *r += 1);
-            EventPropagation::Stop
+            accepted
         },
+        revision,
+        i18n::Key::AiPasteCredential,
+        palette,
     )
+    .enabled(move || !busy.get())
+    .revealed(move || visible.get())
+    .on_paste(move || validate.set(true))
+    .trim_paste()
+    .on_command(move |event| {
+        if let Event::KeyDown(key) = event {
+            match key.key.logical_key {
+                Key::Named(NamedKey::Enter) => {
+                    command.connect();
+                    return EventPropagation::Stop;
+                }
+                Key::Named(NamedKey::Escape) => {
+                    command.clear_key();
+                    return EventPropagation::Stop;
+                }
+                Key::Character(ref value)
+                    if value.eq_ignore_ascii_case("v")
+                        && (key.modifiers.meta() || key.modifiers.control()) =>
+                {
+                    command.feedback.set(Some(i18n::Key::PastePasswordFailed));
+                    return EventPropagation::Stop;
+                }
+                _ => {}
+            }
+        }
+        EventPropagation::Continue
+    })
     .style(move |style| {
         revision.get();
         style
@@ -680,9 +655,6 @@ fn secret_input(controller: Controller, palette: Palette) -> impl IntoView {
                 palette.muted
             } else {
                 palette.ink
-            })
-            .apply_if(selected.get(), |style| {
-                style.background(palette.accent_soft)
             })
     })
     .on_event_stop(EventListener::FocusGained, move |_| focused.set(true))

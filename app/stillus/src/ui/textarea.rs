@@ -31,6 +31,7 @@ pub(crate) struct TextArea {
     height: f64,
     submit: Option<Rc<dyn Fn()>>,
     escape: Option<Rc<dyn Fn()>>,
+    focus_line: Option<RwSignal<Option<usize>>>,
 }
 impl TextArea {
     pub(crate) fn new(value: RwSignal<String>, palette: Palette) -> Self {
@@ -44,6 +45,7 @@ impl TextArea {
             height: 112.0,
             submit: None,
             escape: None,
+            focus_line: None,
         }
     }
     pub(crate) fn placeholder(mut self, key: i18n::Key) -> Self {
@@ -66,6 +68,11 @@ impl TextArea {
         self.height = height;
         self
     }
+    /// A one-based line requested by a form validation message.
+    pub(crate) fn focus_line(mut self, line: RwSignal<Option<usize>>) -> Self {
+        self.focus_line = Some(line);
+        self
+    }
     /// Enter submits; Shift+Enter always inserts a newline. Without this callback Enter inserts.
     pub(crate) fn on_submit(mut self, submit: impl Fn() + 'static) -> Self {
         self.submit = Some(Rc::new(submit));
@@ -86,6 +93,7 @@ impl TextArea {
             height,
             submit,
             escape,
+            focus_line,
         } = self;
         let enabled = floem::reactive::create_memo(move |_| enabled());
         let visible = floem::reactive::create_memo(move |_| visible());
@@ -165,6 +173,25 @@ impl TextArea {
             }
         });
         let editor = create_rw_signal(editor);
+        if let Some(line) = focus_line {
+            create_effect(move |_| {
+                if let Some(line_number) = line.get() {
+                    let editor = editor.get_untracked();
+                    let text = editor.text();
+                    let offset = text.offset_of_line(
+                        line_number
+                            .saturating_sub(1)
+                            .min(text.line_of_offset(text.len())),
+                    );
+                    editor
+                        .cursor
+                        .update(|cursor| cursor.set_insert(Selection::caret(offset)));
+                    if let Some(id) = editor.editor_view_id.get_untracked() {
+                        id.request_focus();
+                    }
+                }
+            });
+        }
         let content = editor_container_view(
             editor,
             move |_| active.get(),
@@ -193,7 +220,11 @@ impl TextArea {
             .style(move |s| {
                 s.absolute()
                     .inset_left(2.0)
+                    .inset_right(2.0)
                     .inset_top(0.0)
+                    .min_width(0.0)
+                    .text_ellipsis()
+                    .apply_if(i18n::current().is_rtl(), |s| s.justify_end())
                     .font_size(crate::ui::FONT_BODY as f32)
                     .color(palette.ink3)
                     .apply_if(!draft.get().is_empty(), |s| s.hide())
@@ -219,12 +250,27 @@ impl TextArea {
                     .border(1.0)
                     .border_color(if invalid() {
                         palette.danger
+                    } else if active.get() {
+                        palette.accent
                     } else {
                         palette.divider
                     })
                     .border_radius(8.0)
-                    .background(palette.paper)
-                    .color(palette.ink)
+                    .background(if enabled.get() {
+                        palette.paper
+                    } else {
+                        palette.canvas
+                    })
+                    .color(if enabled.get() {
+                        palette.ink
+                    } else {
+                        palette.muted
+                    })
+                    .cursor(if enabled.get() {
+                        CursorStyle::Text
+                    } else {
+                        CursorStyle::Default
+                    })
                     .class(GutterClass, |s| s.hide())
                     .class(EditorViewClass, |s| {
                         s.set(ScrollBeyondLastLine, false)

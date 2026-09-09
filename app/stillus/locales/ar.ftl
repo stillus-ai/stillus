@@ -443,3 +443,6 @@ DeleteCategory = حذف الفئة
 DeleteCategoryHint = ستُحفظ الملاحظات ومحتوياتها. ستُزال وسوم هذه الفئة وفئاتها الفرعية.
 DeletePermanently = حذف نهائي
 DeletePermanentlyHint = ستُحذف هذه الملاحظة نهائيًا. لا يمكن التراجع عن هذا الإجراء.
+
+AiJournalDetails = التفاصيل التقنية
+AiJournalSummary = العملية: { $operation } · { $status } · { $duration } ms · النموذج: { $model }

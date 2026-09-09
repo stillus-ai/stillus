@@ -439,3 +439,6 @@ DeleteCategory = Eliminar categoría
 DeleteCategoryHint = Se conservarán las notas y su contenido. Se eliminarán las etiquetas de esta categoría y sus subcategorías.
 DeletePermanently = Eliminar permanentemente
 DeletePermanentlyHint = Esta nota se eliminará permanentemente. Esta acción no se puede deshacer.
+
+AiJournalDetails = Detalles técnicos
+AiJournalSummary = Operación: { $operation } · { $status } · { $duration } ms · Modelo: { $model }

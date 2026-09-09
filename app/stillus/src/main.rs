@@ -833,9 +833,6 @@ impl PasswordFieldIds {
 #[derive(Clone, Copy)]
 struct PasswordFocusSignals {
     field: RwSignal<Option<PasswordField>>,
-    caret_visible: RwSignal<bool>,
-    caret_focused: RwSignal<bool>,
-    caret_generation: RwSignal<u64>,
 }
 
 impl Default for PasswordEntry {
@@ -862,6 +859,7 @@ impl PasswordEntry {
         }
     }
 
+    #[cfg(test)]
     fn push(&mut self, value: &str) -> bool {
         let active = self.active_mut();
         if active.len().saturating_add(value.len()) > MAX_PASSWORD_BYTES
@@ -873,6 +871,7 @@ impl PasswordEntry {
         true
     }
 
+    #[cfg(test)]
     fn pop(&mut self) {
         self.active_mut().pop();
     }
@@ -3469,118 +3468,66 @@ fn encryption_password_field(
     revision: RwSignal<u64>,
     palette: Palette,
 ) -> impl View {
-    let label = label(move || {
-        signals.encryption_revision.get();
-        signals.encryption_entry.with(|entry| {
-            let length = entry.field(field).chars().count();
-            if length == 0 {
-                placeholder.to_string()
-            } else {
-                "•".repeat(length)
-            }
-        })
-    });
-    let input_model = model.clone();
-    let input_field_ids = field_ids;
+    let read = signals.encryption_entry;
     let disabled_model = model.clone();
+    let enabled_model = model.clone();
     let focus_model = model.clone();
-    MaskedPasswordView::new(
-        label.style(|style| style.selectable(false)),
-        move || {
-            if password_change_busy(&model.borrow()) {
-                return;
-            }
-            signals
-                .encryption_entry
-                .update(|entry| entry.active = field);
-            signals.encryption_feedback.set(None);
-            signals
-                .encryption_revision
-                .update(|value| *value = value.saturating_add(1));
+    let input_model = model;
+    SecretInput::new(
+        move || read.with_untracked(|entry| Zeroizing::new(entry.field(field).to_owned())),
+        move |range, insert| {
+            let mut accepted = false;
+            signals.encryption_entry.update(|entry| {
+                entry.active = field;
+                accepted =
+                    replace_secret(entry.field_mut(field), range, insert, MAX_PASSWORD_BYTES);
+            });
+            signals.encryption_feedback.set(if accepted {
+                None
+            } else {
+                Some(SettingsFeedback {
+                    message: msg!(PasswordTooLong, "maximum" => MAX_PASSWORD_BYTES).into(),
+                    is_error: true,
+                })
+            });
+            signals.encryption_revision.update(|value| *value += 1);
+            accepted
         },
-        move |event| {
-            if password_change_busy(&input_model.borrow()) {
-                return EventPropagation::Stop;
-            }
-            let append = |value: &str| {
-                let mut accepted = false;
-                signals.encryption_entry.update(|entry| {
-                    entry.active = field;
-                    let target = entry.field_mut(field);
-                    if target.len().saturating_add(value.len()) <= MAX_PASSWORD_BYTES
-                        && target.len().saturating_add(value.len()) <= target.capacity()
-                    {
-                        target.push_str(value);
-                        accepted = true;
-                    }
-                });
-                if accepted {
-                    signals.encryption_feedback.set(None);
-                } else {
-                    signals.encryption_feedback.set(Some(SettingsFeedback {
-                        message: msg!(PasswordTooLong , "maximum" => MAX_PASSWORD_BYTES).into(),
-                        is_error: true,
-                    }));
-                }
-                signals
-                    .encryption_revision
-                    .update(|value| *value = value.saturating_add(1));
-            };
-            if let Event::ImeCommit(value) = event {
-                append(value);
-                return EventPropagation::Stop;
-            }
-            let Event::KeyDown(key_event) = event else {
-                return EventPropagation::Stop;
-            };
-            let shortcut = (key_event.modifiers.meta() || key_event.modifiers.control())
-                && !altgr_text(key_event.modifiers, key_event.key.text.as_deref());
-            match &key_event.key.logical_key {
-                Key::Named(NamedKey::Enter) => {
-                    submit_master_password_change(signals, &input_model, revision);
-                }
-                Key::Named(NamedKey::Tab) => {
-                    if let Some(ids) = input_field_ids.get() {
-                        let target = ids.adjacent(field, key_event.modifiers.shift());
-                        signals
-                            .encryption_entry
-                            .update(|entry| entry.active = target);
-                        signals.encryption_feedback.set(None);
-                        signals
-                            .encryption_revision
-                            .update(|value| *value = value.saturating_add(1));
-                        ids.get(target).request_focus();
-                    }
-                }
-                Key::Named(NamedKey::Backspace) => {
-                    signals.encryption_entry.update(|entry| {
-                        entry.active = field;
-                        entry.field_mut(field).pop();
-                    });
-                    signals.encryption_feedback.set(None);
-                    signals
-                        .encryption_revision
-                        .update(|value| *value = value.saturating_add(1));
-                }
-                Key::Character(value) if shortcut && value.to_lowercase() == "v" => {
-                    match Clipboard::get_contents() {
-                        Ok(value) => append(&value),
-                        Err(_) => signals.encryption_feedback.set(Some(SettingsFeedback {
-                            message: msg!(PastePasswordFailed).into(),
-                            is_error: true,
-                        })),
-                    }
-                }
-                Key::Named(NamedKey::Space) if !shortcut => append(" "),
-                Key::Character(value) if !shortcut => append(value),
-                Key::Dead(_) => {}
-                // Copy and cut are intentionally swallowed with every other
-                // command shortcut so secrets never enter the clipboard.
-                _ => {}
-            }
-            EventPropagation::Stop
-        },
+        signals.encryption_revision,
+        placeholder,
+        palette,
     )
+    .enabled(move || {
+        revision.get();
+        !password_change_busy(&enabled_model.borrow())
+    })
+    .on_command(move |event| {
+        let Event::KeyDown(key) = event else {
+            return EventPropagation::Continue;
+        };
+        match key.key.logical_key {
+            Key::Named(NamedKey::Enter) => {
+                submit_master_password_change(signals, &input_model, revision)
+            }
+            Key::Named(NamedKey::Tab) => {
+                if let Some(ids) = field_ids.get() {
+                    let target = ids.adjacent(field, key.modifiers.shift());
+                    ids.get(target).request_focus();
+                }
+            }
+            Key::Character(ref value)
+                if value.eq_ignore_ascii_case("v")
+                    && (key.modifiers.meta() || key.modifiers.control()) =>
+            {
+                signals.encryption_feedback.set(Some(SettingsFeedback {
+                    message: msg!(PastePasswordFailed).into(),
+                    is_error: true,
+                }));
+            }
+            _ => return EventPropagation::Continue,
+        }
+        EventPropagation::Stop
+    })
     .style(move |style| {
         revision.get();
         signals.encryption_revision.get();
@@ -3857,257 +3804,69 @@ fn password_dialog_card(
 
     let focus = PasswordFocusSignals {
         field: create_rw_signal(None),
-        caret_visible: create_rw_signal(false),
-        caret_focused: create_rw_signal(false),
-        caret_generation: create_rw_signal(0),
     };
     let field_ids = Rc::new(Cell::new(None));
 
-    let primary_security = security.clone();
-    let primary_label_security = security.clone();
-    let primary_style_security = security.clone();
-    let primary_key_security = security.clone();
-    let primary_key_model = model.clone();
-    let primary_key_ids = field_ids.clone();
-    let primary_leading_caret_security = security.clone();
-    let primary_leading_caret = empty().style(move |style| {
-        primary_leading_caret_security.entry_revision.get();
-        let owns_position = primary_leading_caret_security
-            .entry
-            .borrow()
-            .primary
-            .is_empty();
-        let visible = owns_position
-            && focus.field.get() == Some(PasswordField::Primary)
-            && focus.caret_visible.get();
-        style
-            .width(if owns_position { 1.0 } else { 0.0 })
-            .height(18.0)
-            .flex_shrink(0.0)
-            .background(if visible {
-                palette.accent
-            } else {
-                Color::TRANSPARENT
-            })
-    });
-    let primary_trailing_caret_security = security.clone();
-    let primary_trailing_caret = empty().style(move |style| {
-        primary_trailing_caret_security.entry_revision.get();
-        let owns_position = !primary_trailing_caret_security
-            .entry
-            .borrow()
-            .primary
-            .is_empty();
-        let visible = owns_position
-            && focus.field.get() == Some(PasswordField::Primary)
-            && focus.caret_visible.get();
-        style
-            .width(if owns_position { 1.0 } else { 0.0 })
-            .height(18.0)
-            .flex_shrink(0.0)
-            .background(if visible {
-                palette.accent
-            } else {
-                Color::TRANSPARENT
-            })
-    });
-    let primary_content = h_stack((
-        primary_leading_caret,
-        label(move || {
-            primary_label_security.entry_revision.get();
-            let len = primary_label_security
-                .entry
-                .borrow()
-                .primary
-                .chars()
-                .count();
-            if len == 0 {
-                tr!(EnterPassword)
-            } else {
-                "•".repeat(len)
-            }
-        })
-        .style(|style| style.min_width(0.0).flex_shrink(1.0).selectable(false)),
-        primary_trailing_caret,
-    ))
-    .style(|style| style.width_full().min_width(0.0).items_center());
-    let primary_field = MaskedPasswordView::new(
-        primary_content,
-        move || {
-            if primary_security.busy.get_untracked() {
-                return;
-            }
-            primary_security.entry.borrow_mut().active = PasswordField::Primary;
-            primary_security.clear_feedback();
-            primary_security.entry_revision.update(|value| *value += 1);
-        },
-        move |event| {
-            let Some(ids) = primary_key_ids.get() else {
-                return EventPropagation::Stop;
-            };
-            handle_password_key(
-                event,
-                (PasswordField::Primary, ids),
-                kind,
-                &primary_key_model,
-                &primary_key_security,
-                focus,
-                revision,
-            )
-        },
-    )
-    .style(move |style| {
-        primary_style_security.entry_revision.get();
-        let active = focus.field.get() == Some(PasswordField::Primary);
-        style
-            .width_full()
-            .height(38.0)
-            .items_center()
-            .cursor(CursorStyle::Text)
-            .padding_horiz(11.0)
-            .background(palette.paper)
-            .color(
-                if primary_style_security.entry.borrow().primary.is_empty() {
-                    palette.muted
+    let make_field = |field: PasswordField, hint| {
+        let read = security.clone();
+        let edit = security.clone();
+        let enabled = security.busy;
+        let command_security = security.clone();
+        let command_model = model.clone();
+        let command_ids = field_ids.clone();
+        SecretInput::new(
+            move || {
+                let entry = read.entry.borrow();
+                match field {
+                    PasswordField::Primary => entry.primary.clone(),
+                    PasswordField::Confirmation => entry.confirmation.clone(),
+                }
+            },
+            move |range, insert| {
+                let accepted = {
+                    let mut entry = edit.entry.borrow_mut();
+                    entry.active = field;
+                    replace_secret(entry.active_mut(), range, insert, MAX_PASSWORD_BYTES)
+                };
+                if accepted {
+                    edit.clear_feedback();
                 } else {
-                    palette.ink
-                },
-            )
-            .border(1.0)
-            .border_color(if active {
-                palette.accent
-            } else {
-                palette.divider
-            })
-            .border_radius(6.0)
-            .font_size(crate::ui::FONT_BODY as f32)
-    })
-    .keyboard_navigable();
-    let primary_id = primary_field.id();
-
-    let confirmation_security = security.clone();
-    let confirmation_label_security = security.clone();
-    let confirmation_style_security = security.clone();
-    let confirmation_key_security = security.clone();
-    let confirmation_key_model = model.clone();
-    let confirmation_key_ids = field_ids.clone();
-    let confirmation_leading_caret_security = security.clone();
-    let confirmation_leading_caret = empty().style(move |style| {
-        confirmation_leading_caret_security.entry_revision.get();
-        let owns_position = confirmation_leading_caret_security
-            .entry
-            .borrow()
-            .confirmation
-            .is_empty();
-        let visible = owns_position
-            && focus.field.get() == Some(PasswordField::Confirmation)
-            && focus.caret_visible.get();
-        style
-            .width(if owns_position { 1.0 } else { 0.0 })
-            .height(18.0)
-            .flex_shrink(0.0)
-            .background(if visible {
-                palette.accent
-            } else {
-                Color::TRANSPARENT
-            })
-    });
-    let confirmation_trailing_caret_security = security.clone();
-    let confirmation_trailing_caret = empty().style(move |style| {
-        confirmation_trailing_caret_security.entry_revision.get();
-        let owns_position = !confirmation_trailing_caret_security
-            .entry
-            .borrow()
-            .confirmation
-            .is_empty();
-        let visible = owns_position
-            && focus.field.get() == Some(PasswordField::Confirmation)
-            && focus.caret_visible.get();
-        style
-            .width(if owns_position { 1.0 } else { 0.0 })
-            .height(18.0)
-            .flex_shrink(0.0)
-            .background(if visible {
-                palette.accent
-            } else {
-                Color::TRANSPARENT
-            })
-    });
-    let confirmation_content = h_stack((
-        confirmation_leading_caret,
-        label(move || {
-            confirmation_label_security.entry_revision.get();
-            let len = confirmation_label_security
-                .entry
-                .borrow()
-                .confirmation
-                .chars()
-                .count();
-            if len == 0 {
-                tr!(RepeatPassword)
-            } else {
-                "•".repeat(len)
-            }
-        })
-        .style(|style| style.min_width(0.0).flex_shrink(1.0).selectable(false)),
-        confirmation_trailing_caret,
-    ))
-    .style(|style| style.width_full().min_width(0.0).items_center());
-    let confirmation_field = MaskedPasswordView::new(
-        confirmation_content,
-        move || {
-            if confirmation_security.busy.get_untracked() {
-                return;
-            }
-            confirmation_security.entry.borrow_mut().active = PasswordField::Confirmation;
-            confirmation_security.clear_feedback();
-            confirmation_security
-                .entry_revision
-                .update(|value| *value += 1);
-        },
-        move |event| {
-            let Some(ids) = confirmation_key_ids.get() else {
+                    edit.set_error(msg!(PasswordTooLong, "maximum" => MAX_PASSWORD_BYTES));
+                }
+                edit.entry_revision.update(|value| *value += 1);
+                accepted
+            },
+            security.entry_revision,
+            hint,
+            palette,
+        )
+        .enabled(move || !enabled.get())
+        .on_command(move |event| {
+            let Some(ids) = command_ids.get() else {
                 return EventPropagation::Stop;
             };
             handle_password_key(
                 event,
-                (PasswordField::Confirmation, ids),
+                (field, ids),
                 kind,
-                &confirmation_key_model,
-                &confirmation_key_security,
-                focus,
+                &command_model,
+                &command_security,
                 revision,
             )
-        },
-    )
-    .style(move |style| {
-        confirmation_style_security.entry_revision.get();
-        let entry = confirmation_style_security.entry.borrow();
-        let active = focus.field.get() == Some(PasswordField::Confirmation);
-        let style = style
-            .width_full()
-            .height(38.0)
-            .items_center()
-            .cursor(CursorStyle::Text)
-            .padding_horiz(11.0)
-            .background(palette.paper)
-            .color(if entry.confirmation.is_empty() {
-                palette.muted
-            } else {
-                palette.ink
-            })
-            .border(1.0)
-            .border_color(if active {
-                palette.accent
-            } else {
-                palette.divider
-            })
-            .border_radius(6.0)
-            .font_size(crate::ui::FONT_BODY as f32);
-        if is_setup { style } else { style.hide() }
-    })
-    .keyboard_navigable();
-
+        })
+        .style(move |style| {
+            settings_secret_style(style, palette, false, focus.field.get() == Some(field))
+                .height(38.0)
+                .padding_horiz(11.0)
+                .apply_if(field == PasswordField::Confirmation && !is_setup, |s| {
+                    s.hide()
+                })
+        })
+        .keyboard_navigable()
+    };
+    let primary_field = make_field(PasswordField::Primary, i18n::Key::EnterPassword);
+    let confirmation_field = make_field(PasswordField::Confirmation, i18n::Key::RepeatPassword);
+    let primary_id = primary_field.id();
     let confirmation_id = confirmation_field.id();
     let field_ids_value = PasswordFieldIds {
         primary: primary_id,
@@ -4120,12 +3879,6 @@ fn password_dialog_card(
         .on_event_stop(EventListener::FocusGained, move |_| {
             primary_focus_security.entry.borrow_mut().active = PasswordField::Primary;
             focus.field.set(Some(PasswordField::Primary));
-            focus.caret_focused.set(true);
-            restart_caret_blink(
-                focus.caret_visible,
-                focus.caret_focused,
-                focus.caret_generation,
-            );
             primary_focus_security
                 .entry_revision
                 .update(|value| *value += 1);
@@ -4134,7 +3887,6 @@ fn password_dialog_card(
             // Floem can deliver the next field's FocusGained before this loss.
             if focus.field.get_untracked() == Some(PasswordField::Primary) {
                 focus.field.set(None);
-                stop_password_caret(focus);
             }
         });
 
@@ -4143,12 +3895,6 @@ fn password_dialog_card(
         .on_event_stop(EventListener::FocusGained, move |_| {
             confirmation_focus_security.entry.borrow_mut().active = PasswordField::Confirmation;
             focus.field.set(Some(PasswordField::Confirmation));
-            focus.caret_focused.set(true);
-            restart_caret_blink(
-                focus.caret_visible,
-                focus.caret_focused,
-                focus.caret_generation,
-            );
             confirmation_focus_security
                 .entry_revision
                 .update(|value| *value += 1);
@@ -4156,7 +3902,6 @@ fn password_dialog_card(
         .on_event_stop(EventListener::FocusLost, move |_| {
             if focus.field.get_untracked() == Some(PasswordField::Confirmation) {
                 focus.field.set(None);
-                stop_password_caret(focus);
             }
         });
 
@@ -4253,14 +3998,6 @@ fn password_dialog_card(
     container(card).style(modal_backdrop)
 }
 
-fn stop_password_caret(focus: PasswordFocusSignals) {
-    focus.caret_focused.set(false);
-    focus.caret_visible.set(false);
-    focus
-        .caret_generation
-        .update(|value| *value = value.saturating_add(1));
-}
-
 fn request_password_field_focus(
     field: PasswordField,
     ids: PasswordFieldIds,
@@ -4277,93 +4014,44 @@ fn handle_password_key(
     kind: PasswordDialogKind,
     model: &Rc<RefCell<AppModel>>,
     security: &SecurityUi,
-    focus: PasswordFocusSignals,
     revision: RwSignal<u64>,
 ) -> EventPropagation {
     let (field, field_ids) = field;
     if security.busy.get_untracked() {
         return EventPropagation::Stop;
     }
-    if let Event::ImeCommit(value) = event {
-        security.entry.borrow_mut().active = field;
-        append_password_value(security, value);
-        security.entry_revision.update(|value| *value += 1);
-        restart_caret_blink(
-            focus.caret_visible,
-            focus.caret_focused,
-            focus.caret_generation,
-        );
-        return EventPropagation::Stop;
-    }
-    let Event::KeyDown(key_event) = event else {
+    let Event::KeyDown(key) = event else {
         return EventPropagation::Continue;
     };
-    let shortcut = (key_event.modifiers.meta() || key_event.modifiers.control())
-        && !altgr_text(key_event.modifiers, key_event.key.text.as_deref());
-    match &key_event.key.logical_key {
-        Key::Named(NamedKey::Escape) => {
-            security.close();
-        }
+    match &key.key.logical_key {
+        Key::Named(NamedKey::Escape) => security.close(),
         Key::Named(NamedKey::Enter) => {
-            let advance_to_confirmation = kind == PasswordDialogKind::SetupProtection && {
+            let advance = kind == PasswordDialogKind::SetupProtection && {
                 let entry = security.entry.borrow();
                 field == PasswordField::Primary
                     && !entry.primary.is_empty()
                     && entry.confirmation.is_empty()
             };
-            if advance_to_confirmation {
+            if advance {
                 request_password_field_focus(PasswordField::Confirmation, field_ids, security);
                 security.clear_feedback();
             } else if let Some(target) = submit_password_dialog(kind, model, security, revision) {
                 request_password_field_focus(target, field_ids, security);
             }
         }
-        Key::Named(NamedKey::Backspace) => {
-            security.entry.borrow_mut().active = field;
-            security.entry.borrow_mut().pop();
-            security.clear_feedback();
-            security.entry_revision.update(|value| *value += 1);
-        }
         Key::Named(NamedKey::Tab) if kind == PasswordDialogKind::SetupProtection => {
             request_password_field_focus(field_ids.other(field), field_ids, security);
         }
-        Key::Character(value) if shortcut && value.to_lowercase() == "v" => {
-            security.entry.borrow_mut().active = field;
-            match Clipboard::get_contents() {
-                Ok(value) => append_password_value(security, &value),
-                Err(_) => security.set_error(msg!(PastePasswordFailed)),
-            }
-            security.entry_revision.update(|value| *value += 1);
+        // SecretInput forwards a paste shortcut only when reading the clipboard failed.
+        Key::Character(value)
+            if value.eq_ignore_ascii_case("v")
+                && (key.modifiers.meta() || key.modifiers.control()) =>
+        {
+            security.set_error(msg!(PastePasswordFailed));
         }
-        Key::Named(NamedKey::Space) if !shortcut => {
-            security.entry.borrow_mut().active = field;
-            append_password_value(security, " ");
-            security.entry_revision.update(|value| *value += 1);
-        }
-        Key::Character(value) if !shortcut => {
-            security.entry.borrow_mut().active = field;
-            append_password_value(security, value);
-            security.entry_revision.update(|value| *value += 1);
-        }
-        // A dead key starts an OS composition. The committed character arrives
-        // through ImeCommit; inserting this marker would duplicate accents.
-        Key::Dead(_) => {}
-        _ => return EventPropagation::Stop,
+        _ => return EventPropagation::Continue,
     }
-    restart_caret_blink(
-        focus.caret_visible,
-        focus.caret_focused,
-        focus.caret_generation,
-    );
     EventPropagation::Stop
-}
-
-fn append_password_value(security: &SecurityUi, value: &str) {
-    if security.entry.borrow_mut().push(value) {
-        security.clear_feedback();
-    } else {
-        security.set_error(msg!(PasswordTooLong , "maximum" => MAX_PASSWORD_BYTES));
-    }
 }
 
 fn submit_password_dialog(
@@ -4926,9 +4614,6 @@ fn selected_note_is_ready(model: &Rc<RefCell<AppModel>>) -> bool {
 fn displayed_sidebar_width(saved: f64, window: f64, collapsed: bool) -> f64 {
     if collapsed {
         return 56.0;
-    }
-    if window < 1000.0 {
-        return 200.0;
     }
     saved
         .clamp(SIDEBAR_MIN_WIDTH_PX, SIDEBAR_MAX_WIDTH_PX)
@@ -12255,11 +11940,14 @@ mod tests {
 
     #[test]
     fn sidebar_display_width_preserves_user_width_and_limits_narrow_windows() {
-        assert_eq!(super::displayed_sidebar_width(480.0, 960.0, false), 200.0);
+        assert_eq!(super::displayed_sidebar_width(480.0, 960.0, false), 384.0);
         assert_eq!(super::displayed_sidebar_width(480.0, 1100.0, false), 440.0);
         assert_eq!(super::displayed_sidebar_width(256.0, 1240.0, false), 256.0);
         assert_eq!(super::displayed_sidebar_width(480.0, 960.0, true), 56.0);
         assert_eq!(super::displayed_sidebar_width(420.0, 1240.0, false), 420.0);
+        for width in [1240.0, 1001.0, 999.0, 960.0, 1240.0] {
+            assert_eq!(super::displayed_sidebar_width(300.0, width, false), 300.0);
+        }
     }
 
     #[test]

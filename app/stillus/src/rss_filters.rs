@@ -27,12 +27,66 @@ pub(crate) fn control(
     .into_any()
 }
 
-fn multiline(value: RwSignal<String>, open: RwSignal<bool>, palette: Palette) -> AnyView {
-    TextArea::new(value, palette)
-        .visible(move || open.get())
-        .invalid(move || value.get().len() > 16 * 1024)
-        .on_escape(move || open.set(false))
-        .build(move |_| {})
+fn field_error(value: &str, blacklist: bool) -> Option<stillus_core::RssFilterError> {
+    RssPreferences {
+        blacklist: if blacklist {
+            value.to_owned()
+        } else {
+            String::new()
+        },
+        whitelist: if blacklist {
+            String::new()
+        } else {
+            value.to_owned()
+        },
+        ..Default::default()
+    }
+    .compile()
+    .err()
+}
+
+fn multiline(
+    value: RwSignal<String>,
+    open: RwSignal<bool>,
+    blacklist: bool,
+    palette: Palette,
+) -> AnyView {
+    let error = floem::reactive::create_memo(move |_| field_error(&value.get(), blacklist));
+    let line = create_rw_signal(None);
+    v_stack((
+        TextArea::new(value, palette)
+            .visible(move || open.get())
+            .invalid(move || error.get().is_some())
+            .focus_line(line)
+            .on_escape(move || open.set(false))
+            .build(move |_| {}),
+        selectable_row(
+            label(move || error.get().map(validation_message).unwrap_or_default()).style(
+                move |s| {
+                    s.width_full()
+                        .font_size(crate::ui::FONT_CAPTION)
+                        .color(palette.danger)
+                },
+            ),
+            move || {
+                if let Some(stillus_core::RssFilterError::Invalid { line: number, .. }) =
+                    error.get_untracked()
+                {
+                    line.set(None);
+                    line.set(Some(number));
+                }
+            },
+        )
+        .style(move |s| {
+            s.width_full()
+                .min_width(0.0)
+                .cursor(CursorStyle::Pointer)
+                .focus_visible(|s| s.border(1.0).border_color(palette.danger))
+                .apply_if(error.get().is_none(), |s| s.hide())
+        }),
+    ))
+    .style(|s| s.width_full().min_width(0.0).gap(4.0))
+    .into_any()
 }
 
 fn validation_message(error: stillus_core::RssFilterError) -> String {
@@ -93,9 +147,6 @@ pub(crate) fn form(
         }
     });
     let status = label(move || {
-        if let Some(message) = validation.get() {
-            return message;
-        }
         if error.get() {
             return tr!(RssFilterConflict);
         }
@@ -106,12 +157,13 @@ pub(crate) fn form(
     })
     .style(move |s| {
         s.font_size(crate::ui::FONT_CAPTION as f32)
-            .color(palette.muted)
+            .color(if error.get() {
+                palette.danger
+            } else {
+                palette.muted
+            })
             .width_full()
-            .apply_if(
-                validation.get().is_none() && !error.get() && pending.get().is_none(),
-                |s| s.hide(),
-            )
+            .apply_if(!error.get() && pending.get().is_none(), |s| s.hide())
     });
     let save_button = |apply: bool| {
         let model = model.clone();
@@ -179,12 +231,11 @@ pub(crate) fn form(
                 .color(palette.muted)
         }),
         label(move || tr!(RssFilterBlacklist)),
-        multiline(blacklist, open, palette),
+        multiline(blacklist, open, true, palette),
         label(move || tr!(RssFilterWhitelist)),
-        multiline(whitelist, open, palette),
+        multiline(whitelist, open, false, palette),
         status,
-        h_stack((
-            empty().style(|s| s.flex_grow(1.0)),
+        actions((
             dialog_button(
                 ButtonAction::Cancel,
                 msg!(Cancel),
@@ -195,7 +246,7 @@ pub(crate) fn form(
             save_button(false),
             save_button(true),
         ))
-        .style(|s| s.width_full().items_center().gap(8.0).margin_top(8.0)),
+        .style(|s| s.width_full().justify_end().margin_top(8.0)),
     ))
     .style(move |s| {
         s.width(480.0)
@@ -214,4 +265,18 @@ pub(crate) fn form(
         EventPropagation::Stop
     })
     .into_any()
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn validation_identifies_the_field_and_original_line() {
+        for blacklist in [true, false] {
+            assert_eq!(
+                super::field_error("valid\n\n[", blacklist),
+                Some(stillus_core::RssFilterError::Invalid { blacklist, line: 3 })
+            );
+            assert_eq!(super::field_error("valid\n.*", blacklist), None);
+        }
+    }
 }

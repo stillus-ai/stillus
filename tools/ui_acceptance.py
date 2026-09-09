@@ -689,7 +689,7 @@ def dark_pixel_count(
 
 
 def editor_pixels_equal_except_caret(first: bytes, second: bytes, width: int) -> bool:
-    """Accept only an unchanged image or one 2px by 18px accent caret blinking.
+    """Accept only an unchanged image or one narrow 18–20px accent caret blinking.
 
     Allow a one-pixel rasterization margin. Text, selection overlays and moving
     carets remain changes; do not use a general changed-pixel allowance.
@@ -708,20 +708,28 @@ def editor_pixels_equal_except_caret(first: bytes, second: bytes, width: int) ->
         y, x = divmod(offset // 3, width)
         left, right = min(left, x), max(right, x)
         top, bottom = min(top, y), max(bottom, y)
-        if right - left >= 3 or bottom - top >= 20:
+        if right - left >= 3 or bottom - top >= 22:
             return False
         changed.append((before, after))
-        first_accent |= all(abs(value - color) <= 8 for value, color in zip(before, (54, 94, 130)))
-        second_accent |= all(abs(value - color) <= 8 for value, color in zip(after, (54, 94, 130)))
-    # Exactly one frame must contain the caret's solid accent color.
+        first_accent |= before[2] - before[0] >= 20 and before[2] - before[1] >= 10
+        second_accent |= after[2] - after[0] >= 20 and after[2] - after[1] >= 10
+    # A fractional layout position can antialias the entire 1px-wide caret.
     if bottom - top < 15 or first_accent == second_accent:
         return False
     for before, after in changed:
         painted, background = (before, after) if first_accent else (after, before)
-        # Antialiased edge pixels must also lie between the underlying pixel
-        # and the caret color. A nearby glyph disappearing is not a blink.
-        if any(not min(base, accent) - 2 <= value <= max(base, accent) + 2
-               for value, base, accent in zip(painted, background, (54, 94, 130))):
+        color = (54, 94, 130)
+        channel = max(range(3), key=lambda i: abs(color[i] - background[i]))
+        denominator = color[channel] - background[channel]
+        if denominator == 0:
+            return False
+        alpha = (painted[channel] - background[channel]) / denominator
+        # All channels must share the same blend with the known accent color.
+        # Gray glyphs and disappearing neighboring text cannot pass this check.
+        if not 0 <= alpha <= 1 or any(
+            abs(value - (base + alpha * (accent - base))) > 3
+            for value, base, accent in zip(painted, background, color)
+        ):
             return False
     return True
 
@@ -1583,9 +1591,12 @@ class WindowDriver:
         stable_for: float = 0.0,
         timeout: float = 3.0,
         ignore_editor_caret: bool = False,
+        ignore_control_caret: bool = False,
     ) -> Path:
         if ignore_editor_caret and crop != EDITOR_CROP:
             raise AcceptanceFailure("caret-aware comparison requires the editor crop")
+        if ignore_control_caret and crop is None:
+            raise AcceptanceFailure("control caret comparison requires an explicit crop")
         previous = self.capture("stability-previous")
         stable = self.capture("stability-current")
         stable_since: float | None = None
@@ -1594,8 +1605,9 @@ class WindowDriver:
             nonlocal previous, stable, stable_since
             current = self.capture("stability-next")
             equal = (
-                editor_frames_equal_except_caret(previous, current, EDITOR_CROP)
-                if ignore_editor_caret else image_difference(previous, current, crop=crop) == 0
+                editor_frames_equal_except_caret(previous, current, crop)
+                if ignore_editor_caret or ignore_control_caret
+                else image_difference(previous, current, crop=crop) == 0
             )
             previous.unlink(missing_ok=True)
             previous = current
@@ -7096,11 +7108,11 @@ def resize_scenario(driver: WindowDriver, workspace: Path) -> None:
 
     wait_until("durable sidebar and navigation settings", durable_state_written)
     driver.resize_window(960, 600)
-    wait_for_boundary("narrow sidebar uses 200px", 200)
+    wait_for_boundary("narrow sidebar preserves width within forty percent", 384)
     driver.click_point(28, 572)
     wait_for_boundary("sidebar collapses to icons", 56)
     driver.click_point(28, 572)
-    wait_for_boundary("sidebar expands at narrow width", 200)
+    wait_for_boundary("sidebar expands at narrow width", 384)
     driver.resize_window(1240, 800)
     wait_for_boundary("expanded window restores saved width", 480)
     driver.resize_window(1_100, 700)
@@ -7511,8 +7523,19 @@ def rss_filters_scenario(driver: WindowDriver, workspace: Path) -> None:
     open_filters()
     field(black_y, "promotion\n[")
     before = (config_path.read_bytes(), state_path.read_bytes())
-    driver.capture("rss-filter-invalid-line")
-    driver.click_point(938, footer_y)
+    wait_until("invalid regexp has a visible field error", lambda:
+        near_color_pixel_count(driver.capture("rss-filter-error-paint"),
+            (164, 69, 69), crop=(510, 140, 510, 200)) >= 30)
+    invalid = driver.capture("rss-filter-invalid-line")
+    export_screenshot(invalid, Path("/workspace/dist/rss-filter-validation.png"))
+    set_clipboard_text(driver.environment, "RSS line sentinel")
+    driver.click_point(690, 308)
+    driver.key("Home")
+    driver.key("shift+End")
+    driver.key("ctrl+c")
+    wait_until("validation message focuses the invalid line", lambda:
+        clipboard_text(driver.environment) == "[")
+    driver.click_point(938, footer_y + 20)
     if (config_path.read_bytes(), state_path.read_bytes()) != before:
         raise AcceptanceFailure("invalid regexp changed persisted rules or decisions")
     driver.key("Escape")
@@ -7530,6 +7553,16 @@ def rss_filters_scenario(driver: WindowDriver, workspace: Path) -> None:
     driver.start_app(workspace, "filters-restored")
     if any(entry["decision"] != "keep" for entry in state()["entries"].values()):
         raise AcceptanceFailure("regexp decisions changed after restart")
+    driver.close_app()
+    (driver.home / ".stillus.cfg").write_text(json.dumps({"version": 1, "locale": "ru"}))
+    driver.start_app(workspace, "filters-russian")
+    driver.resize_window(960, 600)
+    before = driver.wait_for_stable_frame("minimum Russian feed", stable_for=0.3)
+    driver.click_point(734, 28)
+    driver.wait_for_visual_change("Russian filter controls", before, crop=(260, 55, 500, 500))
+    russian = driver.wait_for_stable_frame("wrapped Russian filter actions", stable_for=0.3)
+    export_screenshot(russian, Path("/workspace/dist/rss-filter-ru.png"))
+    driver.key("Escape")
     driver.close_app()
 
 
@@ -7588,7 +7621,7 @@ def rss_cards_scenario(driver: WindowDriver, workspace: Path) -> None:
     # rounded corners. A capped or overflowing list must fail even if centered.
     for width in (SCREEN_WIDTH, 960, SCREEN_WIDTH):
         driver.resize_window(width, SCREEN_HEIGHT)
-        sidebar_width = 200 if width < 1000 else SIDEBAR_WIDTH
+        sidebar_width = SIDEBAR_WIDTH
         frame = driver.wait_for_stable_frame(
             f"RSS card layout at width {width}", stable_for=0.3,
             crop=(sidebar_width, 80, width - sidebar_width, 120),
@@ -7719,7 +7752,7 @@ def localization_scenario(driver: WindowDriver, workspace: Path) -> None:
                 wait_until("mirrored sidebar boundary", positioned, timeout=10)
 
             driver.click_point(924, 42)
-            wait_rtl_boundary(760)
+            wait_rtl_boundary(960 - SIDEBAR_WIDTH)
             driver.resize_window(1240, 800)
             wait_rtl_boundary(984)
             driver.press_point(986, 400)
@@ -7766,10 +7799,10 @@ def localization_scenario(driver: WindowDriver, workspace: Path) -> None:
 
 
 def wait_for_ai_controls(driver: WindowDriver) -> None:
-    # Focused text fields legitimately blink. Require identical frames, but not
-    # a 600 ms quiet period spanning a caret blink. Preserve focus so typing,
-    # Enter, blur validation and dropdown assertions exercise the real controls.
-    driver.wait_for_stable_frame("AI controls", crop=(232, 0, 1008, 800), stable_for=0.15, timeout=10)
+    # Permit only the stationary accent caret to blink. Text, borders and
+    # selection still have to settle, while focus and blur semantics are preserved.
+    driver.wait_for_stable_frame("AI controls", crop=(232, 0, 1008, 800),
+        stable_for=0.25, timeout=10, ignore_control_caret=True)
 
 
 def ai_settings_cards(frame: Path) -> list[tuple[int, int]]:
@@ -7878,11 +7911,14 @@ def ai_settings_scenario(driver: WindowDriver, workspace: Path) -> None:
     def bounds() -> tuple[int, int]:
         driver.click_point(*AI_SIDEBAR_ITEM)
         settle()
-        runs = shaded_row_runs(driver.capture("ai-editor"), x=AI_CONTENT_LEFT,
-                               y=0, height=SCREEN_HEIGHT, max_luminance=AI_ACCENT_LUMINANCE)
-        runs = [(start, end) for start, end in runs if end - start >= AI_EXPANDED_MIN_HEIGHT]
-        if len(runs) != 1:
-            raise AcceptanceFailure("expected one alias editor")
+        runs = []
+        def editor_ready() -> bool:
+            nonlocal runs
+            runs = shaded_row_runs(driver.capture("ai-editor"), x=AI_CONTENT_LEFT,
+                y=0, height=SCREEN_HEIGHT, max_luminance=AI_ACCENT_LUMINANCE)
+            runs = [(start, end) for start, end in runs if end - start >= AI_EXPANDED_MIN_HEIGHT]
+            return len(runs) == 1
+        wait_until("one expanded alias editor", editor_ready)
         return runs[0][0] - AI_CARD_CORNER, runs[0][1] + AI_CARD_CORNER
 
     def controls() -> list[tuple[int, int]]:
@@ -7981,21 +8017,24 @@ def ai_settings_scenario(driver: WindowDriver, workspace: Path) -> None:
     review_frame("ai-connection-error")
     driver.click_point(*key_field())
     set_clipboard_text(driver.environment, "  sk-proj-abcdefghijklmnopqrstuvslow  ")
+    driver.key("ctrl+a")
     driver.key("ctrl+v")
     settle()
     field_y = key_field()[1]
+    driver.click_point(*AI_SIDEBAR_ITEM)
+    settle()
     masked = driver.capture("ai-masked")
     driver.click_point(913, field_y)
     driver.click_point(*AI_SIDEBAR_ITEM)
     settle()
-    revealed = driver.capture("ai-revealed")
-    if image_difference(masked, revealed, crop=(310, field_y - 12, 400, 24)) < 50:
-        raise AcceptanceFailure("AI reveal control did not reveal the fixture key")
+    driver.wait_for_visual_change("AI reveal control shows the fixture key", masked,
+        crop=(310, field_y - 12, 400, 24), minimum_pixels=50, timeout=10)
     driver.click_point(913, field_y)
     driver.click_point(*AI_SIDEBAR_ITEM)
     settle()
-    if image_difference(masked, driver.capture("ai-concealed"), crop=(310, field_y - 12, 400, 24)) > 5:
-        raise AcceptanceFailure("AI reveal control did not conceal the key again")
+    wait_until("AI reveal control conceals the key again", lambda:
+        image_difference(masked, driver.capture("ai-concealed"),
+            crop=(310, field_y - 12, 400, 24)) <= 5)
     driver.click_point(*key_field())
     settle()
     driver.key("Return")
@@ -8104,6 +8143,8 @@ def ai_settings_scenario(driver: WindowDriver, workspace: Path) -> None:
     config.write_text(json.dumps(changed))
     primary(within=bounds())
     settle()
+    wait_until("save conflict feedback is painted", lambda:
+        danger_pixels((280, 150, 710, 630)) >= 20)
     top, bottom = bounds()
     if danger_pixels((300, top, 670, bottom - top)) < 20:
         raise AcceptanceFailure("save conflict was not shown inside the alias editor")
@@ -8701,7 +8742,10 @@ def journal_page_states_scenario(driver: WindowDriver) -> None:
                 crop=(300, 184, 700, 180), minimum_pixels=150, timeout=10)
         if count == 1:
             driver.click_point(420, 208)
-            detail = driver.wait_for_visual_change("long journal JSON opens", page,
+            summary = driver.wait_for_visual_change("one-row journal summary opens", page,
+                crop=(276, 230, 850, 120), minimum_pixels=100, timeout=10)
+            driver.click_point(390, 302)
+            detail = driver.wait_for_visual_change("long journal JSON opens", summary,
                 crop=(300, 380, 850, 330), minimum_pixels=100, timeout=10)
             # The fixture occupies two chunks; the second ends with the record's closing brace.
             driver.click_point(490, 754)
@@ -8749,8 +8793,15 @@ def ai_journal_scenario(driver: WindowDriver, workspace: Path) -> None:
     driver.wait_for_visual_change("new journal requests", empty, crop=(260, 180, 720, 230), timeout=10)
     rows = driver.capture("journal-rows")
     driver.click_point(420, 208)
-    driver.wait_for_visual_change("request details", rows, crop=(260, 385, 720, 300), timeout=10)
-    driver.wait_for_stable_frame("journal details rendered", crop=(260, 385, 720, 300), minimum_dark_pixels=800)
+    summary = driver.wait_for_visual_change("request summary", rows, crop=(276, 300, 850, 150), timeout=10)
+    driver.wait_for_stable_frame("compact summary rendered", crop=(276, 300, 850, 150), minimum_dark_pixels=100)
+    summary = driver.capture("journal-summary-columns")
+    for index in range(3):
+        if dark_pixel_count(summary, crop=(280, 194 + index * 36, 290, 20)) < 50:
+            raise AcceptanceFailure("journal timestamp or provider disappeared from a row")
+    driver.click_point(730, 359)
+    driver.wait_for_visual_change("explicit journal details", summary, crop=(276, 420, 850, 280), minimum_pixels=100)
+    driver.wait_for_stable_frame("journal details rendered", crop=(276, 420, 850, 280), minimum_dark_pixels=800)
     preview = driver.capture("journal-details")
     export_screenshot(preview, Path("/workspace/dist/ai-journal-preview.png"))
     driver.click_point(365, 45)
@@ -9098,13 +9149,13 @@ def chat_paging_layout_scenario(driver: WindowDriver, workspace: Path, chat: Pat
     driver.resize_window(960, 600)
     driver.wait_for_stable_frame("minimum window with responsive sidebar", stable_for=0.3)
     narrow = driver.capture("chat-narrow")
-    if abs(sidebar_boundary_x(narrow, y=570) - 200) > 1:
+    if abs(sidebar_boundary_x(narrow, y=570) - SIDEBAR_WIDTH) > 1:
         raise AcceptanceFailure("chat sidebar did not contract at the minimum size")
     if dark_pixel_count(narrow, crop=(908, 12, 32, 32)) < 10:
         raise AcceptanceFailure("chat toolbar extends beyond the minimum window")
     if dark_pixel_count(narrow, crop=(225, 415, 250, 50)) < 20:
         raise AcceptanceFailure("composer is outside the minimum window")
-    if dark_pixel_count(narrow, crop=(230, 500, 680, 20)) != 0:
+    if dark_pixel_count(narrow, crop=(SIDEBAR_WIDTH + 24, 500, 630, 20)) != 0:
         raise AcceptanceFailure("short composer retains horizontal overflow after resize")
     # Header is fixed at 56 px and remains stationary during history scrolling.
     driver.xdotool("mousemove", "--window", driver.window_id, "600", "180", "click", "--repeat", "4", "--delay", "40", "4")
@@ -9117,7 +9168,7 @@ def chat_paging_layout_scenario(driver: WindowDriver, workspace: Path, chat: Pat
     driver.click_point(666, 28)
     driver.wait_for_visual_change("journal opens from fixed toolbar", scrolled_narrow,
                                   crop=(220, 100, 700, 200), minimum_pixels=100)
-    driver.click_point(260, 45)
+    driver.click_point(SIDEBAR_WIDTH + 60, 45)
     returned = driver.wait_for_stable_frame("journal Back restores narrow chat",
                                            crop=(220, 415, 710, 110), stable_for=0.3)
     if image_difference(narrow, returned, crop=(220, 415, 710, 110)) != 0:
@@ -9149,8 +9200,8 @@ def chat_visual_content_scenario(driver: WindowDriver, workspace: Path, chat: Pa
     driver.resize_window(960, 600)
     narrow = driver.wait_for_stable_frame("200-character composer and long URL at minimum width", crop=(220, 80, 715, 475), stable_for=0.3)
     export_screenshot(narrow, Path("/workspace/dist/chat-content-narrow.png"))
-    if abs(sidebar_boundary_x(narrow, y=570) - 200) > 1:
-        raise AcceptanceFailure("minimum chat sidebar exceeds 200px")
+    if abs(sidebar_boundary_x(narrow, y=570) - SIDEBAR_WIDTH) > 1:
+        raise AcceptanceFailure("minimum chat sidebar lost its saved width")
     if dark_pixel_count(narrow, crop=(225, 422, 680, 70)) < 250:
         raise AcceptanceFailure("200-character composer is clipped or does not wrap")
     if dark_pixel_count(narrow, crop=(225, 540, 680, 36)) < 50:
@@ -9161,7 +9212,54 @@ def chat_visual_content_scenario(driver: WindowDriver, workspace: Path, chat: Pa
 
 
 
+def secret_components_scenario(driver: WindowDriver, workspace: Path) -> None:
+    driver.start_app(workspace, "secret-components", environment_overrides={"STILLUS_TEST_COMPONENTS": "1", "STILLUS_TEST_SECRET": "1"})
+    baseline = driver.wait_for_stable_frame("secret editing fixture", crop=(24, 76, 280, 30), stable_for=0.2)
+    driver.click_point(80, 42)
+    driver.type_text("abcdef")
+    driver.key("Home")
+    driver.key("Right")
+    driver.key("Delete")
+    driver.type_text("Z")
+    driver.key("End")
+    driver.key("shift+Left")
+    driver.key("shift+Left")
+    set_clipboard_text(driver.environment, "XY")
+    driver.key("ctrl+v")
+    driver.wait_for_visual_change("middle edit and selected paste produce expected secret", baseline,
+                                 crop=(24, 76, 280, 30), minimum_pixels=10)
+    # The one-read X clipboard owner was consumed by Paste; seed it again.
+    set_clipboard_text(driver.environment, "XY")
+    driver.key("ctrl+a")
+    driver.key("ctrl+c")
+    driver.key("ctrl+x")
+    if clipboard_text(driver.environment) != "XY":
+        raise AcceptanceFailure("secret editing leaked to the clipboard")
+    driver.type_text("x" * 80)
+    driver.click_point(400, 200)
+    masked = driver.wait_for_stable_frame("long secret remains a clipped single line", crop=(20, 20, 400, 50), stable_for=0.2)
+    if dark_pixel_count(masked, crop=(328, 25, 80, 38)):
+        raise AcceptanceFailure("long secret paints outside its field")
+    driver.resize_window(960, 600)
+    closed = driver.wait_for_stable_frame("bottom select before open", crop=(24, 230, 260, 345), stable_for=0.2)
+    driver.click_point(130, 555)
+    driver.wait_for_visual_change("bottom select opens upward", closed, crop=(24, 250, 240, 274), minimum_pixels=100)
+    driver.key("End")
+    before = driver.capture("before-select-last")
+    driver.key("Return")
+    driver.wait_for_visual_change("last model selected with keyboard", before, crop=(24, 114, 260, 32), minimum_pixels=8)
+    driver.click_point(130, 555)
+    driver.resize_window(1240, 800)
+    resized = driver.wait_for_stable_frame("open select follows resized bottom anchor", crop=(24, 450, 240, 274), stable_for=0.3)
+    if dark_pixel_count(resized, crop=(40, 475, 215, 230)) < 100:
+        raise AcceptanceFailure("resizing detached or clipped the open list")
+    driver.key("Home")
+    driver.key("Return")
+    driver.close_app()
+
+
 def components_scenario(driver: WindowDriver, workspace: Path) -> None:
+    secret_components_scenario(driver, workspace)
     driver.start_app(workspace, "gallery", environment_overrides={"STILLUS_TEST_COMPONENTS": "1"})
     fields = (24, 72, 900, 240)
     driver.wait_for_stable_frame("unfocused component fields", crop=fields, stable_for=1.2)
@@ -9279,8 +9377,11 @@ def components_scenario(driver: WindowDriver, workspace: Path) -> None:
                                  crop=counter_crop, minimum_pixels=3)
     driver.wait_for_visual_change("menu action dismisses the overlay", menu_opened,
                                  crop=menu_crop, minimum_pixels=200)
+    closed_after_action = driver.wait_for_stable_frame("menu fully dismissed after action",
+        crop=menu_crop, stable_for=0.2)
     driver.click_point(50, 440)
-    before_end = driver.wait_for_stable_frame("menu reopened for scrolling", crop=menu_crop)
+    before_end = driver.wait_for_visual_change("menu reopened for scrolling", closed_after_action,
+        crop=menu_crop, minimum_pixels=200)
     driver.key("End")
     driver.wait_for_visual_change("End reveals the ninth menu entry", before_end,
                                  crop=menu_crop, minimum_pixels=30)
@@ -9297,6 +9398,10 @@ def components_scenario(driver: WindowDriver, workspace: Path) -> None:
                                  crop=(104, 24, 32, 32), minimum_pixels=20)
     before_inline = driver.capture("before-inline-edit")
     driver.click_point(590, 440)
+    driver.wait_for_visual_change("inline field opens before typing", before_inline,
+        crop=(24, 470, 1165, 48), minimum_pixels=100)
+    driver.wait_for_stable_frame("inline field receives its initial focus",
+        crop=(176, 478, 971, 32), stable_for=0.2, ignore_control_caret=True)
     driver.type_text("inline edit")
     driver.key("Return")
     driver.wait_for_visual_change("inline edit submits through the shared field", before_inline,

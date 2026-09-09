@@ -439,3 +439,6 @@ DeleteCategory = श्रेणी मिटाएँ
 DeleteCategoryHint = नोट और उनकी सामग्री सुरक्षित रहेंगे। इस श्रेणी और इसकी उपश्रेणियों के टैग हटा दिए जाएँगे।
 DeletePermanently = हमेशा के लिए मिटाएँ
 DeletePermanentlyHint = यह नोट हमेशा के लिए मिटा दिया जाएगा। इसे वापस नहीं किया जा सकता।
+
+AiJournalDetails = तकनीकी विवरण
+AiJournalSummary = कार्य: { $operation } · { $status } · { $duration } ms · मॉडल: { $model }

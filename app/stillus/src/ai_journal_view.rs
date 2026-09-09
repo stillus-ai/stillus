@@ -7,6 +7,19 @@ use crate::ai_journal::{Filter, Summary};
 use crate::*;
 use stillus_ai::{AiProvider, journal::RequestStatus};
 
+#[derive(Clone, PartialEq)]
+struct Overview {
+    operation: String,
+    status: RequestStatus,
+    duration: Option<u64>,
+    model: Option<String>,
+    error: Option<String>,
+}
+
+fn journal_list_height(count: usize) -> f64 {
+    count.min(5) as f64 * 36.0
+}
+
 #[derive(Clone)]
 struct JournalView {
     global: Rc<RefCell<GlobalApplication>>,
@@ -18,6 +31,7 @@ struct JournalView {
     status: RwSignal<Option<RequestStatus>>,
     selected: RwSignal<Option<String>>,
     detail: RwSignal<String>,
+    overview: RwSignal<Option<Overview>>,
     error: RwSignal<bool>,
     busy: RwSignal<bool>,
     confirm: RwSignal<bool>,
@@ -91,6 +105,16 @@ fn poll(view: JournalView, id: u64, generation: u64) {
                 if view.rows.get_untracked() != page.rows {
                     view.rows.set(page.rows);
                 }
+                let overview = page.detail.as_ref().map(|record| Overview {
+                    operation: record.purpose.clone(),
+                    status: record.status,
+                    duration: record.duration_ms,
+                    model: record.model.clone(),
+                    error: record.error.clone(),
+                });
+                if view.overview.get_untracked() != overview {
+                    view.overview.set(overview);
+                }
                 let detail = page
                     .detail
                     .map(|record| serde_json::to_string_pretty(&record))
@@ -158,6 +182,7 @@ pub(super) fn page_at(
         status: create_rw_signal(None),
         selected,
         detail: create_rw_signal(String::new()),
+        overview: create_rw_signal(None),
         error: create_rw_signal(false),
         busy: create_rw_signal(false),
         confirm: create_rw_signal(false),
@@ -191,6 +216,8 @@ pub(super) fn page_at(
     let rows = view.rows;
     let selected = view.selected;
     let detail = view.detail;
+    let overview = view.overview;
+    let details_open = create_rw_signal(false);
     let provider = view.provider;
     let status = view.status;
     let before = view.before;
@@ -327,38 +354,30 @@ pub(super) fn page_at(
                 |row| row.id.clone(),
                 move |row| {
                     let id = row.id.clone();
-                    label(move || {
-                        let timestamp =
-                            chrono::DateTime::from_timestamp_millis(row.started_ms as i64)
-                                .map(|t| {
-                                    t.with_timezone(&chrono::Local)
-                                        .format("%Y/%m/%d %H:%M:%S")
-                                        .to_string()
-                                })
-                                .unwrap_or_default();
-                        format!(
-                            "{}   {}   {}",
-                            timestamp,
-                            row.provider
-                                .as_ref()
-                                .map_or_else(|| tr!(AiJournalCorrupt), |p| p.name()),
-                            status_name(row.status)
-                        )
-                    })
-                    .on_click_stop(move |_| selected.set(Some(id.clone())))
-                    .style(move |s| {
-                        s.width_full()
-                            .padding(8.0)
-                            .cursor(CursorStyle::Pointer)
-                            .hover(|s| s.background(palette.accent_soft))
-                    })
+                    let selected_id = id.clone();
+                    let timestamp = chrono::DateTime::from_timestamp_millis(row.started_ms as i64)
+                        .map(|t| t.with_timezone(&chrono::Local).format("%Y/%m/%d %H:%M:%S").to_string())
+                        .unwrap_or_default();
+                    selectable_row(h_stack((
+                        text(timestamp).style(move |s| s.width(180.0).flex_shrink(0.0).font_size(crate::ui::FONT_CAPTION).color(palette.ink2)),
+                        label(move || row.provider.as_ref().map_or_else(|| tr!(AiJournalCorrupt), |p| p.name()))
+                            .style(move |s| s.width(100.0).min_width(0.0).text_ellipsis().color(palette.ink)),
+                        label(move || status_name(row.status)).style(move |s| s.min_width(0.0).flex_grow(1.0).text_ellipsis()
+                            .color(if row.status == RequestStatus::Error { palette.danger } else { palette.ink })),
+                    )).style(|s| rtl_row(s).width_full().min_width(0.0).items_center().gap(12.0)),
+                        move || selected.set(Some(id.clone())))
+                    .style(move |s| s.width_full().height(36.0).flex_shrink(0.0).padding_horiz(8.0).items_center()
+                        .cursor(CursorStyle::Pointer).border_radius(4.0)
+                        .background(if selected.get().as_ref() == Some(&selected_id) { palette.accent_soft } else { Color::TRANSPARENT })
+                        .hover(|s| s.background(palette.accent_soft))
+                        .focus_visible(|s| s.outline(1.0).outline_color(palette.accent)))
                 },
             )
             .style(|s| s.flex_col().width_full()),
         )
         .style(move |s| {
             s.width_full()
-                .height(180.0)
+                .height(journal_list_height(rows.get().len()))
                 .min_height(0.0)
                 .apply_if(rows.get().is_empty(), |s| s.hide())
         }),
@@ -376,7 +395,7 @@ pub(super) fn page_at(
                 move || tr!(AiJournalOlder),
                 IconButtonTone::Secondary,
                 palette,
-                move || has_more.get() && !busy.get(),
+                move || has_more.get(),
                 move || before.set(rows.get_untracked().last().map(|r| r.id.clone())),
             ),
         ))
@@ -384,6 +403,22 @@ pub(super) fn page_at(
             s.flex_shrink(0.0)
                 .apply_if(!has_more.get() && before.get().is_none(), |s| s.hide())
         }),
+        v_stack((
+            label(move || overview.get().map(|record| tr!(AiJournalSummary,
+                "operation" => record.operation,
+                "status" => status_name(record.status),
+                "duration" => record.duration.map(|v| v.to_string()).unwrap_or_else(|| "—".to_owned()),
+                "model" => record.model.unwrap_or_else(|| "—".to_owned())
+            )).unwrap_or_default()).style(move |s| s.width_full().font_size(crate::ui::FONT_BODY).color(palette.ink)),
+            label(move || overview.get().and_then(|v| v.error).unwrap_or_default())
+                .style(move |s| s.width_full().font_size(crate::ui::FONT_BODY).color(palette.danger)
+                    .apply_if(overview.get().is_none_or(|v| v.error.is_none()), |s| s.hide())),
+            action_button(ButtonAction::Custom(ICON_CHEVRON_DOWN), || tr!(AiJournalDetails),
+                IconButtonTone::Secondary, palette, || true,
+                move || details_open.update(|v| *v = !*v)),
+        )).style(move |s| s.width_full().min_width(0.0).gap(8.0).padding(12.0).background(palette.paper)
+            .border(1.0).border_color(palette.divider).border_radius(6.0)
+            .apply_if(overview.get().is_none(), |s| s.hide())),
         scroll(
             dyn_stack(
                 move || {
@@ -417,7 +452,7 @@ pub(super) fn page_at(
                 .min_height(0.0)
                 .flex_basis(0.0)
                 .flex_grow(1.0)
-                .apply_if(detail.get().is_empty(), |s| s.hide())
+                .apply_if(detail.get().is_empty() || !details_open.get(), |s| s.hide())
         }),
         actions((
             action_button(
@@ -439,7 +474,7 @@ pub(super) fn page_at(
         ))
         .style(move |s| {
             s.flex_shrink(0.0)
-                .apply_if(detail.get().chars().count() <= 8000, |s| s.hide())
+                .apply_if(detail.get().chars().count() <= 8000 || !details_open.get(), |s| s.hide())
         }),
     ))
     .style(move |s| {
@@ -454,4 +489,14 @@ pub(super) fn page_at(
             .background(palette.canvas)
             .apply_if(!open.get(), |s| s.hide())
     })
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn journal_list_only_reserves_space_for_existing_rows() {
+        for (count, expected) in [(0, 0.0), (1, 36.0), (3, 108.0), (50, 180.0)] {
+            assert_eq!(super::journal_list_height(count), expected);
+        }
+    }
 }

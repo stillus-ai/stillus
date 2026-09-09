@@ -438,3 +438,6 @@ DeleteCategory = 删除分类
 DeleteCategoryHint = 笔记及其内容将保留。此分类及其子分类的标签将被移除。
 DeletePermanently = 永久删除
 DeletePermanentlyHint = 此笔记将被永久删除。此操作无法撤销。
+
+AiJournalDetails = 技术详情
+AiJournalSummary = 操作: { $operation } · { $status } · { $duration } ms · 模型: { $model }

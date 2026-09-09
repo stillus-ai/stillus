@@ -443,3 +443,6 @@ DeleteCategory = Delete category
 DeleteCategoryHint = Notes and their contents will be kept. Tags in this category and its subcategories will be removed.
 DeletePermanently = Delete permanently
 DeletePermanentlyHint = This note will be permanently deleted. This cannot be undone.
+
+AiJournalDetails = Technical details
+AiJournalSummary = Operation: { $operation } · { $status } · { $duration } ms · Model: { $model }

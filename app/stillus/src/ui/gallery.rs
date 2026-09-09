@@ -4,7 +4,10 @@
 //! Disposable component fixture, compiled only with test-utils.
 use super::*;
 
-pub(crate) fn view() -> impl IntoView {
+pub(crate) fn view() -> AnyView {
+    if std::env::var_os("STILLUS_TEST_SECRET").as_deref() == Some(std::ffi::OsStr::new("1")) {
+        return secret_fixture();
+    }
     let palette = Palette::new();
     let first = create_rw_signal(String::new());
     let second = create_rw_signal(String::new());
@@ -224,4 +227,60 @@ pub(crate) fn view() -> impl IntoView {
         }),
     )
     .style(|s| s.size_full())
+    .into_any()
+}
+
+fn secret_fixture() -> AnyView {
+    use zeroize::Zeroizing;
+    let palette = Palette::new();
+    let value = Rc::new(RefCell::new(Zeroizing::new(String::with_capacity(1024))));
+    let read = value.clone();
+    let write = value.clone();
+    let revision = create_rw_signal(0_u64);
+    let selected = create_rw_signal(Some(0_usize));
+    stack((
+        v_stack((
+            SecretInput::new(
+                move || read.borrow().clone(),
+                move |range, insert| {
+                    let accepted = replace_secret(&mut write.borrow_mut(), range, insert, 1024);
+                    revision.update(|v| *v += 1);
+                    accepted
+                },
+                revision,
+                i18n::Key::EnterPassword,
+                palette,
+            )
+            .keyboard_navigable()
+            .style(move |s| settings_control_style(s, palette).width(300.0)),
+            label(move || {
+                revision.get();
+                format!("verified={}", value.borrow().as_str() == "aZcdXY")
+            })
+            .style(|s| s.height(24.0)),
+            label(move || format!("selected={}", selected.get().unwrap_or_default())),
+        ))
+        .style(|s| s.absolute().inset_left(24.0).inset_top(24.0).gap(16.0)),
+        select(
+            selected,
+            (0..12).collect(),
+            |value| {
+                format!(
+                    "An intentionally long model alias with the same prefix — {}",
+                    value.unwrap_or_default()
+                )
+            },
+            move |value| selected.set(Some(value)),
+            || true,
+            palette,
+        )
+        .style(|s| {
+            s.absolute()
+                .inset_left(24.0)
+                .inset_bottom(24.0)
+                .width(240.0)
+        }),
+    ))
+    .style(move |s| s.size_full().background(palette.paper).color(palette.ink))
+    .into_any()
 }

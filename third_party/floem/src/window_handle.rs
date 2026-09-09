@@ -1534,6 +1534,15 @@ impl View for OverlayView {
         self.id
     }
 
+    fn update(&mut self, _cx: &mut UpdateCx, state: Box<dyn std::any::Any>) {
+        if let Ok(position) = state.downcast::<Point>() {
+            if self.position != *position {
+                self.position = *position;
+                self.id.request_style();
+            }
+        }
+    }
+
     fn view_style(&self) -> Option<crate::style::Style> {
         Some(
             Style::new()

@@ -439,3 +439,6 @@ DeleteCategory = বিভাগ মুছুন
 DeleteCategoryHint = নোট ও সেগুলির বিষয়বস্তু রাখা হবে। এই বিভাগ ও এর উপবিভাগগুলির ট্যাগ সরানো হবে।
 DeletePermanently = স্থায়ীভাবে মুছুন
 DeletePermanentlyHint = এই নোটটি স্থায়ীভাবে মুছে যাবে। এটি আর ফিরিয়ে আনা যাবে না।
+
+AiJournalDetails = প্রযুক্তিগত বিবরণ
+AiJournalSummary = কাজ: { $operation } · { $status } · { $duration } ms · মডেল: { $model }

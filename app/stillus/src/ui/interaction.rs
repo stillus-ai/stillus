@@ -14,54 +14,6 @@ pub(crate) struct PrimaryPointerView {
     capture_pointer: bool,
 }
 
-pub(crate) struct MaskedPasswordView {
-    id: ViewId,
-    on_press: Box<dyn Fn()>,
-    on_input: Box<dyn Fn(&Event) -> EventPropagation>,
-}
-
-impl MaskedPasswordView {
-    pub(crate) fn new(
-        child: impl IntoView,
-        on_press: impl Fn() + 'static,
-        on_input: impl Fn(&Event) -> EventPropagation + 'static,
-    ) -> Self {
-        let id = ViewId::new();
-        id.add_child(Box::new(child.into_view()));
-        Self {
-            id,
-            on_press: Box::new(on_press),
-            on_input: Box::new(on_input),
-        }
-    }
-}
-
-impl View for MaskedPasswordView {
-    fn id(&self) -> ViewId {
-        self.id
-    }
-
-    fn event_before_children(
-        &mut self,
-        _cx: &mut floem::context::EventCx,
-        event: &Event,
-    ) -> EventPropagation {
-        if matches!(event, Event::KeyUp(_)) {
-            return EventPropagation::Stop;
-        }
-        if matches!(event, Event::KeyDown(_) | Event::ImeCommit(_)) {
-            return (self.on_input)(event);
-        }
-        if !is_primary_pointer_down(event) {
-            return EventPropagation::Continue;
-        }
-        let id = self.id;
-        exec_after(Duration::from_millis(10), move |_| id.request_focus());
-        (self.on_press)();
-        EventPropagation::Stop
-    }
-}
-
 impl PrimaryPointerView {
     pub(crate) fn new(
         child: impl IntoView,

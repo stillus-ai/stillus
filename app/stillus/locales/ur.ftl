@@ -439,3 +439,6 @@ DeleteCategory = زمرہ حذف کریں
 DeleteCategoryHint = نوٹس اور ان کا مواد محفوظ رہیں گے۔ اس زمرے اور اس کے ذیلی زمروں کے ٹیگ ہٹا دیے جائیں گے۔
 DeletePermanently = مستقل طور پر حذف کریں
 DeletePermanentlyHint = یہ نوٹ مستقل طور پر حذف ہو جائے گا۔ اس عمل کو واپس نہیں کیا جا سکتا۔
+
+AiJournalDetails = تکنیکی تفصیلات
+AiJournalSummary = عمل: { $operation } · { $status } · { $duration } ms · ماڈل: { $model }

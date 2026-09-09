@@ -51,3 +51,5 @@ pub(crate) use tooltip::{anchored_tooltip, close_button_tooltips};
 
 mod header;
 pub(crate) use header::*;
+mod secret_input;
+pub(crate) use secret_input::{SecretInput, replace_secret};
