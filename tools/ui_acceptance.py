@@ -8474,7 +8474,9 @@ def chat_paging_layout_scenario(driver: WindowDriver, workspace: Path, chat: Pat
     metadata["data"]["common"]["title"] = "Long chat title " * 15
     (chat / "metadata.json").write_text(json.dumps(metadata))
     driver.start_app(workspace, "chat-pages", environment_overrides=fixture)
-    history_crop = (280, 90, 910, 450)
+    # Compare the message content, excluding Copy button outlines whose pixel
+    # rounding can change when preceding rows are inserted.
+    history_crop = (280, 90, 840, 450)
 
     def navigation_ready(earlier: bool, newest: bool) -> None:
         driver.move_to("sidebar_blank")

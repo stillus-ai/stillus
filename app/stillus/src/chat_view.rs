@@ -941,26 +941,19 @@ fn message_view(
         return v_stack((
             acknowledge,
             reliable_button(
-                text(title).style(move |s| s.color(palette.ink)),
+                text(title).style(move |s| s.font_size(12.0).line_height(1.5).color(palette.muted)),
                 move || open.update(|v| *v = !*v),
             )
             .style(|s| s.min_width(0.0).width_full()),
             wrapped_text(
                 detail,
-                move || (history_width.get() - 22.0).max(1.0),
-                palette.ink,
+                move || (history_width.get() - 20.0).max(1.0),
+                palette.muted,
                 12.0,
             )
             .style(move |s| s.apply_if(!open.get(), |s| s.hide())),
         ))
-        .style(move |s| {
-            s.width_full()
-                .padding(10.0)
-                .gap(8.0)
-                .border(1.0)
-                .border_color(palette.divider)
-                .border_radius(6.0)
-        })
+        .style(|s| s.width_full().padding(10.0).gap(8.0))
         .into_any();
     }
     let role = match message.role {
