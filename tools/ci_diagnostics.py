@@ -38,6 +38,7 @@ UI_EXCEPTION_NAMES = frozenset({
 })
 UI_DIAGNOSTIC_FILES = frozenset({
     "tools/ui_acceptance.py", "tools/ui_ready.py", "tools/generate_demo_data.py",
+    "tools/x11_close_window.py",
 })
 
 NATIVE_IO_STAGES = {

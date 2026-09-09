@@ -25,6 +25,7 @@ from typing import Callable
 from ci_diagnostics import UI_DIAGNOSTIC_FILES, ui_diagnostic_context_valid
 from generate_demo_data import generate_demo_workspace
 from ui_ready import wait_for_first_paint
+from x11_close_window import request_window_close
 
 
 DISPLAY = ":99"
@@ -1651,7 +1652,7 @@ class WindowDriver:
     def close_app(self) -> None:
         if self.app is None or self.window_id is None:
             raise AcceptanceFailure("cannot close an app that is not running")
-        self.xdotool("windowclose", self.window_id)
+        request_window_close(self.window_id, self.environment)
         try:
             return_code = self.app.wait(timeout=3.0)
         except subprocess.TimeoutExpired as error:
@@ -8136,7 +8137,7 @@ def updates_scenario(driver: WindowDriver, workspace: Path) -> None:
             raise AcceptanceFailure("Restart did not preserve the current workspace")
     finally:
         if driver.window_id is not None:
-            driver.xdotool("windowclose", driver.window_id)
+            request_window_close(driver.window_id, driver.environment)
             wait_until("restarted window closing", lambda: run_command(
                 ["xdotool", "search", "--onlyvisible", "--name", "^Stillus$"],
                 environment=driver.environment, check=False,

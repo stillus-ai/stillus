@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 
 import contextlib
+import ctypes
 from collections import Counter
 import io
 import json
@@ -21,11 +22,120 @@ import ci
 from ci_diagnostics import UI_SCENARIOS, rust_test_report
 from source_revision import validate_revision
 import ui_acceptance
+import x11_close_window
 
 SHA = "1234567890abcdef1234567890abcdef12345678"
 
 
 class CITests(unittest.TestCase):
+    def test_x11_close_delivers_protocol_without_destroying_window(self):
+        # Own a real X11 window but do not run its event loop until after the
+        # close request. The driver must leave it alive for the client to close.
+        with tempfile.TemporaryFile() as display_output:
+            server = subprocess.Popen(
+                ["Xvfb", "-displayfd", "1", "-screen", "0", "320x240x24", "-nolisten", "tcp"],
+                stdout=display_output, stderr=subprocess.PIPE,
+            )
+            try:
+                def display_ready():
+                    if server.poll() is not None:
+                        self.fail("test Xvfb exited before becoming ready")
+                    return os.pread(display_output.fileno(), 32, 0).strip()
+
+                ui_acceptance.wait_until("test Xvfb ready", display_ready)
+                environment = dict(os.environ, DISPLAY=":" + display_ready().decode())
+                x11 = ctypes.CDLL("libX11.so.6")
+                signatures = {
+                    "XOpenDisplay": ([ctypes.c_char_p], ctypes.c_void_p),
+                    "XDefaultRootWindow": ([ctypes.c_void_p], ctypes.c_ulong),
+                    "XCreateSimpleWindow": ([ctypes.c_void_p, ctypes.c_ulong,
+                        ctypes.c_int, ctypes.c_int, ctypes.c_uint, ctypes.c_uint,
+                        ctypes.c_uint, ctypes.c_ulong, ctypes.c_ulong], ctypes.c_ulong),
+                    "XInternAtom": ([ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int], ctypes.c_ulong),
+                    "XSetWMProtocols": ([ctypes.c_void_p, ctypes.c_ulong,
+                        ctypes.POINTER(ctypes.c_ulong), ctypes.c_int], ctypes.c_int),
+                    "XSync": ([ctypes.c_void_p, ctypes.c_int], ctypes.c_int),
+                    "XPending": ([ctypes.c_void_p], ctypes.c_int),
+                    "XNextEvent": ([ctypes.c_void_p,
+                        ctypes.POINTER(x11_close_window.XEvent)], ctypes.c_int),
+                    "XCloseDisplay": ([ctypes.c_void_p], ctypes.c_int),
+                }
+                for name, (arguments, result) in signatures.items():
+                    getattr(x11, name).argtypes = arguments
+                    getattr(x11, name).restype = result
+                display = x11.XOpenDisplay(environment["DISPLAY"].encode())
+                self.assertTrue(display)
+                try:
+                    root = x11.XDefaultRootWindow(display)
+                    window = x11.XCreateSimpleWindow(display, root, 0, 0, 100, 80, 0, 0, 0)
+                    delete = ctypes.c_ulong(x11.XInternAtom(display, b"WM_DELETE_WINDOW", False))
+                    self.assertTrue(x11.XSetWMProtocols(display, window, ctypes.byref(delete), 1))
+                    protocols = x11.XInternAtom(display, b"WM_PROTOCOLS", True)
+                    x11.XSync(display, False)
+
+                    x11_close_window.request_window_close(str(window), environment)
+
+                    ui_acceptance.wait_until("close protocol delivered", lambda: x11.XPending(display) > 0)
+                    event = x11_close_window.XEvent()
+                    x11.XNextEvent(display, ctypes.byref(event))
+                    self.assertEqual(event.client.type, 33)
+                    self.assertTrue(event.client.send_event)
+                    self.assertEqual(event.client.window, window)
+                    self.assertEqual(event.client.message_type, protocols)
+                    self.assertEqual(event.client.format, 32)
+                    self.assertEqual(list(event.client.data.l), [delete.value, 0, 0, 0, 0])
+                    geometry = subprocess.run(
+                        ["xdotool", "getwindowgeometry", "--shell", str(window)],
+                        env=environment, check=True, capture_output=True, text=True,
+                    ).stdout
+                    self.assertIn("WIDTH=100\n", geometry)
+                    self.assertIn("HEIGHT=80\n", geometry)
+                finally:
+                    x11.XCloseDisplay(display)
+            finally:
+                server.terminate()
+                server.communicate(timeout=3)
+
+    def test_x11_close_reports_connection_protocol_and_send_failures(self):
+        for failure in ("connection", "protocol", "send"):
+            with self.subTest(failure=failure):
+                x11 = Mock()
+                x11.XOpenDisplay.return_value = 0 if failure == "connection" else 1
+                x11.XInternAtom.return_value = 0 if failure == "protocol" else 2
+                x11.XSendEvent.return_value = 0
+                with patch.object(x11_close_window.ctypes, "CDLL", return_value=x11):
+                    with self.assertRaises(RuntimeError):
+                        x11_close_window.request_window_close("123", {"DISPLAY": ":99"})
+                if failure == "connection":
+                    x11.XCloseDisplay.assert_not_called()
+                else:
+                    x11.XCloseDisplay.assert_called_once_with(1)
+                if failure != "send":
+                    x11.XSendEvent.assert_not_called()
+
+    def test_acceptance_close_requires_clean_process_exit(self):
+        for result in (0, 1, subprocess.TimeoutExpired("stillus", 3)):
+            with self.subTest(result=result):
+                driver = object.__new__(ui_acceptance.WindowDriver)
+                process = Mock()
+                process.wait.side_effect = [result, -15]
+                driver.app = process
+                driver.window_id = "123"
+                driver.environment = {"DISPLAY": ":99"}
+                with patch.object(ui_acceptance, "request_window_close") as request:
+                    if result == 0:
+                        driver.close_app()
+                    else:
+                        with self.assertRaises(ui_acceptance.AcceptanceFailure):
+                            driver.close_app()
+                    request.assert_called_once_with("123", driver.environment)
+                self.assertIsNone(driver.app)
+                self.assertIsNone(driver.window_id)
+                if isinstance(result, subprocess.TimeoutExpired):
+                    process.terminate.assert_called_once()
+                else:
+                    process.terminate.assert_not_called()
+
     def test_split_ci_gates_preserve_all_local_checks_without_duplicates(self):
         def commands(target):
             result = subprocess.run(
