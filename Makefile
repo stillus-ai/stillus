@@ -25,7 +25,7 @@ endif
 UI_JOBS ?= 2
 
 UI_ACCEPTANCE_STANDARD := ui-click-external ui-click-localization ui-click-rss-cards ui-click-rss-keyboard ui-click-workspace ui-click-compatibility ui-click-categories ui-click-interaction ui-click-lifecycle ui-click-tags ui-click-editor ui-click-context-menu ui-click-selection ui-click-persistence ui-click-recovery ui-click-conflict ui-click-search ui-click-find ui-click-resize ui-click-visual
-UI_ACCEPTANCE_SECURE := ui-click-chat ui-click-rss-filters ui-click-ai ui-click-ai-journal ui-click-updates ui-click-crash ui-click-password-change ui-click-secure ui-click-secure-recovery ui-click-secure-conflict ui-click-secure-integrity
+UI_ACCEPTANCE_SECURE := ui-click-components ui-click-chat ui-click-rss-filters ui-click-ai ui-click-ai-journal ui-click-updates ui-click-crash ui-click-password-change ui-click-secure ui-click-secure-recovery ui-click-secure-conflict ui-click-secure-integrity
 
 .PHONY: all help check clean build build-windows test-windows-build build-macos build-linux build-linux-smoke build-container native-smoke native-external-smoke demo-data test-demo-data check-macos test test-release lint fmt fmt-check lock tree audit audit-source audit-dependencies audit-vulnerabilities \
 	diff-check status log diff-stat diff image benchmark-generate \
@@ -208,7 +208,7 @@ tree:
 
 audit: audit-source audit-dependencies audit-vulnerabilities
 
-audit-source:
+audit-source: audit-ui-components
 	$(RUN) python3 tools/audit_source.py
 
 audit-dependencies:
@@ -445,3 +445,14 @@ test-chat:
 .PHONY: ui-click-chat
 ui-click-chat: ui-build-test-utils
 	$(RUN) python3 -B tools/ui_acceptance.py chat
+
+.PHONY: test-ui-components ui-click-components audit-ui-components
+test-ui-components:
+	$(RUN) cargo test -p stillus-app --features test-utils ui::
+
+ui-click-components: ui-build-test-utils
+	$(RUN) python3 -B tools/ui_acceptance.py components
+
+audit-ui-components:
+	$(RUN) python3 -B tools/test_ui_components.py
+	$(RUN) python3 -B tools/audit_ui_components.py

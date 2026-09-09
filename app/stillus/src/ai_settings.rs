@@ -195,50 +195,6 @@ fn error_key(error: Failure) -> i18n::Key {
     }
 }
 
-/// The page heading of a settings section, matching the general and
-/// encryption pages.
-pub(super) fn page_title(key: i18n::Key, palette: Palette) -> impl IntoView {
-    label(move || key.to_string()).style(move |style| {
-        style
-            .font_size(26.0)
-            .font_weight(floem::text::Weight::SEMIBOLD)
-            .color(palette.ink)
-            .selectable(false)
-    })
-}
-
-pub(super) fn page_description(key: i18n::Key, palette: Palette) -> impl IntoView {
-    label(move || key.to_string())
-        .style(move |style| style.font_size(13.5).color(palette.muted).selectable(false))
-}
-
-/// A step of the page: the connection and the model aliases are two sections
-/// of one page, titled like the cards of the general settings page.
-pub(super) fn section_title(key: i18n::Key, palette: Palette) -> impl IntoView {
-    label(move || key.to_string()).style(move |style| {
-        style
-            .font_size(15.0)
-            .font_weight(floem::text::Weight::SEMIBOLD)
-            .color(palette.ink)
-            .selectable(false)
-    })
-}
-
-pub(super) fn spacer(height: f64) -> impl IntoView {
-    empty().style(move |style| style.height(height))
-}
-
-/// One row of form actions. Buttons keep their own width instead of
-/// stretching across the card, and wrap before they shrink.
-pub(super) fn actions(children: impl ViewTuple + 'static) -> impl IntoView {
-    h_stack(children).style(|style| {
-        rtl_row(style)
-            .gap(8.0)
-            .items_center()
-            .flex_wrap(floem::taffy::FlexWrap::Wrap)
-    })
-}
-
 pub(super) fn page(
     signals: SettingsPageSignals,
     revision: RwSignal<u64>,
@@ -313,6 +269,7 @@ pub(super) fn page(
     .style(|style| style.width_full());
     let cleanup_controller = controller.clone();
     let cleanup = actions((action_button(
+        ButtonAction::Custom(ButtonAction::Refresh.icon()),
         move || tr!(AiRetryCleanup),
         IconButtonTone::Danger,
         palette,
@@ -342,6 +299,7 @@ pub(super) fn page(
             h_stack((
                 page_title(i18n::Key::AiAssistant, palette),
                 action_button(
+                    ButtonAction::Custom(ICON_FILE),
                     move || tr!(AiJournal),
                     IconButtonTone::Secondary,
                     palette,
@@ -466,6 +424,7 @@ fn connection_summary(controller: Controller, palette: Palette) -> impl IntoView
         .style(|style| rtl_column(style).width_full().gap(4.0)),
         actions((
             action_button(
+                ButtonAction::Custom(ICON_LOCK),
                 move || tr!(AiChangeCredential),
                 IconButtonTone::Secondary,
                 palette,
@@ -477,6 +436,7 @@ fn connection_summary(controller: Controller, palette: Palette) -> impl IntoView
                 },
             ),
             action_button(
+                ButtonAction::Refresh,
                 move || {
                     if busy.get() && operation.get() == Operation::Refresh {
                         tr!(AiRefreshing)
@@ -580,6 +540,7 @@ fn connection_form(controller: Controller, palette: Palette) -> impl IntoView {
         warning,
         actions((
             action_button(
+                ButtonAction::Custom(ICON_LOCK),
                 move || {
                     if busy.get() && operation.get() == Operation::Connect {
                         tr!(AiConnecting)
@@ -598,6 +559,7 @@ fn connection_form(controller: Controller, palette: Palette) -> impl IntoView {
                 move || submit.connect(),
             ),
             action_button(
+                ButtonAction::Cancel,
                 move || tr!(Cancel),
                 IconButtonTone::Secondary,
                 palette,
@@ -614,6 +576,7 @@ fn connection_form(controller: Controller, palette: Palette) -> impl IntoView {
                 style.apply_if(settings.get().connection.is_none(), |style| style.hide())
             }),
             action_button(
+                ButtonAction::Custom(ICON_CANCEL),
                 move || tr!(AiDisconnect),
                 IconButtonTone::Danger,
                 palette,
@@ -632,8 +595,6 @@ fn connection_form(controller: Controller, palette: Palette) -> impl IntoView {
 }
 
 fn secret_input(controller: Controller, palette: Palette) -> impl IntoView {
-    const EYE: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>"##;
-    const EYE_OFF: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m3 3 18 18M10.6 5.1 12 5c6.5 0 10 7 10 7a19 19 0 0 1-3.2 4M6.5 6.5A20 20 0 0 0 2 12s3.5 7 10 7a11 11 0 0 0 5.5-1.5"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>"##;
     let revision = controller.key_revision;
     let visible = controller.visible_key;
     let busy = controller.busy;
@@ -738,46 +699,27 @@ fn secret_input(controller: Controller, palette: Palette) -> impl IntoView {
         revision.get();
         !busy.get() && !reveal_key.borrow().is_empty()
     };
-    let reveal_press_enabled = reveal_enabled.clone();
-    let reveal = reliable_button(
-        svg(EYE)
-            .update_value(move || if visible.get() { EYE_OFF } else { EYE })
-            .style(|style| style.size(16.0, 16.0)),
+    let reveal = compact_icon_button(
         move || {
-            if reveal_press_enabled() {
-                visible.update(|show| *show = !*show);
+            if visible.get() {
+                ICON_EYE_OFF
+            } else {
+                ICON_EYE
             }
         },
-    )
-    .style(move |style| {
-        style
-            .size(28.0, 28.0)
-            .items_center()
-            .justify_center()
-            .border_radius(4.0)
-            .color(if reveal_enabled() {
-                palette.ink
-            } else {
-                palette.muted
-            })
-            .cursor(if reveal_enabled() {
-                CursorStyle::Pointer
-            } else {
-                CursorStyle::Default
-            })
-            .hover(|style| style.background(palette.canvas))
-            .focus(|style| style.outline(1.0).outline_color(palette.accent))
-    })
-    .tooltip(move || {
-        tooltip_label(
+        move || {
             if visible.get() {
                 tr!(AiConcealCredential)
             } else {
                 tr!(AiRevealCredential)
-            },
-            palette,
-        )
-    });
+            }
+        },
+        IconButtonTone::Secondary,
+        palette,
+        28.0,
+        reveal_enabled,
+        move || visible.update(|show| *show = !*show),
+    );
     h_stack((
         h_stack((field, reveal)).style(move |style| {
             // Keys and the reveal control retain left-to-right order in RTL locales.
@@ -794,6 +736,7 @@ fn secret_input(controller: Controller, palette: Palette) -> impl IntoView {
                 })
         }),
         action_button(
+            ButtonAction::Paste,
             move || tr!(AiPaste),
             IconButtonTone::Secondary,
             palette,
@@ -822,7 +765,7 @@ fn aliases_section(controller: Controller, palette: Palette) -> impl IntoView {
             let summary_name = name.clone();
             let valid_name = name.clone();
             let hidden_name = name.clone();
-            reliable_button(
+            selectable_row(
                 h_stack((
                     v_stack((
                         label(move || title.clone()).style(move |style| {
@@ -875,7 +818,7 @@ fn aliases_section(controller: Controller, palette: Palette) -> impl IntoView {
                     svg(ICON_CHEVRON_RIGHT)
                         .update_value(move || {
                             if i18n::current().is_rtl() {
-                                ICON_BACK
+                                ButtonAction::Back.icon()
                             } else {
                                 ICON_CHEVRON_RIGHT
                             }
@@ -928,6 +871,7 @@ fn aliases_section(controller: Controller, palette: Palette) -> impl IntoView {
         h_stack((
             section_title(i18n::Key::AiModels, palette),
             action_button(
+                ButtonAction::Add,
                 move || tr!(AiAliasAdd),
                 IconButtonTone::Secondary,
                 palette,
@@ -956,78 +900,6 @@ fn aliases_section(controller: Controller, palette: Palette) -> impl IntoView {
             .max_width(SETTINGS_CARD_MAX_WIDTH_PX)
             .gap(12.0)
             .apply_if(settings.get().connection.is_none(), |style| style.hide())
-    })
-}
-
-pub(crate) fn alias_dropdown<T: Clone + 'static>(
-    value: RwSignal<Option<T>>,
-    items: Vec<T>,
-    display: impl Fn(Option<T>) -> String + 'static,
-    accept: impl Fn(T) + 'static,
-    enabled: impl Fn() -> bool + 'static,
-    palette: Palette,
-) -> impl IntoView {
-    let display = Rc::new(display);
-    let item_display = display.clone();
-    floem::views::dropdown::Dropdown::custom(
-        move || value.get(),
-        move |item| {
-            let display = display.clone();
-            h_stack((
-                label(move || display(item.clone()))
-                    .style(|style| style.min_width(0.0).text_ellipsis().selectable(false)),
-                svg(ICON_CHEVRON_DOWN).style(|style| style.size(12.0, 12.0)),
-            ))
-            .style(|style| {
-                rtl_row(style)
-                    .width_full()
-                    .items_center()
-                    .justify_between()
-                    .gap(8.0)
-            })
-            .into_any()
-        },
-        items.into_iter().map(Some).collect::<Vec<_>>(),
-        move |item| {
-            let display = item_display.clone();
-            label(move || display(item.clone()))
-                .style(move |style| {
-                    style
-                        .width_full()
-                        .height(34.0)
-                        .padding_horiz(12.0)
-                        .items_center()
-                        .font_size(13.0)
-                        .color(palette.ink)
-                        .background(palette.paper)
-                        .selectable(false)
-                        .hover(|style| style.background(palette.accent_soft))
-                        .focus(|style| style.background(palette.accent_soft))
-                })
-                .into_any()
-        },
-    )
-    .on_accept(move |item| {
-        if let Some(item) = item {
-            accept(item);
-        }
-    })
-    .disabled(move || !enabled())
-    .keyboard_navigable()
-    .style(move |style| {
-        settings_control_style(style, palette)
-            .cursor(CursorStyle::Pointer)
-            .focus(|style| style.border_color(palette.accent))
-            .disabled(|style| style.color(palette.muted).cursor(CursorStyle::Default))
-            .class(floem::views::scroll::ScrollClass, |style| {
-                style
-                    .width_full()
-                    .max_height(204.0)
-                    .background(palette.paper)
-                    .border(1.0)
-                    .border_color(palette.divider)
-                    .border_radius(6.0)
-            })
     })
 }
 
@@ -1101,7 +973,7 @@ fn alias_form(controller: Controller, palette: Palette) -> impl IntoView {
             })
         },
         move |models| {
-            alias_dropdown(
+            select(
                 model,
                 models.iter().map(|m| m.id.clone()).collect(),
                 move |value| {
@@ -1133,7 +1005,7 @@ fn alias_form(controller: Controller, palette: Palette) -> impl IntoView {
         move || available().map(|m| m.efforts).unwrap_or_default(),
         move |efforts| {
             let has_efforts = !efforts.is_empty();
-            alias_dropdown(
+            select(
                 effort,
                 efforts,
                 move |value| {
@@ -1238,6 +1110,7 @@ fn alias_form(controller: Controller, palette: Palette) -> impl IntoView {
         }),
         actions((
             action_button(
+                ButtonAction::Save,
                 move || {
                     if busy.get() && operation.get() == Operation::Save {
                         tr!(AiSaving)
@@ -1278,6 +1151,7 @@ fn alias_form(controller: Controller, palette: Palette) -> impl IntoView {
                 },
             ),
             action_button(
+                ButtonAction::Cancel,
                 move || tr!(Cancel),
                 IconButtonTone::Secondary,
                 palette,
@@ -1298,6 +1172,7 @@ fn alias_form(controller: Controller, palette: Palette) -> impl IntoView {
             )
         }),
         actions((action_button(
+            ButtonAction::Delete,
             move || tr!(AiAliasDelete),
             IconButtonTone::Danger,
             palette,

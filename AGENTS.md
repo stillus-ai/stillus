@@ -69,6 +69,23 @@
   defect.
 - Use scoped UI styles. Do not apply global theme/style overrides for local
   changes.
+- Build shared controls through `app/stillus/src/ui/`: buttons, inputs,
+  textareas, selects, secret-input surfaces, menus, tooltips and modal shells.
+  Fix interaction and appearance in the component, never in a per-screen copy.
+  Components receive values and callbacks, not application controllers.
+- Every action button starts with an icon. Standard standalone actions use
+  only their icon; custom actions retain text. Dialogs, menus and navigation
+  retain their labels. Declare standard actions with `ButtonAction`.
+- Every icon-only button MUST have a nonempty localized tooltip on hover,
+  including unavailable buttons. Use the shared button's title argument;
+  update it with the action state. Preserve keyboard-focus hints too.
+  Use the component's enabled predicate for unavailable buttons; applying
+  Floem `.disabled()` to an icon-only button or its wrapper suppresses hover dispatch.
+- Use `TextArea` for form multiline input. Never insert placeholders into
+  its document or implement a screen-specific caret/blink workaround.
+  The bounded Markdown document editor and OS-owned dialogs are specialized
+  exceptions; they must not become alternative form-control implementations.
+- Keep `make audit-ui-components` and `make ui-click-components` passing.
 - After changes, run fast unit tests first, then only tests related to the
   changed behavior. Select specific packages, test filters, and UI scenarios
   based on the affected code.

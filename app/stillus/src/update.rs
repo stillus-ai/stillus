@@ -11,7 +11,6 @@
 //! for a day after publication, a manual check never does, and nothing is
 //! installed without the user pressing the button.
 
-use crate::ai_settings::{actions, page_description, page_title, spacer};
 use crate::*;
 #[cfg(test)]
 use stillus_update::Version;
@@ -205,6 +204,7 @@ pub(crate) fn prompt_view(updates: Updates, palette: Palette) -> impl IntoView {
         )
     });
     let update_button = action_button(
+        ButtonAction::Custom(ButtonAction::Download.icon()),
         move || tr!(UpdateInstall),
         IconButtonTone::Primary,
         palette,
@@ -218,6 +218,7 @@ pub(crate) fn prompt_view(updates: Updates, palette: Palette) -> impl IntoView {
         )
     });
     let dismiss = action_button(
+        ButtonAction::Custom(ICON_CANCEL),
         move || tr!(UpdateLater),
         IconButtonTone::Secondary,
         palette,
@@ -225,6 +226,7 @@ pub(crate) fn prompt_view(updates: Updates, palette: Palette) -> impl IntoView {
         move || later.dismiss(),
     );
     let restart_button = action_button(
+        ButtonAction::Custom(ICON_UPDATE),
         move || tr!(UpdateRestart),
         IconButtonTone::Primary,
         palette,
@@ -317,6 +319,7 @@ pub(crate) fn page(
         }),
         actions((
             action_button(
+                ButtonAction::Custom(ButtonAction::Refresh.icon()),
                 move || tr!(UpdateCheckNow),
                 IconButtonTone::Secondary,
                 palette,
@@ -327,6 +330,7 @@ pub(crate) fn page(
                 move || check.check(CheckMode::Manual),
             ),
             action_button(
+                ButtonAction::Custom(ButtonAction::Download.icon()),
                 move || tr!(UpdateInstall),
                 IconButtonTone::Primary,
                 palette,
@@ -343,6 +347,7 @@ pub(crate) fn page(
                 )
             }),
             action_button(
+                ButtonAction::Custom(ICON_FILE),
                 move || tr!(UpdateOpenPage),
                 IconButtonTone::Secondary,
                 palette,
@@ -353,6 +358,7 @@ pub(crate) fn page(
                 style.apply_if(stage.get().release().is_none(), |style| style.hide())
             }),
             action_button(
+                ButtonAction::Custom(ICON_UPDATE),
                 move || tr!(UpdateRestart),
                 IconButtonTone::Primary,
                 palette,
@@ -406,6 +412,7 @@ pub(crate) fn page(
         })
         .style(move |style| style.font_size(12.5).color(palette.muted).selectable(false)),
         actions((action_button(
+            ButtonAction::Custom(ICON_UPDATE),
             move || {
                 if automatic.get() {
                     tr!(UpdateAutomaticDisable)

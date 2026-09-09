@@ -11,9 +11,9 @@ test-utils = ["stillus-core/test-utils"]
 
 [dependencies]
 stillus-chat = { version = "0.1.0", path = "../../crates/stillus-chat" }
-stillus-engine = { path = "../../crates/stillus-engine" }
-stillus-security = { path = "../../crates/stillus-security" }
-stillus-storage = { path = "../../crates/stillus-storage" }
+stillus-engine = { version = "0.1.0", path = "../../crates/stillus-engine" }
+stillus-security = { version = "0.1.0", path = "../../crates/stillus-security" }
+stillus-storage = { version = "0.1.0", path = "../../crates/stillus-storage" }
 stillus-ai = { version = "0.1.0", path = "../../crates/stillus-ai" }
 stillus-platform = { version = "0.1.0", path = "../../crates/stillus-platform", features = ["credentials"] }
 fluent-bundle = "=0.16.0"

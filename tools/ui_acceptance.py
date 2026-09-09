@@ -318,7 +318,7 @@ AI_CARD_MIN_HEIGHT = 24
 AI_EXPANDED_MIN_HEIGHT = 80
 # Rounded corners leave the first and last rows of a card without a border.
 AI_CARD_CORNER = 7
-AI_CANCEL_X = AI_CARD_CONTENT_LEFT + 91
+AI_CANCEL_X = AI_CARD_CONTENT_LEFT + 32 + 8 + 16
 
 
 def tag_row_top(index: int) -> int:
@@ -5459,6 +5459,7 @@ def secure_scenario(
     driver.click_note(0, counts=locked_counts, categories=(tag,))
     driver.wait_for_password_dialog()
     driver.key("Escape")
+    driver.wait_for_password_dialog(opened=False)
     assert_locked_editor_inaccessible(
         driver,
         markers=(title, body_marker, tag, edit_marker, search_proof_marker),
@@ -7274,12 +7275,12 @@ def rss_filters_scenario(driver: WindowDriver, workspace: Path) -> None:
     if preferences()["blacklist"] != "nothingmatches":
         raise AcceptanceFailure("Escape saved the regexp draft")
     edit_preferences()
-    driver.click_point(785, footer_y)  # Cancel
+    driver.click_point(720, footer_y)  # Cancel
     if preferences()["blacklist"] != "nothingmatches":
         raise AcceptanceFailure("Cancel saved the regexp draft")
     edit_preferences()
     decisions_before = state().get("entries", {})
-    driver.click_point(855, footer_y)  # Save
+    driver.click_point(816, footer_y)  # Save
     wait_until("regexp rules saved", lambda: preferences()["blacklist"] == blacklist
                and preferences()["whitelist"] == whitelist)
     if any(entry.get("decision") == "hide" for entry in state().get("entries", {}).values()):
@@ -7289,7 +7290,7 @@ def rss_filters_scenario(driver: WindowDriver, workspace: Path) -> None:
             raise AcceptanceFailure("Save changed an existing decision")
     open_filters()
     read_before = state()["read_entry_ids"]
-    driver.click_point(960, footer_y)  # Save and Apply
+    driver.click_point(938, footer_y)  # Save and Apply
     wait_until("blacklist hides the read promotion", lambda:
                state().get("entries", {}).get("entry/0", {}).get("decision") == "hide")
     if state()["read_entry_ids"] != read_before:
@@ -7311,18 +7312,18 @@ def rss_filters_scenario(driver: WindowDriver, workspace: Path) -> None:
     field(black_y, "promotion\n[")
     before = (config_path.read_bytes(), state_path.read_bytes())
     driver.capture("rss-filter-invalid-line")
-    driver.click_point(960, footer_y)
+    driver.click_point(938, footer_y)
     if (config_path.read_bytes(), state_path.read_bytes()) != before:
         raise AcceptanceFailure("invalid regexp changed persisted rules or decisions")
     driver.key("Escape")
     open_filters()
     field(white_y, "")
-    driver.click_point(960, footer_y)
+    driver.click_point(938, footer_y)
     wait_until("removing whitelist hides its previous exception", lambda:
                state()["entries"]["entry/2"]["decision"] == "hide")
     open_filters()
     field(black_y, "")
-    driver.click_point(960, footer_y)
+    driver.click_point(938, footer_y)
     wait_until("empty blacklist reveals all articles", lambda:
                all(entry["decision"] == "keep" for entry in state()["entries"].values()))
     driver.close_app()
@@ -7632,7 +7633,7 @@ def ai_settings_scenario(driver: WindowDriver, workspace: Path) -> None:
 
     def add(name: str) -> None:
         rows = all_rows()
-        driver.click_point(945, rows[0][1] + 44)
+        driver.click_point(980, rows[0][1] + 44)
         settle()
         driver.click_point(470, field(0))
         driver.type_text(name)
@@ -7694,7 +7695,7 @@ def ai_settings_scenario(driver: WindowDriver, workspace: Path) -> None:
     settle()
     wait_until("invalid clipboard key feedback", lambda: danger_pixels() >= 20)
     set_clipboard_text(driver.environment, "sk-proj-abcdefghijklmnopqrstuvdenied")
-    driver.click_point(938, key_field()[1])
+    driver.click_point(957, key_field()[1])
     settle()
     wait_until("valid key paste clears format feedback", lambda: danger_pixels() <= 5)
     primary()
@@ -7709,13 +7710,13 @@ def ai_settings_scenario(driver: WindowDriver, workspace: Path) -> None:
     settle()
     field_y = key_field()[1]
     masked = driver.capture("ai-masked")
-    driver.click_point(875, field_y)
+    driver.click_point(913, field_y)
     driver.click_point(*AI_SIDEBAR_ITEM)
     settle()
     revealed = driver.capture("ai-revealed")
     if image_difference(masked, revealed, crop=(310, field_y - 12, 400, 24)) < 50:
         raise AcceptanceFailure("AI reveal control did not reveal the fixture key")
-    driver.click_point(875, field_y)
+    driver.click_point(913, field_y)
     driver.click_point(*AI_SIDEBAR_ITEM)
     settle()
     if image_difference(masked, driver.capture("ai-concealed"), crop=(310, field_y - 12, 400, 24)) > 5:
@@ -7776,7 +7777,7 @@ def ai_settings_scenario(driver: WindowDriver, workspace: Path) -> None:
     settle()
     edit(1)  # quick sorts before research
     last = controls()[-1]
-    driver.click_point(340, (last[0] + last[1]) // 2)
+    driver.click_point(AI_CARD_CONTENT_LEFT + 16, (last[0] + last[1]) // 2)
     wait_until("deleted alias", lambda: "quick" not in state()["aliases"])
     settle()
     if state()["aliases"]["default"] != default:
@@ -7789,7 +7790,7 @@ def ai_settings_scenario(driver: WindowDriver, workspace: Path) -> None:
     empty_key = driver.capture("ai-provider-empty")
     key_y = key_field()[1]
     set_clipboard_text(driver.environment, "sk-ant-api03-abcdefghijklmnopqrstuv")
-    driver.click_point(938, key_y)
+    driver.click_point(957, key_y)
     driver.wait_for_visual_change("provider key pasted", empty_key,
                                   crop=(310, key_y - 15, 540, 30), timeout=10)
     settle()
@@ -7803,7 +7804,7 @@ def ai_settings_scenario(driver: WindowDriver, workspace: Path) -> None:
     settle()
     empty_key = driver.capture("ai-replacement-empty")
     set_clipboard_text(driver.environment, "sk-proj-abcdefghijklmnopqrstuv")
-    driver.click_point(938, key_field()[1])
+    driver.click_point(957, key_field()[1])
     driver.wait_for_visual_change("replacement key pasted", empty_key,
                                   crop=(310, key_field()[1] - 15, 540, 30), timeout=10)
     settle()
@@ -8249,12 +8250,12 @@ def ai_journal_scenario(driver: WindowDriver, workspace: Path) -> None:
     driver.wait_for_stable_frame("journal details rendered", crop=(260, 385, 720, 300), minimum_dark_pixels=800)
     preview = driver.capture("journal-details")
     shutil.copyfile(preview, Path("/workspace/dist/ai-journal-preview.png"))
-    driver.click_point(460, 45)
+    driver.click_point(365, 45)
     driver.wait_for_visual_change("history cleanup confirmation", preview, crop=(260, 180, 720, 160), timeout=10)
     driver.wait_for_stable_frame("history cleanup controls", crop=(260, 180, 720, 160), stable_for=0.5)
     driver.click_point(310, 223)
     wait_until("journal history cleared", lambda: not list(directory.glob("*.json")), timeout=10)
-    driver.click_point(345, 45)
+    driver.click_point(278, 45)
     wait_for_ai_controls(driver)
     driver.close_app()
     driver.start_app(workspace, "journal-restart", environment_overrides={"STILLUS_TEST_AI": "1"})
@@ -8380,7 +8381,7 @@ def chat_scenario(driver: WindowDriver, workspace: Path) -> None:
     driver.click_point(946, 36)
     driver.wait_for_stable_frame("chat request journal", crop=(280, 100, 850, 300), stable_for=0.2)
     shutil.copyfile(driver.capture("chat-journal"), Path("/workspace/dist/chat-journal.png"))
-    driver.click_point(342, 45)
+    driver.click_point(302, 45)
 
     def create_and_send(text: str) -> Path:
         before = set(root.glob("*/metadata.json"))
@@ -8562,7 +8563,7 @@ def chat_paging_layout_scenario(driver: WindowDriver, workspace: Path, chat: Pat
     driver.click_point(516, 78)
     driver.wait_for_visual_change("journal opens from wrapped toolbar", narrow,
                                   crop=(500, 100, 330, 200), minimum_pixels=100)
-    driver.click_point(560, 45)
+    driver.click_point(526, 45)
     returned = driver.wait_for_stable_frame("journal Back restores narrow chat",
                                            crop=(500, 333, 340, 115), stable_for=0.3)
     if image_difference(narrow, returned, crop=(500, 333, 340, 115)) != 0:
@@ -8570,7 +8571,108 @@ def chat_paging_layout_scenario(driver: WindowDriver, workspace: Path, chat: Pat
     driver.close_app()
 
 
+def components_scenario(driver: WindowDriver, workspace: Path) -> None:
+    driver.start_app(workspace, "gallery", environment_overrides={"STILLUS_TEST_COMPONENTS": "1"})
+    fields = (24, 72, 900, 240)
+    driver.wait_for_stable_frame("unfocused component fields", crop=fields, stable_for=1.2)
+    # Every kind of icon button, including the unavailable Send, has a hover title.
+    for x in (40, 80, 120, 155):
+        driver.xdotool("mousemove", "--window", driver.window_id, "900", "500")
+        baseline = driver.wait_for_stable_frame("no tooltip", crop=(20, 20, 400, 120), stable_for=0.2)
+        driver.xdotool("mousemove", "--window", driver.window_id, str(x), "40")
+        tip = driver.wait_for_visual_change("icon hover tooltip", baseline, crop=(20, 55, 400, 65), minimum_pixels=50, timeout=3)
+        if x == 40:
+            english_tip = tip
+    driver.xdotool("mousemove", "--window", driver.window_id, "900", "500")
+    counters = driver.wait_for_stable_frame("initial action counters", crop=(24, 384, 950, 24), stable_for=0.2)
+    driver.click_point(80, 40)
+    if image_difference(counters, driver.capture("disabled-action"), crop=(24, 384, 950, 24)):
+        raise AcceptanceFailure("disabled button invoked its callback")
+    driver.click_point(40, 40)
+    driver.wait_for_visual_change("enabled action invoked once", counters, crop=(24, 384, 950, 24), minimum_pixels=3)
+    # Tab reaches the unavailable action and exposes its title without a mouse hover.
+    driver.xdotool("mousemove", "--window", driver.window_id, "900", "500")
+    no_tip = driver.wait_for_stable_frame("before keyboard title", crop=(20, 55, 400, 65), stable_for=0.2)
+    driver.key("Tab")
+    driver.wait_for_visual_change("keyboard focus tooltip", no_tip, crop=(20, 55, 400, 65), minimum_pixels=50)
+    driver.click_point(75, 348)  # Disable Copy and the first textarea.
+    counters = driver.wait_for_stable_frame("disabled component state", crop=(24, 384, 950, 24), stable_for=0.2)
+    driver.click_point(40, 40)
+    if image_difference(counters, driver.capture("changed-availability"), crop=(24, 384, 950, 24)):
+        raise AcceptanceFailure("button ignored its updated availability")
+    driver.xdotool("mousemove", "--window", driver.window_id, "900", "500")
+    no_tip = driver.wait_for_stable_frame("disabled Copy before hover", crop=(20, 55, 400, 65), stable_for=0.2)
+    driver.xdotool("mousemove", "--window", driver.window_id, "40", "40")
+    driver.wait_for_visual_change("disabled Copy retains its tooltip", no_tip, crop=(20, 55, 400, 65), minimum_pixels=50)
+    driver.click_point(75, 348)
+    driver.click_point(40, 40)
+    driver.wait_for_visual_change("reenabled button works", counters, crop=(24, 384, 950, 24), minimum_pixels=3)
+    driver.click_point(120, 40)
+    driver.xdotool("mousemove", "--window", driver.window_id, "900", "500")
+    no_tip = driver.wait_for_stable_frame("before toggled title", crop=(20, 55, 400, 65), stable_for=0.2)
+    driver.xdotool("mousemove", "--window", driver.window_id, "120", "40")
+    toggled = driver.wait_for_visual_change("toggled action title", no_tip, crop=(20, 55, 400, 65), minimum_pixels=50)
+    driver.click_point(120, 40)
+    driver.xdotool("mousemove", "--window", driver.window_id, "900", "500")
+    no_tip = driver.wait_for_stable_frame("before untoggled title", crop=(20, 55, 400, 65), stable_for=0.2)
+    driver.xdotool("mousemove", "--window", driver.window_id, "120", "40")
+    untoggled = driver.wait_for_visual_change("untoggled tooltip appears", no_tip, crop=(20, 55, 400, 65), minimum_pixels=50, timeout=3)
+    if image_difference(toggled, untoggled, crop=(125, 55, 180, 32)) < 20:
+        raise AcceptanceFailure("tooltip did not change with toggle state")
+    driver.xdotool("mousemove", "--window", driver.window_id, "900", "500")
+    baseline = driver.wait_for_stable_frame("placeholder without caret", crop=fields, stable_for=1.2)
+    driver.click_point(100, 100)
+    caret = driver.wait_for_visual_change("caret precedes placeholder", baseline, crop=(32, 80, 4, 30), minimum_pixels=8, timeout=3)
+    driver.wait_for_visual_change("focused caret blinks", caret, crop=(32, 80, 4, 30), minimum_pixels=8, timeout=3)
+    driver.type_text("first")
+    driver.key("shift+Return")
+    driver.type_text("second")
+    driver.key("ctrl+a")
+    driver.key("ctrl+c")
+    wait_until("multiline input", lambda: clipboard_text(driver.environment) == "first\nsecond")
+    driver.key("End")
+    set_clipboard_text(driver.environment, " pasted")
+    driver.key("ctrl+v")
+    driver.key("ctrl+z")
+    driver.key("ctrl+a")
+    driver.key("ctrl+c")
+    wait_until("textarea Undo", lambda: clipboard_text(driver.environment) == "first\nsecond")
+    driver.key("ctrl+shift+z")
+    driver.key("ctrl+a")
+    driver.key("ctrl+c")
+    wait_until("textarea Redo", lambda: clipboard_text(driver.environment) == "first\nsecond pasted")
+    driver.click_point(100, 225)
+    driver.wait_for_stable_frame("first field loses caret", crop=(24, 72, 900, 112), stable_for=1.2)
+    driver.type_text("other")
+    driver.key("Return")
+    driver.type_text("line")
+    driver.key("ctrl+a")
+    driver.key("ctrl+c")
+    wait_until("independent field and newline mode", lambda: clipboard_text(driver.environment) == "other\nline")
+    driver.xdotool("windowfocus", "0")
+    driver.wait_for_stable_frame("inactive window hides every caret", crop=fields, stable_for=1.2)
+    driver.xdotool("windowfocus", "--sync", driver.window_id)
+    driver.click_point(215, 40)
+    driver.click_point(100, 100)
+    driver.type_text("after clear")
+    driver.key("ctrl+a")
+    driver.key("ctrl+c")
+    wait_until("external reset updates existing editor", lambda: clipboard_text(driver.environment) == "after clear")
+    driver.click_point(185, 348)
+    driver.xdotool("mousemove", "--window", driver.window_id, "900", "500")
+    no_tip = driver.wait_for_stable_frame("Russian controls", crop=(20, 55, 400, 65), stable_for=0.2)
+    driver.xdotool("mousemove", "--window", driver.window_id, "40", "40")
+    russian_tip = driver.wait_for_visual_change("translated tooltip appears", no_tip, crop=(20, 55, 400, 65), minimum_pixels=50, timeout=3)
+    if image_difference(english_tip, russian_tip, crop=(45, 55, 180, 32)) < 20:
+        raise AcceptanceFailure("tooltip did not follow the locale")
+    driver.resize_window(860, 560)
+    driver.xdotool("mousemove", "--window", driver.window_id, "700", "500")
+    driver.wait_for_stable_frame("components in a narrow window", stable_for=0.3)
+    driver.close_app()
+
+
 SCENARIOS: dict[str, Callable[[WindowDriver, Path], None]] = {
+    "components": components_scenario,
     "chat": chat_scenario,
     "ai": ai_settings_scenario,
     "ai_journal": ai_journal_scenario,

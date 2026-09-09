@@ -14,7 +14,7 @@ pub(crate) fn control(
     palette: Palette,
 ) -> AnyView {
     model.borrow_mut().rss_filters_open = Some(open);
-    let trigger = toolbar_action_button(
+    let trigger = toolbar_control(
         ToolbarAction::Filters,
         ToolbarSubject::Feed,
         palette,
@@ -28,47 +28,11 @@ pub(crate) fn control(
 }
 
 fn multiline(value: RwSignal<String>, open: RwSignal<bool>, palette: Palette) -> AnyView {
-    use floem::style::CursorColor;
-    use floem::views::editor::command::CommandExecuted;
-    use floem::views::editor::keypress::{default_key_handler, key::KeyInput};
-    use floem::views::editor::text::WrapMethod;
-    use floem::views::editor::view::EditorViewClass;
-    floem::views::text_editor::text_editor_keys(
-        value.get_untracked(),
-        move |editor, key, modifiers| {
-            if matches!(
-                &key.key,
-                KeyInput::Keyboard(Key::Named(NamedKey::Escape), _)
-            ) {
-                open.set(false);
-                CommandExecuted::Yes
-            } else {
-                default_key_handler(editor)(key, modifiers)
-            }
-        },
-    )
-    .update(move |event| {
-        if let Some(editor) = event.editor {
-            value.set(editor.rope_text().text.to_string());
-        }
-    })
-    .editor_style(|style| style.hide_gutter(true).wrap_method(WrapMethod::EditorWidth))
-    .style(move |style| {
-        form_field_style(style, palette, value.get().len() > 16 * 1024)
-            .width_full()
-            .height(112.0)
-            .font_size(14.0)
-            .color(palette.ink)
-            .background(palette.paper)
-            // Floem's TextEditor treats every instance as active. Its inner
-            // EditorView owns keyboard focus, so scope the caret to that view.
-            .class(EditorViewClass, move |style| {
-                style
-                    .set(CursorColor, Color::TRANSPARENT)
-                    .focus(move |style| style.set(CursorColor, palette.ink))
-            })
-    })
-    .into_any()
+    TextArea::new(value, palette)
+        .visible(move || open.get())
+        .invalid(move || value.get().len() > 16 * 1024)
+        .on_escape(move || open.set(false))
+        .build(move |_| {})
 }
 
 fn validation_message(error: stillus_core::RssFilterError) -> String {
@@ -149,7 +113,12 @@ fn form(
     let save_button = |apply: bool| {
         let model = model.clone();
         let id = id.clone();
-        action_button(
+        dialog_action_button(
+            if apply {
+                ButtonAction::Custom(ButtonAction::Save.icon())
+            } else {
+                ButtonAction::Save
+            },
             move || {
                 if apply {
                     tr!(RssFilterSaveApply)
@@ -205,7 +174,8 @@ fn form(
         status,
         h_stack((
             empty().style(|s| s.flex_grow(1.0)),
-            text_button(
+            dialog_button(
+                ButtonAction::Cancel,
                 msg!(Cancel),
                 IconButtonTone::Secondary,
                 palette,

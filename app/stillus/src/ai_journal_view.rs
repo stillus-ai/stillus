@@ -202,8 +202,9 @@ pub(super) fn page_at(
         chunk.set(0);
     });
     v_stack((
-        crate::ai_settings::actions((
+        actions((
             action_button(
+                ButtonAction::Back,
                 move || tr!(AiJournalBack),
                 IconButtonTone::Secondary,
                 palette,
@@ -211,6 +212,7 @@ pub(super) fn page_at(
                 move || open.set(false),
             ),
             action_button(
+                ButtonAction::Custom(ButtonAction::Delete.icon()),
                 move || tr!(AiJournalClear),
                 IconButtonTone::Danger,
                 palette,
@@ -218,6 +220,7 @@ pub(super) fn page_at(
                 move || confirm.set(true),
             ),
             action_button(
+                ButtonAction::Retry,
                 move || tr!(AiJournalRetry),
                 IconButtonTone::Secondary,
                 palette,
@@ -225,10 +228,11 @@ pub(super) fn page_at(
                 move || retry.refresh(false, true),
             ),
         )),
-        crate::ai_settings::page_title(i18n::Key::AiJournal, palette),
-        crate::ai_settings::page_description(i18n::Key::AiJournalHint, palette),
-        crate::ai_settings::actions((
+        page_title(i18n::Key::AiJournal, palette),
+        page_description(i18n::Key::AiJournalHint, palette),
+        actions((
             action_button(
+                ButtonAction::Custom(ButtonAction::Settings.icon()),
                 move || {
                     provider
                         .get()
@@ -253,6 +257,7 @@ pub(super) fn page_at(
                 },
             ),
             action_button(
+                ButtonAction::Custom(ButtonAction::Settings.icon()),
                 move || {
                     status
                         .get()
@@ -277,8 +282,9 @@ pub(super) fn page_at(
             .style(move |s| s.color(palette.danger).apply_if(!error.get(), |s| s.hide())),
         v_stack((
             label(move || tr!(AiJournalConfirm)),
-            crate::ai_settings::actions((
-                action_button(
+            actions((
+                dialog_action_button(
+                    ButtonAction::Delete,
                     move || tr!(AiJournalClear),
                     IconButtonTone::Danger,
                     palette,
@@ -289,7 +295,8 @@ pub(super) fn page_at(
                         clear.refresh(true, false);
                     },
                 ),
-                action_button(
+                dialog_action_button(
+                    ButtonAction::Cancel,
                     move || tr!(Cancel),
                     IconButtonTone::Secondary,
                     palette,
@@ -337,8 +344,9 @@ pub(super) fn page_at(
             .style(|s| s.flex_col().width_full()),
         )
         .style(|s| s.width_full().height(180.0)),
-        crate::ai_settings::actions((
+        actions((
             action_button(
+                ButtonAction::Custom(ICON_ARROW_DOWN),
                 move || tr!(AiJournalNewest),
                 IconButtonTone::Secondary,
                 palette,
@@ -346,6 +354,7 @@ pub(super) fn page_at(
                 move || before.set(None),
             ),
             action_button(
+                ButtonAction::Custom(ICON_ARROW_UP),
                 move || tr!(AiJournalOlder),
                 IconButtonTone::Secondary,
                 palette,
@@ -381,8 +390,9 @@ pub(super) fn page_at(
             .style(|s| s.flex_col().min_width(0.0)),
         )
         .style(|s| s.width_full().min_height(100.0).flex_grow(1.0)),
-        crate::ai_settings::actions((
+        actions((
             action_button(
+                ButtonAction::Custom(ButtonAction::Back.icon()),
                 move || tr!(AiJournalPreviousPart),
                 IconButtonTone::Secondary,
                 palette,
@@ -390,6 +400,7 @@ pub(super) fn page_at(
                 move || chunk.update(|n| *n = n.saturating_sub(1)),
             ),
             action_button(
+                ButtonAction::Custom(ICON_CHEVRON_RIGHT),
                 move || tr!(AiJournalNextPart),
                 IconButtonTone::Secondary,
                 palette,

@@ -20,12 +20,24 @@ use std::any::Any;
 pub(crate) struct LocalizedInput {
     input: TextInput,
     buffer: RwSignal<String>,
-    hint: Key,
+    hint: InputHint,
     attrs: AttrsList,
     layout: TextLayout,
     on_escape: Option<Box<dyn Fn()>>,
 }
 
+enum InputHint {
+    Localized(Key),
+    Literal(&'static str),
+}
+impl std::fmt::Display for InputHint {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Localized(key) => write!(f, "{key}"),
+            Self::Literal(value) => f.write_str(value),
+        }
+    }
+}
 impl LocalizedInput {
     pub(crate) fn new(buffer: RwSignal<String>, hint: Key) -> Self {
         let input = text_input(buffer);
@@ -37,11 +49,18 @@ impl LocalizedInput {
         Self {
             input,
             buffer,
-            hint,
+            hint: InputHint::Localized(hint),
             attrs: AttrsList::new(Attrs::new()),
             layout: TextLayout::new(),
             on_escape: None,
         }
+    }
+
+    /// Literal examples (URLs and paths) are decorative hints too.
+    pub(crate) fn example(buffer: RwSignal<String>, hint: &'static str) -> Self {
+        let mut input = Self::new(buffer, Key::SearchNotes);
+        input.hint = InputHint::Literal(hint);
+        input
     }
 
     pub(crate) fn on_escape(mut self, action: impl Fn() + 'static) -> Self {

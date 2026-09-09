@@ -13,7 +13,8 @@ mod chat_view;
 mod crash_dialog;
 mod editor_geometry;
 mod i18n;
-mod localized_input;
+mod ui;
+use ui::*;
 mod native_diagnostics;
 mod restart;
 mod rss_card;
@@ -47,20 +48,20 @@ use application::runtime::{
 };
 use application::workspace::Workspace as WorkspaceSession;
 use editor_geometry::{EditorTextGeometry, GeometryConfig, GeometryLine, MAX_GEOMETRY_ROWS};
-use floem::action::{add_overlay, exec_after, remove_overlay};
+use floem::action::exec_after;
 use floem::event::{Event, EventListener, EventPropagation};
 use floem::file::{FileDialogOptions, FileSpec};
 use floem::file_action::open_file;
 use floem::keyboard::{Key, KeyCode, Modifiers, NamedKey, PhysicalKey};
 use floem::kurbo::{Point, Size};
-use floem::menu::{Menu, MenuItem};
+use floem::menu::Menu;
 use floem::pointer::PointerInputEvent;
 use floem::prelude::*;
 use floem::reactive::create_effect;
 use floem::style::{CursorStyle, Style};
 use floem::window::WindowConfig;
 use floem::{AnyView, Application, Clipboard, View, ViewId, quit_app};
-use i18n::{Locale, UiText, msg, tr};
+use i18n::{UiText, msg, tr};
 use settings::{
     CategoryNoteSortSettings, GlobalSettings, NoteSortField, PersistedExternalFile,
     PersistedSidebarGroup, SidebarSettings, SortDirection, UiSettings, UpdateSettings,
@@ -92,22 +93,6 @@ fn note_caption(note: &stillus_core::NoteSummary) -> UiText {
         msg!(UnsupportedProtectedNote).into()
     } else {
         note.title.clone().into()
-    }
-}
-
-fn rtl_row(style: Style) -> Style {
-    style.flex_direction(if i18n::current().is_rtl() {
-        floem::taffy::FlexDirection::RowReverse
-    } else {
-        floem::taffy::FlexDirection::Row
-    })
-}
-
-fn rtl_column(style: Style) -> Style {
-    if i18n::current().is_rtl() {
-        style.items_end()
-    } else {
-        style
     }
 }
 
@@ -170,28 +155,17 @@ const CREATE_POPOVER_PADDING_PX: f64 = 6.0;
 /// the choice rows, which carry their own horizontal padding.
 const RSS_FORM_PADDING_PX: f64 = 12.0;
 const RSS_FORM_GAP_PX: f64 = 8.0;
-/// One field height for every engine form: the creation popover and the
-/// toolbar editing bars share it through `form_field_style`.
-const FORM_FIELD_HEIGHT_PX: f64 = 32.0;
-/// One card, one field height and one field label for every settings page:
-/// the general page, encryption and the AI assistant share them through
-/// `settings_card_style`, `settings_control_style` and `settings_field_label`.
-const SETTINGS_CARD_MAX_WIDTH_PX: f64 = 720.0;
-const SETTINGS_CARD_PADDING_PX: f64 = 22.0;
-const SETTINGS_FIELD_HEIGHT_PX: f64 = 40.0;
 /// Gap between toolbar controls, shared by the document header and the feed
 /// toolbar so both read as one row of controls.
 const TOOLBAR_ACTION_GAP_PX: f64 = 6.0;
 const RSS_RENAME_FIELD_WIDTH_PX: f64 = 340.0;
 const RSS_CATEGORIES_FIELD_WIDTH_PX: f64 = 420.0;
-const TOOLBAR_EDIT_BAR_HEIGHT_PX: f64 = 48.0;
 const RSS_FORM_BUTTON_HEIGHT_PX: f64 = 30.0;
 /// Reserved for the hint line so a one-line error does not move the buttons.
 const RSS_FORM_STATUS_HEIGHT_PX: f64 = 16.0;
 /// Pressed-in shade of `Palette::accent` for the primary form button hover.
 const RSS_FORM_ACCENT_HOVER: Color = Color::rgb8(42, 74, 103);
 const MAX_PASSWORD_BYTES: usize = 1_024;
-const UI_FONT_FAMILY: &str = "sans-serif";
 /// Monospace families probed in order at startup. Floem applies only the
 /// first family of a CSS-style list, so the editor picks one that is actually
 /// installed and measures its real advance width instead of assuming one.
@@ -204,43 +178,6 @@ const EDITOR_FONT_CANDIDATES: [&str; 6] = [
     "DejaVu Sans Mono",
 ];
 const EDITOR_FALLBACK_FONT_FAMILY: &str = "monospace";
-const ICON_CREATE: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.8" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>"##;
-const ICON_TAG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13 20 4 11V4h7l9 9-7 7Z"/><circle cx="8.5" cy="8.5" r="1"/></svg>"##;
-const ICON_PIN: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h6l-1 5 3 3v2H7v-2l3-3-1-5Z"/><path d="M12 13v8"/></svg>"##;
-const ICON_STAR: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-2.9-5.6 2.9 1.1-6.2L3 9.6l6.2-.9L12 3Z"/></svg>"##;
-const ICON_RENAME: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9l-4-4L4 16v4Z"/><path d="m14.5 5.5 4 4"/></svg>"##;
-const ICON_TRASH: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></svg>"##;
-const ICON_RETRY: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M18.5 9A7 7 0 0 0 6 6.5L4 9M5.5 15A7 7 0 0 0 18 17.5l2-2.5"/></svg>"##;
-const ICON_RECOVER: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v5h5"/><path d="M5.2 17.5A9 9 0 1 0 4 8"/><path d="M12 7v5l3 2"/></svg>"##;
-const ICON_DISK_VERSION: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l4 4v14H6V3Z"/><path d="M15 3v5h4M12 11v6M9 14l3 3 3-3"/></svg>"##;
-const ICON_CANCEL: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.8" stroke-linecap="round"><path d="m6 6 12 12M18 6 6 18"/></svg>"##;
-const ICON_SEARCH: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg>"##;
-const ICON_SETTINGS: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1A1.7 1.7 0 0 0 9 4.6 1.7 1.7 0 0 0 10 3v-.2h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"/></svg>"##;
-const ICON_FOLDER: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6.5h7l2 2h9v10.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6.5Z"/><path d="M3 10h18"/></svg>"##;
-const ICON_BACK: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>"##;
-const ICON_ARROW_UP: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m6 14 6-6 6 6"/></svg>"##;
-const ICON_ARROW_DOWN: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m6 10 6 6 6-6"/></svg>"##;
-const ICON_SORT: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4v16M4 7l3-3 3 3M17 20V4M14 17l3 3 3-3"/></svg>"##;
-const ICON_LOCK: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v3"/></svg>"##;
-const ICON_CHEVRON_RIGHT: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m9 5 7 7-7 7"/></svg>"##;
-const ICON_CHEVRON_DOWN: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 9 7 7 7-7"/></svg>"##;
-const ICON_NOTE: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l4 4v14H6V3Z"/><path d="M15 3v5h4M9 12h6M9 16h6"/></svg>"##;
-const ICON_FILE: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l4 4v14H6V3Z"/><path d="M15 3v5h4"/></svg>"##;
-const ICON_CHAT: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="6 1 32 32" fill="none" stroke="#000" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><g transform="translate(5 5) scale(1.25)"><path d="M11.2 3H5a2 2 0 0 0-2 2v16l4-4h12a2 2 0 0 0 2-2v-2.2"/></g><g transform="translate(20 4) scale(.666667)"><path d="m12 3 1.9 5.8a2 2 0 0 0 1.3 1.3L21 12l-5.8 1.9a2 2 0 0 0-1.3 1.3L12 21l-1.9-5.8a2 2 0 0 0-1.3-1.3L3 12l5.8-1.9a2 2 0 0 0 1.3-1.3L12 3ZM20 2v4M18 4h4M4 18v4M2 20h4"/></g></svg>"##;
-const ICON_RSS: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.9" stroke-linecap="round"><circle cx="6" cy="18" r="1.5" fill="#000" stroke="none"/><path d="M5 11a8 8 0 0 1 8 8M5 5a14 14 0 0 1 14 14"/></svg>"##;
-const ICON_UPDATE: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4a8 8 0 1 0 7.5 5.3"/><path d="M20 3.5V10h-6.5"/><path d="M12 8v5l3 2"/></svg>"##;
-const ICON_UNLOCK: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M16 10V7a4 4 0 0 0-7.8-1.2M12 14v3"/></svg>"##;
-/// Frames of the padlock that swings open while a protected note is being
-/// decrypted. Floem has no animated-image view, so the badge swaps these
-/// static drawings on a timer instead.
-const ICON_DECRYPT_FRAMES: [&str; 6] = [
-    r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2.5"/><path d="M8.5 11V7.5a3.5 3.5 0 0 1 7 0V11M12 15v2.5"/></svg>"##,
-    r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2.5"/><path d="M8.5 11V7a3.5 3.5 0 0 1 7 0v2.4M12 15v2.5"/></svg>"##,
-    r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2.5"/><path d="M8.5 11V6.6a3.5 3.5 0 0 1 7 0v1.2M12 15v2.5"/><path d="M19.4 6.2v1.6M18.6 7h1.6"/></svg>"##,
-    r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2.5"/><path d="M8.5 11V6.3a3.5 3.5 0 0 1 6.5-1.8M12 15v2.5"/><path d="M19.4 5.4v1.8M18.5 6.3h1.8M4.6 5.4v1.2M4 6h1.2"/></svg>"##,
-    r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2.5"/><path d="M8.5 11V6.2a3.5 3.5 0 0 1 5.4-2.9M12 15v2.5"/><path d="M18.8 4.6v2M17.8 5.6h2M4.6 6.4v1.4M3.9 7.1h1.4"/></svg>"##,
-    r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2.5"/><path d="M8.5 11V6.2a3.5 3.5 0 0 1 4.4-3.4M12 15v2.5"/><path d="M18.2 4v2.2M17.1 5.1h2.2"/></svg>"##,
-];
 /// One frame is held this long: slow enough to read as a lock opening, fast
 /// enough to look alive next to the caret blink.
 const DECRYPT_FRAME_MS: u64 = 150;
@@ -397,29 +334,37 @@ fn main() -> Result<(), LaunchError> {
         operations: launch.smoke_operations,
     };
     let initial_window = settings.window;
-    app.window(
-        move |_| {
-            app_view(
-                model,
-                settings_store,
-                global_settings_store,
-                settings,
-                startup_prompt,
-                UiLaunch {
-                    smoke,
-                    external_paths: launch.external_paths,
-                    restart_request,
-                },
-            )
-        },
-        Some(
-            WindowConfig::default()
-                .title("Stillus")
-                .size((initial_window.width, initial_window.height))
-                .apply_default_theme(false),
-        ),
-    )
-    .run();
+    let build_view = move |_| {
+        app_view(
+            model,
+            settings_store,
+            global_settings_store,
+            settings,
+            startup_prompt,
+            UiLaunch {
+                smoke,
+                external_paths: launch.external_paths,
+                restart_request,
+            },
+        )
+    };
+    let window_config = Some(
+        WindowConfig::default()
+            .title("Stillus")
+            .size((initial_window.width, initial_window.height))
+            .apply_default_theme(false),
+    );
+    #[cfg(feature = "test-utils")]
+    let app = if std::env::var_os("STILLUS_TEST_COMPONENTS").as_deref()
+        == Some(std::ffi::OsStr::new("1"))
+    {
+        app.window(move |_| ui::gallery::view(), window_config)
+    } else {
+        app.window(build_view, window_config)
+    };
+    #[cfg(not(feature = "test-utils"))]
+    let app = app.window(build_view, window_config);
+    app.run();
     native_diagnostics::emit(native_diagnostics::Stage::EventLoopExited);
     if let Err(error) = final_settings_store.borrow_mut().flush() {
         native_diagnostics::emit(native_diagnostics::Stage::FinalSettingsFailed);
@@ -2558,73 +2503,21 @@ fn settings_page_view(
     let ai_content = ai_settings::page(signals, revision, global_settings_store.clone(), palette);
     let updates_content = update::page(signals, updates, palette);
     let language_feedback = create_rw_signal(None::<i18n::Message>);
-    let language_picker =
-        floem::views::dropdown::Dropdown::new(i18n::current, Locale::ALL.iter().copied())
-            .main_view(|_| {
-                h_stack((
-                    label(|| i18n::current().native_name()).style(|style| style.font_size(13.0)),
-                    svg(ICON_CHEVRON_DOWN).style(|style| style.size(12.0, 12.0)),
-                ))
-                .style(|style| {
-                    rtl_row(style)
-                        .width_full()
-                        .items_center()
-                        .justify_between()
-                        .gap(8.0)
-                        .font_family("sans-serif".to_owned())
-                })
-                .into_any()
-            })
-            .list_item_view(move |locale| {
-                text(locale.native_name())
-                    .style(move |style| {
-                        style
-                            .width_full()
-                            .min_height(30.0)
-                            .padding_horiz(10.0)
-                            .padding_vert(6.0)
-                            .font_family("sans-serif".to_owned())
-                            .font_size(13.0)
-                            .color(palette.ink)
-                            .background(palette.paper)
-                            .hover(move |style| style.background(palette.accent_soft))
-                            .focus(move |style| style.background(palette.accent_soft))
-                    })
-                    .into_any()
-            })
-            .on_accept(move |locale| {
-                // Release the coordinator before changing signals: locale effects read it again.
-                let result = global_settings_store.borrow_mut().set_locale(locale);
-                match result {
-                    Ok(()) => {
-                        language_feedback.set(None);
-                        i18n::set_current(locale);
-                    }
-                    Err(error) => language_feedback
-                        .set(Some(msg!(LanguageSaveFailed, "error" => error.to_string()))),
+    let language_picker = language_select(
+        move |locale| {
+            // Release the coordinator before changing signals: locale effects read it again.
+            let result = global_settings_store.borrow_mut().set_locale(locale);
+            match result {
+                Ok(()) => {
+                    language_feedback.set(None);
+                    i18n::set_current(locale);
                 }
-            })
-            .style(move |style| {
-                style
-                    .width(300.0)
-                    .min_height(36.0)
-                    .padding_horiz(10.0)
-                    .padding_vert(6.0)
-                    .background(palette.paper)
-                    .color(palette.ink)
-                    .border(1.0)
-                    .border_color(palette.divider)
-                    .border_radius(6.0)
-                    .class(floem::views::scroll::ScrollClass, |style| {
-                        style
-                            .width(300.0)
-                            .max_height(280.0)
-                            .background(palette.paper)
-                            .border(1.0)
-                            .border_color(palette.divider)
-                            .border_radius(6.0)
-                    })
-            });
+                Err(error) => language_feedback
+                    .set(Some(msg!(LanguageSaveFailed, "error" => error.to_string()))),
+            }
+        },
+        palette,
+    );
     let language_card = v_stack((
         text(msg!(Language)).style(move |style| style.font_size(15.0).color(palette.ink)),
         text(msg!(LanguageDescription))
@@ -2647,7 +2540,7 @@ fn settings_page_view(
     let navigation = v_stack((
         h_stack((
             icon_button(
-                ICON_BACK,
+                ButtonAction::Back.icon(),
                 || tr!(BackToNotes),
                 IconButtonTone::Sidebar,
                 palette,
@@ -2670,9 +2563,9 @@ fn settings_page_view(
                 .selectable(false)
         }),
         empty().style(|style| style.height(8.0)),
-        reliable_button(
+        selectable_row(
             h_stack((
-                svg(ICON_SETTINGS).style(|style| style.size(16.0, 16.0)),
+                svg(ButtonAction::Settings.icon()).style(|style| style.size(16.0, 16.0)),
                 label(move || tr!(General)).style(|style| style.font_size(13.5).selectable(false)),
             ))
             .style(|style| rtl_row(style).items_center().gap(10.0)),
@@ -2696,7 +2589,7 @@ fn settings_page_view(
                 .color(palette.sidebar_ink)
                 .border_radius(6.0)
         }),
-        reliable_button(
+        selectable_row(
             h_stack((
                 svg(ICON_LOCK).style(|style| style.size(16.0, 16.0)),
                 label(move || tr!(Encryption))
@@ -2723,7 +2616,7 @@ fn settings_page_view(
                 .color(palette.sidebar_ink)
                 .border_radius(6.0)
         }),
-        reliable_button(h_stack((
+        selectable_row(h_stack((
             svg(r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5Z"/></svg>"#).style(|style| style.size(16.0,16.0)),
             label(move || tr!(AiAssistant)).style(|style| style.selectable(false)),
         )).style(|style| rtl_row(style).items_center().gap(10.0)), move || {
@@ -2747,7 +2640,7 @@ fn settings_page_view(
                 })
                 .focus(|style| style.border(1.0).border_color(palette.accent))
         }),
-        reliable_button(
+        selectable_row(
             h_stack((
                 svg(ICON_UPDATE).style(|style| style.size(16.0, 16.0)),
                 label(move || tr!(Updates)).style(|style| style.font_size(13.5).selectable(false)),
@@ -2825,13 +2718,20 @@ fn settings_page_view(
         manual_apply(PathBuf::from(path.trim()));
     };
     let controls = h_stack((
-        text_button(
+        dialog_button(
+            ButtonAction::Custom(ICON_FOLDER),
             msg!(ChooseFolder),
             IconButtonTone::Secondary,
             palette,
             picker_action,
         ),
-        text_button(msg!(Apply), IconButtonTone::Primary, palette, apply_action),
+        dialog_button(
+            ButtonAction::Custom(ButtonAction::Save.icon()),
+            msg!(Apply),
+            IconButtonTone::Primary,
+            palette,
+            apply_action,
+        ),
     ))
     .style(|style| rtl_row(style).items_center().gap(8.0));
 
@@ -3041,7 +2941,8 @@ fn startup_workspace_modal(
 
     let disabled_signals = signals;
     let primary_label_signals = signals;
-    let primary = reliable_button(
+    let primary = content_button(
+        ICON_FOLDER,
         label(move || {
             startup_candidate_state(
                 primary_label_signals.candidate.get().as_deref(),
@@ -3164,7 +3065,8 @@ fn startup_workspace_modal(
         detail,
         h_stack((
             empty().style(|style| style.flex_grow(1.0)),
-            text_button(
+            dialog_button(
+                ButtonAction::Custom(ICON_FOLDER),
                 msg!(ChooseAnother),
                 IconButtonTone::Secondary,
                 palette,
@@ -3174,17 +3076,7 @@ fn startup_workspace_modal(
         ))
         .style(|style| style.width_full().items_center().gap(8.0)),
     ))
-    .style(move |style| {
-        style
-            .width(520.0)
-            .gap(14.0)
-            .padding(22.0)
-            .background(palette.paper)
-            .color(palette.ink)
-            .border(1.0)
-            .border_color(palette.divider)
-            .border_radius(9.0)
-    });
+    .style(move |style| dialog_card_style(style, palette, 520.0, 22.0).gap(14.0));
     container(card).style(move |style| {
         let style = style
             .absolute()
@@ -3370,7 +3262,8 @@ fn encryption_settings_view(
 
     let submit_model = model.clone();
     let disabled_model = model.clone();
-    let submit = text_button(
+    let submit = dialog_button(
+        ButtonAction::Custom(ICON_LOCK),
         msg!(ChangeMasterPassword),
         IconButtonTone::Primary,
         palette,
@@ -3668,7 +3561,8 @@ fn password_change_recovery_modal(
         .style(move |style| style.font_size(12.0).color(palette.danger)),
         h_stack((
             empty().style(|style| style.flex_grow(1.0)),
-            text_button(
+            dialog_button(
+                ButtonAction::Custom(ButtonAction::Refresh.icon()),
                 msg!(RetryRecovery),
                 IconButtonTone::Primary,
                 palette,
@@ -3680,25 +3574,10 @@ fn password_change_recovery_modal(
         ))
         .style(|style| style.width_full()),
     ))
-    .style(move |style| {
-        style
-            .width(470.0)
-            .gap(14.0)
-            .padding(20.0)
-            .background(palette.paper)
-            .color(palette.ink)
-            .border(1.0)
-            .border_color(palette.divider)
-            .border_radius(9.0)
-    });
+    .style(move |style| dialog_card_style(style, palette, 470.0, 20.0).gap(14.0));
     container(card).style(move |style| {
         revision.get();
-        let style = style
-            .absolute()
-            .size_full()
-            .items_center()
-            .justify_center()
-            .background(Color::rgba8(24, 29, 36, 92));
+        let style = modal_backdrop(style);
         if visibility_model
             .borrow()
             .blocked_password_change_workspace
@@ -3737,22 +3616,34 @@ fn integrity_modal(
             let restore_disabled_model = model.clone();
             let error_model = model.clone();
             let error_visibility_model = model.clone();
-            let retry = text_button(msg!(Retry), IconButtonTone::Primary, palette, move || {
-                retry_model
-                    .borrow_mut()
-                    .start_integrity_resolution(IntegrityResolution::Retry);
-                revision.update(|value| *value += 1);
-            })
+            let retry = dialog_button(
+                ButtonAction::Retry,
+                msg!(Retry),
+                IconButtonTone::Primary,
+                palette,
+                move || {
+                    retry_model
+                        .borrow_mut()
+                        .start_integrity_resolution(IntegrityResolution::Retry);
+                    revision.update(|value| *value += 1);
+                },
+            )
             .disabled(move || {
                 revision.get();
                 retry_disabled_model.borrow().secure_worker_active
             });
-            let restore = text_button(msg!(Restore), IconButtonTone::Danger, palette, move || {
-                restore_model
-                    .borrow_mut()
-                    .start_integrity_resolution(IntegrityResolution::Restore);
-                revision.update(|value| *value += 1);
-            })
+            let restore = dialog_button(
+                ButtonAction::Custom(ICON_RECOVER),
+                msg!(Restore),
+                IconButtonTone::Danger,
+                palette,
+                move || {
+                    restore_model
+                        .borrow_mut()
+                        .start_integrity_resolution(IntegrityResolution::Restore);
+                    revision.update(|value| *value += 1);
+                },
+            )
             .disabled(move || {
                 revision.get();
                 restore_disabled_model.borrow().secure_worker_active
@@ -3782,27 +3673,8 @@ fn integrity_modal(
                 h_stack((empty().style(|style| style.flex_grow(1.0)), restore, retry))
                     .style(|style| style.width_full().items_center().gap(8.0)),
             ))
-            .style(move |style| {
-                style
-                    .width(430.0)
-                    .gap(14.0)
-                    .padding(20.0)
-                    .background(palette.paper)
-                    .color(palette.ink)
-                    .border(1.0)
-                    .border_color(palette.divider)
-                    .border_radius(9.0)
-            });
-            container(card)
-                .style(move |style| {
-                    style
-                        .absolute()
-                        .size_full()
-                        .items_center()
-                        .justify_center()
-                        .background(Color::rgba8(24, 29, 36, 92))
-                })
-                .into_any()
+            .style(move |style| dialog_card_style(style, palette, 430.0, 20.0).gap(14.0));
+            container(card).style(modal_backdrop).into_any()
         },
     )
     .style(move |style| {
@@ -4157,10 +4029,11 @@ fn password_dialog_card(
                 .update(|value| *value += 1);
         })
         .on_event_stop(EventListener::FocusLost, move |_| {
+            // Floem can deliver the next field's FocusGained before this loss.
             if focus.field.get_untracked() == Some(PasswordField::Primary) {
                 focus.field.set(None);
+                stop_password_caret(focus);
             }
-            stop_password_caret(focus);
         });
 
     let confirmation_focus_security = security.clone();
@@ -4181,8 +4054,8 @@ fn password_dialog_card(
         .on_event_stop(EventListener::FocusLost, move |_| {
             if focus.field.get_untracked() == Some(PasswordField::Confirmation) {
                 focus.field.set(None);
+                stop_password_caret(focus);
             }
-            stop_password_caret(focus);
         });
 
     let feedback_security = security.clone();
@@ -4238,6 +4111,7 @@ fn password_dialog_card(
         h_stack((
             empty().style(|style| style.flex_grow(1.0)),
             password_dialog_button(
+                ButtonAction::Cancel,
                 msg!(Cancel),
                 IconButtonTone::Secondary,
                 palette,
@@ -4245,6 +4119,7 @@ fn password_dialog_card(
                 move || cancel_security.close(),
             ),
             password_dialog_button(
+                ButtonAction::Custom(ICON_UNLOCK),
                 confirm_label,
                 IconButtonTone::Primary,
                 palette,
@@ -4260,28 +4135,11 @@ fn password_dialog_card(
         ))
         .style(|style| style.width_full().items_center().gap(8.0)),
     ))
-    .style(move |style| {
-        style
-            .width(390.0)
-            .gap(14.0)
-            .padding(20.0)
-            .background(palette.paper)
-            .color(palette.ink)
-            .border(1.0)
-            .border_color(palette.divider)
-            .border_radius(9.0)
-    });
+    .style(move |style| dialog_card_style(style, palette, 390.0, 20.0).gap(14.0));
     exec_after(Duration::from_millis(10), move |_| {
         primary_id.request_focus()
     });
-    container(card).style(move |style| {
-        style
-            .absolute()
-            .size_full()
-            .items_center()
-            .justify_center()
-            .background(Color::rgba8(24, 29, 36, 92))
-    })
+    container(card).style(modal_backdrop)
 }
 
 fn stop_password_caret(focus: PasswordFocusSignals) {
@@ -4764,114 +4622,6 @@ impl From<SidebarFilter> for PersistedSidebarGroup {
     }
 }
 
-#[derive(Clone, Copy)]
-struct Palette {
-    canvas: Color,
-    sidebar: Color,
-    sidebar_active: Color,
-    sidebar_ink: Color,
-    sidebar_muted: Color,
-    sidebar_border: Color,
-    sidebar_accent: Color,
-    paper: Color,
-    ink: Color,
-    muted: Color,
-    divider: Color,
-    accent: Color,
-    accent_soft: Color,
-    danger: Color,
-    scrollbar: Color,
-}
-
-impl Palette {
-    fn new() -> Self {
-        Self {
-            canvas: Color::rgb8(246, 247, 248),
-            sidebar: Color::rgb8(36, 42, 51),
-            sidebar_active: Color::rgb8(57, 66, 78),
-            sidebar_ink: Color::rgb8(244, 246, 248),
-            sidebar_muted: Color::rgb8(164, 173, 184),
-            sidebar_border: Color::rgb8(58, 66, 77),
-            sidebar_accent: Color::rgb8(143, 184, 220),
-            paper: Color::rgb8(255, 255, 255),
-            ink: Color::rgb8(35, 39, 45),
-            muted: Color::rgb8(105, 112, 121),
-            divider: Color::rgb8(226, 229, 233),
-            accent: Color::rgb8(54, 94, 130),
-            accent_soft: Color::rgb8(229, 238, 246),
-            danger: Color::rgb8(164, 69, 69),
-            scrollbar: Color::rgba8(35, 39, 45, 96),
-        }
-    }
-}
-
-fn text_input_affordance(style: Style, placeholder_color: Color, caret_color: Color) -> Style {
-    style
-        .cursor(CursorStyle::Text)
-        .cursor_color(floem::peniko::Brush::Solid(caret_color))
-        .class(PlaceholderTextClass, move |style| {
-            style.color(placeholder_color)
-        })
-}
-
-fn is_primary_pointer_down(event: &Event) -> bool {
-    matches!(event, Event::PointerDown(pointer) if pointer.button.is_primary())
-}
-
-struct PrimaryPointerView {
-    id: ViewId,
-    on_press: Box<dyn Fn(&PointerInputEvent)>,
-    capture_pointer: bool,
-}
-
-struct MaskedPasswordView {
-    id: ViewId,
-    on_press: Box<dyn Fn()>,
-    on_input: Box<dyn Fn(&Event) -> EventPropagation>,
-}
-
-impl MaskedPasswordView {
-    fn new(
-        child: impl IntoView,
-        on_press: impl Fn() + 'static,
-        on_input: impl Fn(&Event) -> EventPropagation + 'static,
-    ) -> Self {
-        let id = ViewId::new();
-        id.add_child(Box::new(child.into_view()));
-        Self {
-            id,
-            on_press: Box::new(on_press),
-            on_input: Box::new(on_input),
-        }
-    }
-}
-
-impl View for MaskedPasswordView {
-    fn id(&self) -> ViewId {
-        self.id
-    }
-
-    fn event_before_children(
-        &mut self,
-        _cx: &mut floem::context::EventCx,
-        event: &Event,
-    ) -> EventPropagation {
-        if matches!(event, Event::KeyUp(_)) {
-            return EventPropagation::Stop;
-        }
-        if matches!(event, Event::KeyDown(_) | Event::ImeCommit(_)) {
-            return (self.on_input)(event);
-        }
-        if !is_primary_pointer_down(event) {
-            return EventPropagation::Continue;
-        }
-        let id = self.id;
-        exec_after(Duration::from_millis(10), move |_| id.request_focus());
-        (self.on_press)();
-        EventPropagation::Stop
-    }
-}
-
 struct NotePointerDragView {
     id: ViewId,
     origin: Option<Point>,
@@ -4952,206 +4702,6 @@ impl View for NotePointerDragView {
             }
             _ => EventPropagation::Continue,
         }
-    }
-}
-
-enum AnchoredPopoverMessage {
-    Open(bool),
-}
-
-struct AnchoredPopover {
-    id: ViewId,
-    overlay_ids: Rc<RefCell<Vec<ViewId>>>,
-    open: RwSignal<bool>,
-    content: Rc<dyn Fn() -> AnyView>,
-    width: f64,
-    gap: f64,
-    align_start: bool,
-    window_origin: Option<Point>,
-}
-
-fn anchored_popover<V, C, CV>(
-    trigger: V,
-    open: RwSignal<bool>,
-    width: f64,
-    gap: f64,
-    align_start: bool,
-    content: C,
-) -> impl IntoView
-where
-    V: IntoView + 'static,
-    C: Fn() -> CV + 'static,
-    CV: IntoView + 'static,
-{
-    let id = ViewId::new();
-    id.add_child(Box::new(trigger.into_view()));
-    create_effect(move |_| {
-        id.update_state(AnchoredPopoverMessage::Open(open.get()));
-    });
-    let overlay_ids = Rc::new(RefCell::new(Vec::new()));
-    let cleanup_overlay_ids = overlay_ids.clone();
-    AnchoredPopover {
-        id,
-        overlay_ids,
-        open,
-        content: Rc::new(move || content().into_any()),
-        width,
-        gap,
-        align_start,
-        window_origin: None,
-    }
-    .on_cleanup(move || {
-        let overlay_ids = std::mem::take(&mut *cleanup_overlay_ids.borrow_mut());
-        for overlay_id in overlay_ids.into_iter().rev() {
-            remove_overlay(overlay_id);
-        }
-    })
-}
-
-impl AnchoredPopover {
-    fn close_overlay(&mut self) {
-        let overlay_ids = std::mem::take(&mut *self.overlay_ids.borrow_mut());
-        for overlay_id in overlay_ids.into_iter().rev() {
-            remove_overlay(overlay_id);
-        }
-    }
-}
-
-fn popover_left(
-    origin: f64,
-    trigger: f64,
-    width: f64,
-    window: f64,
-    align_start: bool,
-    rtl: bool,
-) -> f64 {
-    let left = if align_start != rtl {
-        origin
-    } else {
-        origin + trigger - width
-    };
-    left.clamp(8.0, (window - width - 8.0).max(8.0))
-}
-
-impl View for AnchoredPopover {
-    fn id(&self) -> ViewId {
-        self.id
-    }
-
-    fn update(&mut self, _cx: &mut floem::context::UpdateCx, state: Box<dyn std::any::Any>) {
-        let Ok(message) = state.downcast::<AnchoredPopoverMessage>() else {
-            return;
-        };
-        match *message {
-            AnchoredPopoverMessage::Open(false) => self.close_overlay(),
-            AnchoredPopoverMessage::Open(true) => {
-                if !self.overlay_ids.borrow().is_empty() {
-                    return;
-                }
-                let Some(origin) = self.window_origin else {
-                    self.open.set(false);
-                    return;
-                };
-                let layout = self.id.get_layout().unwrap_or_default();
-                let mut root = self.id;
-                while let Some(parent) = root.parent() {
-                    root = parent;
-                }
-                let window_width = root
-                    .get_layout()
-                    .map_or(860.0, |layout| f64::from(layout.size.width));
-                let left = popover_left(
-                    origin.x,
-                    f64::from(layout.size.width),
-                    self.width,
-                    window_width,
-                    self.align_start,
-                    i18n::current().is_rtl(),
-                );
-                let top = origin.y + f64::from(layout.size.height) + self.gap;
-                let content = self.content.clone();
-                let dismiss_layer = add_overlay(Point::new(0.0, 0.0), move |_| {
-                    empty()
-                        .pointer_events(|| false)
-                        .style(|style| style.absolute().size_full())
-                });
-                let card = add_overlay(Point::new(left, top), move |_| content());
-                self.overlay_ids.borrow_mut().extend([dismiss_layer, card]);
-            }
-        }
-    }
-
-    fn compute_layout(
-        &mut self,
-        cx: &mut floem::context::ComputeLayoutCx,
-    ) -> Option<floem::kurbo::Rect> {
-        self.window_origin = Some(cx.window_origin());
-        let mut layout_rect: Option<floem::kurbo::Rect> = None;
-        for child in self.id.children() {
-            if let Some(child_layout) = cx.compute_view_layout(child) {
-                layout_rect =
-                    Some(layout_rect.map_or(child_layout, |rect| rect.union(child_layout)));
-            }
-        }
-        layout_rect
-    }
-}
-
-impl PrimaryPointerView {
-    fn new(child: impl IntoView, on_press: impl Fn(&PointerInputEvent) + 'static) -> Self {
-        let id = ViewId::new();
-        id.add_child(Box::new(child.into_view()));
-        Self {
-            id,
-            on_press: Box::new(on_press),
-            capture_pointer: false,
-        }
-    }
-
-    /// Route every pointer event to this view until the primary button is
-    /// released, even when the pointer leaves its bounds. Pointer drags need
-    /// this so the release always ends the drag instead of leaving the
-    /// selection following later hover movement.
-    fn capture_pointer(mut self) -> Self {
-        self.capture_pointer = true;
-        self
-    }
-}
-
-impl View for PrimaryPointerView {
-    fn id(&self) -> ViewId {
-        self.id
-    }
-
-    fn event_before_children(
-        &mut self,
-        _cx: &mut floem::context::EventCx,
-        event: &Event,
-    ) -> EventPropagation {
-        if is_primary_pointer_down(event) {
-            let Event::PointerDown(pointer) = event else {
-                unreachable!("primary pointer-down predicate only accepts PointerDown")
-            };
-            self.id.request_focus();
-            if self.capture_pointer {
-                self.id.request_active();
-            }
-            (self.on_press)(pointer);
-            EventPropagation::Continue
-        } else {
-            EventPropagation::Continue
-        }
-    }
-}
-
-fn is_keyboard_activation(event: &Event) -> bool {
-    let Event::KeyDown(key_event) = event else {
-        return false;
-    };
-    match &key_event.key.logical_key {
-        Key::Named(NamedKey::Enter | NamedKey::Space) => true,
-        Key::Character(character) => character == " ",
-        _ => false,
     }
 }
 
@@ -5260,24 +4810,6 @@ fn selected_note_is_ready(model: &Rc<RefCell<AppModel>>) -> bool {
 
 fn resized_sidebar_width(current_width: f64, pointer_x: f64, grab_x: f64) -> f64 {
     (current_width + pointer_x - grab_x).clamp(SIDEBAR_MIN_WIDTH_PX, SIDEBAR_MAX_WIDTH_PX)
-}
-
-fn reliable_button<V>(child: V, on_press: impl Fn() + 'static) -> impl IntoView
-where
-    V: IntoView + 'static,
-{
-    let on_press: Rc<dyn Fn()> = Rc::new(on_press);
-    let pointer_press = on_press.clone();
-    PrimaryPointerView::new(child, move |_| pointer_press())
-        .keyboard_navigable()
-        .on_event(EventListener::KeyDown, move |event| {
-            if is_keyboard_activation(event) {
-                on_press();
-                EventPropagation::Stop
-            } else {
-                EventPropagation::Continue
-            }
-        })
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -6215,8 +5747,8 @@ fn sidebar_note_indicator_icons(
 ) -> Vec<&'static str> {
     [
         (ICON_LOCK, protected),
-        (ICON_PIN, pinned),
-        (ICON_STAR, favorited),
+        (ButtonAction::Pin.icon(), pinned),
+        (ButtonAction::Favorite.icon(), favorited),
     ]
     .into_iter()
     .filter_map(|(icon, visible)| visible.then_some(icon))
@@ -6262,79 +5794,6 @@ fn activate_sidebar_group(
     schedule_autosave(model.clone(), revision);
 }
 
-fn sort_choice_row(
-    title: i18n::Message,
-    selected: impl Fn() -> bool + 'static,
-    on_press: impl Fn() + 'static,
-    palette: Palette,
-) -> impl IntoView {
-    let selected = Rc::new(selected);
-    let indicator_selected = selected.clone();
-    reliable_button(
-        h_stack((
-            text(title)
-                .style(move |style| style.font_size(13.0).color(palette.ink).selectable(false)),
-            empty().style(|style| style.flex_grow(1.0)),
-            label(move || {
-                if indicator_selected() {
-                    "✓".to_owned()
-                } else {
-                    String::new()
-                }
-            })
-            .style(move |style| {
-                style
-                    .width(16.0)
-                    .font_size(13.0)
-                    .color(palette.accent)
-                    .selectable(false)
-            }),
-        ))
-        .style(|style| style.width_full().items_center()),
-        on_press,
-    )
-    .style(move |style| {
-        style
-            .width_full()
-            .height(30.0)
-            .padding_horiz(8.0)
-            .border_radius(5.0)
-            .background(if selected() {
-                palette.accent_soft
-            } else {
-                Color::TRANSPARENT
-            })
-            .hover(move |style| style.background(palette.canvas))
-    })
-}
-
-fn protection_menu_row(
-    title: i18n::Message,
-    danger: bool,
-    palette: Palette,
-    on_press: impl Fn() + 'static,
-) -> impl IntoView {
-    reliable_button(
-        text(title).style(move |style| {
-            style
-                .font_size(13.0)
-                .color(if danger { palette.danger } else { palette.ink })
-                .selectable(false)
-        }),
-        on_press,
-    )
-    .style(move |style| {
-        style
-            .width_full()
-            .height(32.0)
-            .padding_horiz(8.0)
-            .items_center()
-            .cursor(CursorStyle::Pointer)
-            .border_radius(5.0)
-            .hover(move |style| style.background(palette.canvas))
-    })
-}
-
 fn external_file_picker_spec(extensions: Vec<String>) -> Option<FileSpec> {
     if extensions.is_empty() {
         return None;
@@ -6350,54 +5809,6 @@ fn external_file_picker_spec(extensions: Vec<String>) -> Option<FileSpec> {
     Some(FileSpec {
         name: i18n::static_filter_name(),
         extensions: Box::leak(extensions.into_boxed_slice()),
-    })
-}
-
-fn creation_menu_row(
-    icon: &'static str,
-    title: i18n::Message,
-    enabled: bool,
-    palette: Palette,
-    on_press: impl Fn() + 'static,
-) -> impl IntoView {
-    reliable_button(
-        h_stack((
-            svg(icon).style(move |style| {
-                style
-                    .size(15.0, 15.0)
-                    .color(if enabled { palette.ink } else { palette.muted })
-                    .flex_shrink(0.0)
-            }),
-            text(title).style(move |style| {
-                style
-                    .font_size(13.0)
-                    .color(if enabled { palette.ink } else { palette.muted })
-                    .selectable(false)
-            }),
-        ))
-        .style(|style| style.width_full().items_center().gap(8.0)),
-        on_press,
-    )
-    .disabled(move || !enabled)
-    .style(move |style| {
-        style
-            .width_full()
-            .height(32.0)
-            .padding_horiz(8.0)
-            .items_center()
-            .cursor(if enabled {
-                CursorStyle::Pointer
-            } else {
-                CursorStyle::Default
-            })
-            .border_radius(5.0)
-            .hover(move |style| {
-                if enabled {
-                    style.background(palette.canvas)
-                } else {
-                    style
-                }
-            })
     })
 }
 
@@ -6477,14 +5888,14 @@ fn creation_choices(
     let file_model = model;
     let file_enabled = file_spec.is_some();
     v_stack((
-        creation_menu_row(ICON_NOTE, msg!(Note), true, palette, move || {
+        menu_item(ICON_NOTE, msg!(Note), true, palette, move || {
             open.set(false);
             let active = sidebar_state.get_untracked().creation_group;
             note_model.borrow_mut().request_note_creation(active);
             revision.update(|value| *value += 1);
             schedule_autosave(note_model.clone(), revision);
         }),
-        creation_menu_row(ICON_FILE, msg!(File), file_enabled, palette, move || {
+        menu_item(ICON_FILE, msg!(File), file_enabled, palette, move || {
             open.set(false);
             let Some(mut file_spec) = file_spec else {
                 return;
@@ -6509,11 +5920,11 @@ fn creation_choices(
                 schedule_autosave(selected_model.clone(), revision);
             });
         }),
-        creation_menu_row(ICON_RSS, msg!(RssFeed), true, palette, move || {
+        menu_item(ICON_RSS, msg!(RssFeed), true, palette, move || {
             rss_error.set(None);
             rss_mode.set(true);
         }),
-        creation_menu_row(ICON_CHAT, msg!(ChatMenu), true, palette, move || {
+        menu_item(ICON_CHAT, msg!(ChatMenu), true, palette, move || {
             open.set(false);
             let group = sidebar_state.get_untracked().creation_group;
             let categories = if let SidebarFilter::Tag(category) = &group {
@@ -6572,8 +5983,7 @@ fn rss_creation_form(
         }
     });
     let input_submit = submit.clone();
-    let input = text_input(rss_url)
-        .placeholder("https://example.com/feed.xml")
+    let input = localized_input::LocalizedInput::example(rss_url, "https://example.com/feed.xml")
         .style(move |style| {
             form_field_style(style, palette, rss_error.get().is_some()).width_full()
         })
@@ -6648,7 +6058,8 @@ fn rss_creation_form(
             .items_center()
     });
     let footer = h_stack((
-        reliable_button(
+        content_button(
+            ButtonAction::Back.icon(),
             label(move || tr!(Back)).style(|style| style.font_size(12.5).selectable(false)),
             move || {
                 rss_mode.set(false);
@@ -6670,7 +6081,8 @@ fn rss_creation_form(
                 .hover(move |style| style.background(palette.canvas).color(palette.ink))
         }),
         empty().style(|style| style.flex_grow(1.0)),
-        reliable_button(
+        content_button(
+            ButtonAction::Add.icon(),
             label(move || tr!(Add)).style(|style| style.font_size(12.5).selectable(false)),
             move || button_submit(),
         )
@@ -6714,13 +6126,13 @@ fn protection_popover(
     let lock_model = model.clone();
     let disable_model = model;
     v_stack((
-        protection_menu_row(msg!(LockNote), false, palette, move || {
+        menu_action_row(msg!(LockNote), false, palette, move || {
             open.set(false);
             lock_model.borrow_mut().lock_selected();
             revision.update(|value| *value += 1);
             schedule_autosave(lock_model.clone(), revision);
         }),
-        protection_menu_row(msg!(RemoveEncryption), true, palette, move || {
+        menu_action_row(msg!(RemoveEncryption), true, palette, move || {
             open.set(false);
             disable_model.borrow_mut().disable_protection_selected();
             revision.update(|value| *value += 1);
@@ -6764,19 +6176,19 @@ fn sidebar_sort_popover(
         label(move || tr!(SortNotes))
             .style(move |style| style.font_size(13.0).color(palette.ink).selectable(false)),
         v_stack((
-            sort_choice_row(
+            choice_row(
                 msg!(ByName),
                 move || name_field.get() == NoteSortField::Name,
                 move || field.set(NoteSortField::Name),
                 palette,
             ),
-            sort_choice_row(
+            choice_row(
                 msg!(ByCreated),
                 move || created_field.get() == NoteSortField::Created,
                 move || field.set(NoteSortField::Created),
                 palette,
             ),
-            sort_choice_row(
+            choice_row(
                 msg!(ByUpdated),
                 move || modified_field.get() == NoteSortField::Modified,
                 move || field.set(NoteSortField::Modified),
@@ -6792,13 +6204,13 @@ fn sidebar_sort_popover(
                 .background(palette.divider)
         }),
         v_stack((
-            sort_choice_row(
+            choice_row(
                 msg!(Ascending),
                 move || ascending_direction.get() == SortDirection::Ascending,
                 move || direction.set(SortDirection::Ascending),
                 palette,
             ),
-            sort_choice_row(
+            choice_row(
                 msg!(Descending),
                 move || descending_direction.get() == SortDirection::Descending,
                 move || direction.set(SortDirection::Descending),
@@ -6806,28 +6218,34 @@ fn sidebar_sort_popover(
             ),
         ))
         .style(|style| style.width_full().gap(2.0)),
-        text_button(msg!(Apply), IconButtonTone::Primary, palette, move || {
-            let cleared = apply_model
-                .borrow_mut()
-                .clear_sidebar_note_order(&apply_scope);
-            if cleared.is_none() {
+        dialog_button(
+            ButtonAction::Custom(ButtonAction::Save.icon()),
+            msg!(Apply),
+            IconButtonTone::Primary,
+            palette,
+            move || {
+                let cleared = apply_model
+                    .borrow_mut()
+                    .clear_sidebar_note_order(&apply_scope);
+                if cleared.is_none() {
+                    revision.update(|value| *value = value.saturating_add(1));
+                    return;
+                }
+                if let Some(order_key) = sidebar_note_order_key(&apply_scope) {
+                    sidebar_state.update(|state| {
+                        state.set_note_sort(
+                            order_key.to_owned(),
+                            NoteSort {
+                                field: field.get_untracked(),
+                                direction: direction.get_untracked(),
+                            },
+                        );
+                    });
+                }
+                open.set(false);
                 revision.update(|value| *value = value.saturating_add(1));
-                return;
-            }
-            if let Some(order_key) = sidebar_note_order_key(&apply_scope) {
-                sidebar_state.update(|state| {
-                    state.set_note_sort(
-                        order_key.to_owned(),
-                        NoteSort {
-                            field: field.get_untracked(),
-                            direction: direction.get_untracked(),
-                        },
-                    );
-                });
-            }
-            open.set(false);
-            revision.update(|value| *value = value.saturating_add(1));
-        }),
+            },
+        ),
     ))
     .style(move |style| {
         style
@@ -6913,7 +6331,7 @@ fn sidebar_group_row(
         svg(ICON_CHEVRON_RIGHT)
             .update_value(move || {
                 if i18n::current().is_rtl() {
-                    ICON_BACK
+                    ButtonAction::Back.icon()
                 } else {
                     ICON_CHEVRON_RIGHT
                 }
@@ -7040,7 +6458,7 @@ fn sidebar_group_row(
 
     if category_path.is_none() {
         let action_filter = filter;
-        return reliable_button(row, move || {
+        return selectable_row(row, move || {
             activate_sidebar_group(&action_filter, &model, sidebar_state, revision);
         })
         .into_any();
@@ -7123,7 +6541,7 @@ fn external_file_row(
             format!("{}\n{message}", file.path.display()).into()
         }
     };
-    let main = reliable_button(
+    let main = selectable_row(
         h_stack((
             svg(ICON_NOTE).style(|style| style.size(13.0, 13.0).flex_shrink(0.0)),
             text(file.title).style(move |style| {
@@ -7155,8 +6573,13 @@ fn external_file_row(
     )
     .tooltip(move || tooltip_label(tooltip.to_string(), palette))
     .style(|style| style.min_width(0.0).flex_grow(1.0).height_full());
-    let close = reliable_button(
-        svg(ICON_CANCEL).style(|style| style.size(13.0, 13.0)),
+    let close = compact_icon_button(
+        || ButtonAction::Close.icon(),
+        || tr!(RemoveSidebar),
+        IconButtonTone::Sidebar,
+        palette,
+        22.0,
+        || true,
         move || {
             close_model
                 .borrow_mut()
@@ -7165,7 +6588,6 @@ fn external_file_row(
             schedule_autosave(close_model.clone(), revision);
         },
     )
-    .tooltip(move || tooltip_label(tr!(RemoveSidebar), palette))
     .style(move |style| {
         style
             .size(22.0, 22.0)
@@ -7355,7 +6777,7 @@ fn sidebar_note_row(
     let content = content.style(row_style);
     if sidebar_note_order_key(&parent).is_none() {
         let click = activate.clone();
-        return reliable_button(content, move || click()).into_any();
+        return selectable_row(content, move || click()).into_any();
     }
     let drag_item = CatalogOrderItem::Note(note.path.clone());
     let drag_group = parent.clone();
@@ -7588,7 +7010,7 @@ fn engine_sidebar_row(
     });
     if sidebar_note_order_key(&parent).is_none() {
         let click = activate;
-        return reliable_button(content, move || click()).into_any();
+        return selectable_row(content, move || click()).into_any();
     }
     let drag_item = CatalogOrderItem::Engine(drag_engine.clone(), item_id.clone());
     let drag_group = parent.clone();
@@ -8179,7 +7601,7 @@ fn sidebar_panel(
         .as_ref()
         .and_then(|workspace| external_file_picker_spec(workspace.external_file_extensions()));
     let create_trigger = icon_button(
-        ICON_CREATE,
+        ButtonAction::Add.icon(),
         || tr!(CreateOrOpen),
         IconButtonTone::Primary,
         palette,
@@ -8206,7 +7628,7 @@ fn sidebar_panel(
     );
     let header = h_stack((
         icon_button(
-            ICON_SEARCH,
+            ButtonAction::Search.icon(),
             || tr!(SearchShortcut, "modifier" => i18n::shortcut_modifier()),
             IconButtonTone::Sidebar,
             palette,
@@ -8217,7 +7639,7 @@ fn sidebar_panel(
         empty().style(|style| style.flex_grow(1.0)),
         create_action,
         icon_button(
-            ICON_SETTINGS,
+            ButtonAction::Settings.icon(),
             || tr!(Settings),
             IconButtonTone::Sidebar,
             palette,
@@ -8264,7 +7686,7 @@ fn sidebar_panel(
             } else {
                 result.snippet
             };
-            reliable_button(
+            selectable_row(
                 v_stack((
                     h_stack((
                         text(result.title).style(move |style| {
@@ -8405,7 +7827,7 @@ fn sidebar_panel(
     let retry_search_model = search_input_model.clone();
     let retry_search_state_model = search_input_model.clone();
     let search_retry = icon_button(
-        ICON_RETRY,
+        ButtonAction::Refresh.icon(),
         || tr!(RebuildSearch),
         IconButtonTone::Sidebar,
         palette,
@@ -8582,7 +8004,7 @@ fn rss_article_link(
     palette: Palette,
     ink: Color,
 ) -> impl IntoView {
-    reliable_button(rss_title(label, ink), on_press)
+    selectable_row(rss_title(label, ink), on_press)
         // The card selects on bubbling pointer events; the title handles its own
         // selection before opening so it must not also activate the card.
         .on_event(EventListener::PointerDown, |event| {
@@ -8645,7 +8067,7 @@ fn rss_toolbar_control(
         ToolbarAction::Refresh => {
             let busy_model = model.clone();
             let busy_id = item_id.clone();
-            toolbar_action_button(
+            toolbar_control(
                 action,
                 ToolbarSubject::Feed,
                 palette,
@@ -8665,7 +8087,7 @@ fn rss_toolbar_control(
             )
             .into_any()
         }
-        ToolbarAction::Rename => toolbar_action_button(
+        ToolbarAction::Rename => toolbar_control(
             action,
             ToolbarSubject::Feed,
             palette,
@@ -8685,7 +8107,7 @@ fn rss_toolbar_control(
             },
         )
         .into_any(),
-        ToolbarAction::Categories => toolbar_action_button(
+        ToolbarAction::Categories => toolbar_control(
             action,
             ToolbarSubject::Feed,
             palette,
@@ -8705,7 +8127,7 @@ fn rss_toolbar_control(
             },
         )
         .into_any(),
-        ToolbarAction::Pin => toolbar_action_button(
+        ToolbarAction::Pin => toolbar_control(
             action,
             ToolbarSubject::Feed,
             palette,
@@ -8717,7 +8139,7 @@ fn rss_toolbar_control(
             },
         )
         .into_any(),
-        ToolbarAction::Favorite => toolbar_action_button(
+        ToolbarAction::Favorite => toolbar_control(
             action,
             ToolbarSubject::Feed,
             palette,
@@ -8731,7 +8153,7 @@ fn rss_toolbar_control(
         .into_any(),
         ToolbarAction::Delete | ToolbarAction::Restore => {
             let deleted = matches!(action, ToolbarAction::Restore);
-            toolbar_action_button(
+            toolbar_control(
                 action,
                 ToolbarSubject::Feed,
                 palette,
@@ -9484,9 +8906,15 @@ fn go_to_line_prompt(
             })
             .style(move |style| style.font_size(12.0).color(palette.muted)),
             empty().style(|style| style.flex_grow(1.0)),
-            text_button(msg!(Go), IconButtonTone::Primary, palette, move || {
-                submit_go_to_line(&submit_model, revision, signals, editor_focus_request);
-            }),
+            dialog_button(
+                ButtonAction::Custom(ICON_ARROW_DOWN),
+                msg!(Go),
+                IconButtonTone::Primary,
+                palette,
+                move || {
+                    submit_go_to_line(&submit_model, revision, signals, editor_focus_request);
+                },
+            ),
         ))
         .style(|style| style.width_full().items_center().gap(8.0)),
         label(move || {
@@ -9779,7 +9207,7 @@ fn editor_panel(
             if retry {
                 let retry_model = retry_model.clone();
                 actions.push(icon_button(
-                    ICON_RETRY,
+                    ButtonAction::Refresh.icon(),
                     || tr!(RetrySave),
                     IconButtonTone::Status,
                     palette,
@@ -10141,14 +9569,14 @@ fn editor_panel(
             ProtectionActionState::None => empty()
                 .style(|style| style.size(BUTTON_SIZE_PX, BUTTON_SIZE_PX))
                 .into_any(),
-            ProtectionActionState::Decrypting => icon_button(
+            ProtectionActionState::Decrypting => enabled_icon_button(
                 state.icon().expect("decrypting action has an icon"),
                 || tr!(Decrypting),
                 IconButtonTone::Secondary,
                 palette,
+                || false,
                 || {},
             )
-            .disabled(|| true)
             .into_any(),
             ProtectionActionState::Protect => {
                 let action_model = protection_action_model.clone();
@@ -10333,10 +9761,14 @@ fn editor_panel(
     });
     let find_button_model = model.clone();
     let find_button_disabled_model = model.clone();
-    let find_action = icon_toggle_button(
-        ICON_SEARCH,
+    let find_action = enabled_icon_toggle_button(
+        ButtonAction::Search.icon(),
         || tr!(FindShortcut, "modifier" => i18n::shortcut_modifier()),
         palette,
+        move || {
+            revision.get();
+            local_search_is_available(&find_button_disabled_model)
+        },
         move || note_find.open.get(),
         move || {
             open_note_find(
@@ -10347,17 +9779,17 @@ fn editor_panel(
                 go_to_line,
             );
         },
-    )
-    .disabled(move || {
-        revision.get();
-        !local_search_is_available(&find_button_disabled_model)
-    });
+    );
     let tag_button_disabled_model = model.clone();
     let tag_button_action_model = model.clone();
-    let tag_button = toolbar_action_button(
+    let tag_button = enabled_toolbar_control(
         ToolbarAction::Categories,
         ToolbarSubject::Note,
         palette,
+        move || {
+            revision.get();
+            selected_note_is_ready(&tag_button_disabled_model)
+        },
         move || tag_popover.open.get(),
         move || {
             close_go_to_line(go_to_line);
@@ -10387,11 +9819,7 @@ fn editor_panel(
                 tag_popover.open.set(true);
             }
         },
-    )
-    .disabled(move || {
-        revision.get();
-        !selected_note_is_ready(&tag_button_disabled_model)
-    });
+    );
     let tag_button_id = tag_button.id();
     let tag_popover_model = model.clone();
     let tag_action = anchored_popover(
@@ -10419,10 +9847,14 @@ fn editor_panel(
                 h_stack((
                     tag_action,
                     protection_action,
-                    toolbar_action_button(
+                    enabled_toolbar_control(
                         ToolbarAction::Pin,
                         ToolbarSubject::Note,
                         palette,
+                        move || {
+                            revision.get();
+                            selected_note_is_ready(&pin_disabled_model)
+                        },
                         move || {
                             revision.get();
                             selected_note_flag(&pin_label_model, |note| note.pinned)
@@ -10432,15 +9864,15 @@ fn editor_panel(
                             pin_revision.update(|value| *value += 1);
                             schedule_autosave(pin_model.clone(), pin_revision);
                         },
-                    )
-                    .disabled(move || {
-                        revision.get();
-                        !selected_note_is_ready(&pin_disabled_model)
-                    }),
-                    toolbar_action_button(
+                    ),
+                    enabled_toolbar_control(
                         ToolbarAction::Favorite,
                         ToolbarSubject::Note,
                         palette,
+                        move || {
+                            revision.get();
+                            selected_note_is_ready(&favorite_disabled_model)
+                        },
                         move || {
                             revision.get();
                             selected_note_flag(&favorite_label_model, |note| note.favorited)
@@ -10450,11 +9882,7 @@ fn editor_panel(
                             favorite_revision.update(|value| *value += 1);
                             schedule_autosave(favorite_model.clone(), favorite_revision);
                         },
-                    )
-                    .disabled(move || {
-                        revision.get();
-                        !selected_note_is_ready(&favorite_disabled_model)
-                    }),
+                    ),
                     dyn_container(
                         move || {
                             revision.get();
@@ -10462,7 +9890,7 @@ fn editor_panel(
                         },
                         move |deleted| {
                             let action_model = deleted_action_model.clone();
-                            toolbar_action_button(
+                            toolbar_control(
                                 if deleted {
                                     ToolbarAction::Restore
                                 } else {
@@ -10714,38 +10142,24 @@ fn editor_context_menu(
     let cut_model = model.clone();
     let copy_model = model.clone();
     let paste_model = model;
-    Menu::new("")
-        .entry(
-            MenuItem::new(tr!(Cut))
-                .enabled(state.can_cut_or_copy)
-                .action(move || {
-                    execute_editor_command(&cut_model, revision, EditorCommand::Cut);
-                    editor_focus_id.request_focus();
-                }),
-        )
-        .entry(
-            MenuItem::new(tr!(Copy))
-                .enabled(state.can_cut_or_copy)
-                .action(move || {
-                    execute_editor_command(&copy_model, revision, EditorCommand::Copy);
-                    editor_focus_id.request_focus();
-                }),
-        )
-        .separator()
-        .entry(
-            MenuItem::new(tr!(Paste))
-                .enabled(state.can_paste)
-                .action(move || {
-                    if let Ok(contents) = Clipboard::get_contents() {
-                        execute_editor_command(
-                            &paste_model,
-                            revision,
-                            EditorCommand::Paste(contents),
-                        );
-                    }
-                    editor_focus_id.request_focus();
-                }),
-        )
+    native_edit_menu(
+        state.can_cut_or_copy,
+        state.can_paste,
+        move || {
+            execute_editor_command(&cut_model, revision, EditorCommand::Cut);
+            editor_focus_id.request_focus();
+        },
+        move || {
+            execute_editor_command(&copy_model, revision, EditorCommand::Copy);
+            editor_focus_id.request_focus();
+        },
+        move || {
+            if let Ok(contents) = Clipboard::get_contents() {
+                execute_editor_command(&paste_model, revision, EditorCommand::Paste(contents));
+            }
+            editor_focus_id.request_focus();
+        },
+    )
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -11598,8 +11012,13 @@ fn tag_popover_card(
             let remove_tag_value = tag.clone();
             let tooltip_tag = tag.clone();
             let remove_model = assigned_row_model.clone();
-            let remove_button = reliable_button(
-                svg(ICON_CANCEL).style(move |style| style.size(11.0, 11.0)),
+            let remove_button = compact_icon_button(
+                || ICON_CANCEL,
+                move || tr!(RemoveTag, "tag" => tooltip_tag.clone()),
+                IconButtonTone::Secondary,
+                palette,
+                20.0,
+                || true,
                 move || {
                     let removed =
                         remove_tag(&remove_model, sidebar_state, &remove_tag_value, revision);
@@ -11630,8 +11049,7 @@ fn tag_popover_card(
                             .color(palette.danger)
                     })
                     .focus_visible(move |style| style.color(palette.muted))
-            })
-            .tooltip(move || tooltip_label(tr!(RemoveTag , "tag" => tooltip_tag.clone()), palette));
+            });
             h_stack((
                 label(move || label_tag.clone()).style(move |style| {
                     style
@@ -11684,7 +11102,7 @@ fn tag_popover_card(
         move |(index, tag)| {
             let action_tag = tag.clone();
             let row_model = suggestion_row_model.clone();
-            reliable_button(
+            selectable_row(
                 label(move || tag.clone()).style(move |style| {
                     style
                         .min_width(0.0)
@@ -11835,289 +11253,6 @@ fn selected_note_flag(
         .is_some_and(predicate)
 }
 
-#[derive(Clone, Copy)]
-enum IconButtonTone {
-    Secondary,
-    Primary,
-    Danger,
-    Status,
-    /// Quiet control on the dark sidebar surface.
-    Sidebar,
-}
-
-#[derive(Clone, Copy)]
-struct ButtonColors {
-    background: Color,
-    foreground: Color,
-    border: Color,
-    hover: Color,
-    hover_foreground: Color,
-}
-
-fn button_colors(tone: IconButtonTone, palette: Palette) -> ButtonColors {
-    match tone {
-        IconButtonTone::Secondary => ButtonColors {
-            background: palette.paper,
-            foreground: palette.ink,
-            border: palette.divider,
-            hover: palette.accent_soft,
-            hover_foreground: palette.accent,
-        },
-        IconButtonTone::Primary => ButtonColors {
-            background: palette.accent,
-            foreground: Color::WHITE,
-            border: palette.accent,
-            hover: Color::rgb8(44, 82, 117),
-            hover_foreground: Color::WHITE,
-        },
-        IconButtonTone::Danger => ButtonColors {
-            background: palette.paper,
-            foreground: palette.danger,
-            border: Color::rgb8(232, 205, 205),
-            hover: Color::rgb8(250, 235, 235),
-            hover_foreground: palette.danger,
-        },
-        IconButtonTone::Status => ButtonColors {
-            background: palette.paper,
-            foreground: palette.accent,
-            border: palette.divider,
-            hover: palette.accent_soft,
-            hover_foreground: palette.accent,
-        },
-        IconButtonTone::Sidebar => ButtonColors {
-            background: palette.sidebar_active,
-            foreground: palette.sidebar_ink,
-            border: palette.sidebar_border,
-            hover: Color::rgb8(72, 83, 97),
-            hover_foreground: palette.sidebar_ink,
-        },
-    }
-}
-
-const BUTTON_SIZE_PX: f64 = 32.0;
-const STATUS_BUTTON_SIZE_PX: f64 = 28.0;
-const PASSWORD_DIALOG_SECONDARY_BUTTON_WIDTH_PX: f64 = 84.0;
-const PASSWORD_DIALOG_PRIMARY_BUTTON_WIDTH_PX: f64 = 134.0;
-
-fn icon_button(
-    icon_svg: &'static str,
-    title: impl Fn() -> String + 'static,
-    tone: IconButtonTone,
-    palette: Palette,
-    action: impl Fn() + 'static,
-) -> floem::views::Tooltip {
-    let (button_size, icon_size) = match tone {
-        IconButtonTone::Status => (STATUS_BUTTON_SIZE_PX, 15.0),
-        _ => (BUTTON_SIZE_PX, 16.0),
-    };
-    let colors = button_colors(tone, palette);
-    reliable_button(
-        svg(icon_svg)
-            .update_value(move || {
-                if icon_svg == ICON_BACK && i18n::current().is_rtl() {
-                    ICON_CHEVRON_RIGHT
-                } else {
-                    icon_svg
-                }
-            })
-            .style(move |style| style.size(icon_size, icon_size)),
-        action,
-    )
-    .style(move |style| {
-        style
-            .size(button_size, button_size)
-            .items_center()
-            .justify_center()
-            .background(colors.background)
-            .color(colors.foreground)
-            .border(1.0)
-            .border_color(colors.border)
-            .border_radius(5.0)
-            .hover(move |style| {
-                style
-                    .background(colors.hover)
-                    .color(colors.hover_foreground)
-            })
-    })
-    .tooltip(move || tooltip_label(title(), palette))
-}
-
-fn sidebar_sort_button(
-    row_hovered: RwSignal<bool>,
-    palette: Palette,
-    action: impl Fn() + 'static,
-) -> floem::views::Tooltip {
-    reliable_button(svg(ICON_SORT).style(|style| style.size(14.0, 14.0)), action)
-        .style(move |style| {
-            let visible = row_hovered.get();
-            style
-                .size(24.0, 24.0)
-                .items_center()
-                .justify_center()
-                .background(Color::TRANSPARENT)
-                .color(if visible {
-                    palette.sidebar_muted
-                } else {
-                    Color::TRANSPARENT
-                })
-                .border(1.0)
-                .border_color(Color::TRANSPARENT)
-                .border_radius(5.0)
-                .hover(move |style| {
-                    style.background(Color::TRANSPARENT).color(if visible {
-                        palette.sidebar_ink
-                    } else {
-                        Color::TRANSPARENT
-                    })
-                })
-        })
-        .tooltip(move || tooltip_label(tr!(SortNotes), palette))
-}
-
-fn icon_toggle_button(
-    icon_svg: &'static str,
-    title: impl Fn() -> String + 'static,
-    palette: Palette,
-    active: impl Fn() -> bool + 'static,
-    action: impl Fn() + 'static,
-) -> floem::views::Tooltip {
-    let colors = button_colors(IconButtonTone::Secondary, palette);
-    reliable_button(
-        svg(icon_svg).style(move |style| style.size(16.0, 16.0)),
-        action,
-    )
-    .style(move |style| {
-        let is_active = active();
-        style
-            .size(BUTTON_SIZE_PX, BUTTON_SIZE_PX)
-            .items_center()
-            .justify_center()
-            .background(if is_active {
-                palette.accent_soft
-            } else {
-                colors.background
-            })
-            .color(if is_active {
-                palette.accent
-            } else {
-                colors.foreground
-            })
-            .border(1.0)
-            .border_color(if is_active {
-                palette.accent
-            } else {
-                colors.border
-            })
-            .border_radius(5.0)
-            .hover(move |style| {
-                style
-                    .background(colors.hover)
-                    .color(colors.hover_foreground)
-            })
-    })
-    .tooltip(move || tooltip_label(title(), palette))
-}
-
-fn text_button(
-    label_text: i18n::Message,
-    tone: IconButtonTone,
-    palette: Palette,
-    action: impl Fn() + 'static,
-) -> impl IntoView {
-    text_button_view(
-        text(label_text).style(|style| style.font_size(13.0).selectable(false)),
-        tone,
-        palette,
-        Rc::new(|| false),
-        action,
-    )
-}
-
-/// The same button with a translated label that follows the current locale and
-/// an enabled predicate. Settings forms keep their actions visible but inert
-/// until the form is valid, so the unavailable affordance is part of the
-/// shared button instead of a per-page invention.
-///
-/// The button stays enabled for the event system and refuses the press
-/// itself: a Floem view excluded from event dispatch swallows the pointer
-/// sequence that follows it, so clicking an unavailable action would lose the
-/// user's next click.
-fn action_button(
-    label_text: impl Fn() -> String + 'static,
-    tone: IconButtonTone,
-    palette: Palette,
-    enabled: impl Fn() -> bool + 'static,
-    action: impl Fn() + 'static,
-) -> impl IntoView {
-    let enabled: Rc<dyn Fn() -> bool> = Rc::new(enabled);
-    let press_enabled = enabled.clone();
-    text_button_view(
-        label(label_text).style(|style| style.font_size(13.0).selectable(false)),
-        tone,
-        palette,
-        Rc::new(move || !enabled()),
-        move || {
-            if press_enabled() {
-                action();
-            }
-        },
-    )
-}
-
-/// One style closure decides the whole button, the unavailable state
-/// included, and its `hover` block stays constant. A `hover` block that is
-/// itself computed from the signals the closure reads leaves the view without
-/// a style pass when those signals change, and the surrounding form then
-/// paints a stale frame until an unrelated event repaints it. Only the
-/// pointer cursor marks an unavailable button while it is hovered.
-fn text_button_view<V>(
-    child: V,
-    tone: IconButtonTone,
-    palette: Palette,
-    unavailable: Rc<dyn Fn() -> bool>,
-    action: impl Fn() + 'static,
-) -> impl IntoView
-where
-    V: IntoView + 'static,
-{
-    let colors = button_colors(tone, palette);
-    reliable_button(child, action).style(move |style| {
-        let unavailable = unavailable();
-        style
-            .height(BUTTON_SIZE_PX)
-            .padding_horiz(14.0)
-            .items_center()
-            .justify_center()
-            .cursor(if unavailable {
-                CursorStyle::Default
-            } else {
-                CursorStyle::Pointer
-            })
-            .background(if unavailable {
-                palette.canvas
-            } else {
-                colors.background
-            })
-            .color(if unavailable {
-                palette.muted
-            } else {
-                colors.foreground
-            })
-            .border(1.0)
-            .border_color(if unavailable {
-                palette.divider
-            } else {
-                colors.border
-            })
-            .border_radius(5.0)
-            .hover(move |style| {
-                style
-                    .background(colors.hover)
-                    .color(colors.hover_foreground)
-            })
-    })
-}
-
 /// The item a toolbar acts on. Engines share one control per action and name
 /// it with their own noun, so the shared button takes the subject instead of
 /// a ready-made tooltip.
@@ -12130,13 +11265,13 @@ enum ToolbarSubject {
 
 fn toolbar_action_icon(action: ToolbarAction) -> &'static str {
     match action {
-        ToolbarAction::Filters => ICON_SETTINGS,
-        ToolbarAction::Refresh => ICON_RETRY,
-        ToolbarAction::Rename => ICON_RENAME,
+        ToolbarAction::Filters => ButtonAction::Settings.icon(),
+        ToolbarAction::Refresh => ButtonAction::Refresh.icon(),
+        ToolbarAction::Rename => ButtonAction::Edit.icon(),
         ToolbarAction::Categories => ICON_TAG,
-        ToolbarAction::Pin => ICON_PIN,
-        ToolbarAction::Favorite => ICON_STAR,
-        ToolbarAction::Delete => ICON_TRASH,
+        ToolbarAction::Pin => ButtonAction::Pin.icon(),
+        ToolbarAction::Favorite => ButtonAction::Favorite.icon(),
+        ToolbarAction::Delete => ButtonAction::Delete.icon(),
         ToolbarAction::Restore => ICON_RECOVER,
     }
 }
@@ -12241,223 +11376,46 @@ fn visible_toolbar_actions(declared: &[ToolbarAction], deleted: bool) -> Vec<Too
 }
 
 /// The control every engine surface renders for a declared toolbar action.
-fn toolbar_action_button(
+fn toolbar_control(
     action: ToolbarAction,
     subject: ToolbarSubject,
     palette: Palette,
     active: impl Fn() -> bool + 'static,
     on_press: impl Fn() + 'static,
-) -> floem::views::Tooltip {
+) -> AnyView {
+    enabled_toolbar_control(action, subject, palette, || true, active, on_press)
+}
+
+fn enabled_toolbar_control(
+    action: ToolbarAction,
+    subject: ToolbarSubject,
+    palette: Palette,
+    enabled: impl Fn() -> bool + 'static,
+    active: impl Fn() -> bool + 'static,
+    on_press: impl Fn() + 'static,
+) -> AnyView {
     let icon = toolbar_action_icon(action);
     if toolbar_action_is_toggle(action) {
         let active: Rc<dyn Fn() -> bool> = Rc::new(active);
         let title_active = active.clone();
-        icon_toggle_button(
+        enabled_icon_toggle_button(
             icon,
             move || toolbar_action_title(action, subject, title_active()),
             palette,
+            enabled,
             move || active(),
             on_press,
         )
     } else {
-        icon_button(
+        enabled_icon_button(
             icon,
             move || toolbar_action_title(action, subject, false),
             toolbar_action_tone(action),
             palette,
+            enabled,
             on_press,
         )
     }
-}
-
-/// One field affordance for every engine form: the creation popover and the
-/// toolbar editing bars share height, radius, colors and focus ring.
-fn form_field_style(style: Style, palette: Palette, invalid: bool) -> Style {
-    text_input_affordance(style, palette.muted, palette.accent)
-        .height(FORM_FIELD_HEIGHT_PX)
-        .items_center()
-        .padding_horiz(10.0)
-        .background(palette.canvas)
-        .color(palette.ink)
-        .border(1.0)
-        .border_color(if invalid {
-            palette.danger
-        } else {
-            palette.divider
-        })
-        .border_radius(6.0)
-        .font_size(13.0)
-        .focus(move |style| {
-            if invalid {
-                style
-            } else {
-                style.background(palette.paper).border_color(palette.accent)
-            }
-        })
-}
-
-/// One card for every settings page: the general page, encryption and both AI
-/// sections share width, padding, surface and border. Callers add their own
-/// gap because a card of stacked fields and a card of prose need different
-/// rhythms.
-fn settings_card_style(style: Style, palette: Palette) -> Style {
-    rtl_column(style)
-        .width_full()
-        .min_width(0.0)
-        .max_width(SETTINGS_CARD_MAX_WIDTH_PX)
-        .padding(SETTINGS_CARD_PADDING_PX)
-        .background(palette.paper)
-        .border(1.0)
-        .border_color(palette.divider)
-        .border_radius(8.0)
-}
-
-/// The shape every settings form control shares: text fields, the masked
-/// secret fields and the AI model dropdown are one affordance, so a settings
-/// form never mixes control heights or radii.
-fn settings_control_style(style: Style, palette: Palette) -> Style {
-    style
-        .width_full()
-        .min_width(0.0)
-        .height(SETTINGS_FIELD_HEIGHT_PX)
-        .items_center()
-        .padding_horiz(12.0)
-        .background(palette.paper)
-        .color(palette.ink)
-        .border(1.0)
-        .border_color(palette.divider)
-        .border_radius(6.0)
-        .font_size(13.0)
-}
-
-/// A settings text field: the shared control plus the placeholder and caret
-/// colors and the focused border every other field in the app already has.
-fn settings_input_style(style: Style, palette: Palette) -> Style {
-    text_input_affordance(
-        settings_control_style(style, palette),
-        palette.muted,
-        palette.accent,
-    )
-    .focus(move |style| style.border_color(palette.accent))
-}
-
-/// A settings field that never reveals what it holds: the master password
-/// fields and the AI API key. An empty field prints its placeholder in the
-/// placeholder color instead of the value color.
-fn settings_secret_style(style: Style, palette: Palette, empty: bool, active: bool) -> Style {
-    settings_control_style(style, palette)
-        .cursor(CursorStyle::Text)
-        .font_size(13.5)
-        .color(if empty { palette.muted } else { palette.ink })
-        .border_color(if active {
-            palette.accent
-        } else {
-            palette.divider
-        })
-}
-
-/// The disabled affordance shared by every settings control: a control that
-/// cannot act says so instead of looking pressable.
-fn disabled_control_style(style: Style, palette: Palette) -> Style {
-    style.disabled(move |style| {
-        style
-            .cursor(CursorStyle::Default)
-            .background(palette.canvas)
-            .color(palette.muted)
-            .border_color(palette.divider)
-    })
-}
-
-/// The small caption above a settings control ("Path", "API key", "Model").
-fn settings_field_label(key: i18n::Key, palette: Palette) -> impl IntoView {
-    label(move || key.to_string())
-        .style(move |style| style.font_size(10.0).color(palette.muted).selectable(false))
-}
-
-/// A settings paragraph: card subtitles, form hints and inline explanations.
-fn settings_hint(key: i18n::Key, palette: Palette) -> impl IntoView {
-    label(move || key.to_string()).style(move |style| {
-        style
-            .width_full()
-            .font_size(12.5)
-            .line_height(1.4)
-            .color(palette.muted)
-            .selectable(false)
-    })
-}
-
-/// An inline editing row under a toolbar: the shared shape behind renaming an
-/// item and editing its categories.
-#[derive(Clone, Copy)]
-struct ToolbarEditBar {
-    open: RwSignal<bool>,
-    value: RwSignal<String>,
-    label: i18n::Key,
-    placeholder: i18n::Key,
-    field_width: f64,
-}
-
-fn toolbar_edit_bar(
-    bar: ToolbarEditBar,
-    palette: Palette,
-    on_submit: impl Fn() + 'static,
-) -> impl IntoView {
-    let submit: Rc<dyn Fn()> = Rc::new(on_submit);
-    let key_submit = submit.clone();
-    let input = localized_input::LocalizedInput::new(bar.value, bar.placeholder)
-        .on_escape(move || bar.open.set(false))
-        .on_event(EventListener::KeyDown, move |event| {
-            let Event::KeyDown(key) = event else {
-                return EventPropagation::Continue;
-            };
-            if key.key.logical_key == Key::Named(NamedKey::Enter) {
-                key_submit();
-                EventPropagation::Stop
-            } else {
-                EventPropagation::Continue
-            }
-        })
-        .style(move |style| form_field_style(style, palette, false).width(bar.field_width));
-    // Opening the bar hands the field the caret, so the control that opened it
-    // does not have to be followed by a click into the field.
-    let input_id = input.id();
-    let focus_generation = create_rw_signal(0_u64);
-    create_effect(move |_| {
-        let open = bar.open.get();
-        let generation = focus_generation.get_untracked().wrapping_add(1);
-        focus_generation.set(generation);
-        if open {
-            exec_after(Duration::from_millis(10), move |_| {
-                // Closing, reopening or disposing the bar invalidates this
-                // request, even if its timer was already queued by Floem.
-                if bar.open.try_get_untracked() == Some(true)
-                    && focus_generation.try_get_untracked() == Some(generation)
-                {
-                    input_id.request_focus();
-                }
-            });
-        }
-    });
-    h_stack((
-        text(bar.label)
-            .style(move |style| style.font_size(12.5).color(palette.muted).selectable(false)),
-        input,
-        text_button(msg!(Save), IconButtonTone::Primary, palette, move || {
-            submit();
-        }),
-    ))
-    .style(move |style| {
-        let style = style
-            .width_full()
-            .height(TOOLBAR_EDIT_BAR_HEIGHT_PX)
-            .padding_horiz(20.0)
-            .items_center()
-            .gap(10.0)
-            .background(palette.canvas)
-            .border_bottom(1.0)
-            .border_color(palette.divider);
-        if bar.open.get() { style } else { style.hide() }
-    })
 }
 
 /// Comma-separated categories as an engine stores them: trimmed, without
@@ -12471,125 +11429,6 @@ fn parsed_category_list(input: &str) -> Vec<String> {
         .filter(|category| seen.insert((*category).to_owned()))
         .map(str::to_owned)
         .collect()
-}
-
-fn password_dialog_button(
-    label_text: i18n::Message,
-    tone: IconButtonTone,
-    palette: Palette,
-    disabled: impl Fn() -> bool + 'static,
-    action: impl Fn() + 'static,
-) -> impl IntoView {
-    let colors = button_colors(tone, palette);
-    let button_width = match tone {
-        IconButtonTone::Primary => PASSWORD_DIALOG_PRIMARY_BUTTON_WIDTH_PX,
-        _ => PASSWORD_DIALOG_SECONDARY_BUTTON_WIDTH_PX,
-    };
-    let disabled: Rc<dyn Fn() -> bool> = Rc::new(disabled);
-    let action: Rc<dyn Fn()> = Rc::new(action);
-    let active_background = match tone {
-        IconButtonTone::Primary => Color::rgb8(35, 72, 105),
-        IconButtonTone::Danger => Color::rgb8(244, 220, 220),
-        IconButtonTone::Sidebar => Color::rgb8(82, 94, 110),
-        IconButtonTone::Secondary | IconButtonTone::Status => palette.divider,
-    };
-    let disabled_background = match tone {
-        IconButtonTone::Primary => Color::rgb8(166, 184, 200),
-        _ => palette.canvas,
-    };
-    let trigger_disabled = disabled.clone();
-    let trigger: Rc<dyn Fn()> = Rc::new(move || {
-        if trigger_disabled() {
-            return;
-        }
-        action();
-    });
-    let pointer_trigger = trigger.clone();
-    let keyboard_trigger = trigger;
-    let view_disabled = disabled;
-    let surface = PrimaryPointerView::new(empty(), move |_| pointer_trigger())
-        .capture_pointer()
-        .keyboard_navigable()
-        .on_event(EventListener::KeyDown, move |event| {
-            if is_keyboard_activation(event) {
-                keyboard_trigger();
-                EventPropagation::Stop
-            } else {
-                EventPropagation::Continue
-            }
-        })
-        .style(move |style| {
-            style
-                .size_full()
-                .items_center()
-                .justify_center()
-                .cursor(CursorStyle::Pointer)
-                .background(colors.background)
-                .border(1.0)
-                .border_color(colors.border)
-                .border_radius(5.0)
-                .hover(move |style| {
-                    if matches!(tone, IconButtonTone::Primary) {
-                        style.border_color(colors.hover)
-                    } else {
-                        style.background(colors.hover)
-                    }
-                })
-                .disabled(move |style| {
-                    style.background(disabled_background).border_color(
-                        if matches!(tone, IconButtonTone::Primary) {
-                            disabled_background
-                        } else {
-                            palette.divider
-                        },
-                    )
-                })
-                .active(move |style| {
-                    style
-                        .background(active_background)
-                        .border_color(active_background)
-                })
-        })
-        .disabled(move || view_disabled());
-    let label = text(label_text)
-        .pointer_events(|| false)
-        .style(move |style| {
-            style
-                .font_family(UI_FONT_FAMILY.to_owned())
-                .font_size(13.0)
-                .color(colors.foreground)
-                .selectable(false)
-        });
-    let label = h_stack((label,))
-        .pointer_events(|| false)
-        .style(|style| style.absolute().size_full().items_center().justify_center());
-    stack((surface, label)).style(move |style| {
-        style
-            .font_family(UI_FONT_FAMILY.to_owned())
-            .font_size(13.0)
-            .width(button_width)
-            .min_width(button_width)
-            .max_width(button_width)
-            .height(BUTTON_SIZE_PX)
-            .min_height(BUTTON_SIZE_PX)
-            .max_height(BUTTON_SIZE_PX)
-            .flex_shrink(0.0)
-    })
-}
-
-fn tooltip_label(title: String, palette: Palette) -> impl IntoView {
-    text(title).style(move |style| {
-        style
-            .padding_vert(6.0)
-            .padding_horiz(9.0)
-            .background(Color::rgb8(28, 33, 40))
-            .color(palette.sidebar_ink)
-            .font_family(UI_FONT_FAMILY.to_owned())
-            .font_size(12.0)
-            .border(1.0)
-            .border_color(Color::rgb8(58, 66, 77))
-            .border_radius(5.0)
-    })
 }
 
 #[cfg(test)]
@@ -14012,16 +12851,19 @@ mod tests {
         }
         assert_eq!(
             toolbar_action_icon(ToolbarAction::Rename),
-            super::ICON_RENAME
+            super::ButtonAction::Edit.icon()
         );
-        assert_eq!(toolbar_action_icon(ToolbarAction::Pin), super::ICON_PIN);
+        assert_eq!(
+            toolbar_action_icon(ToolbarAction::Pin),
+            super::ButtonAction::Pin.icon()
+        );
         assert_eq!(
             toolbar_action_icon(ToolbarAction::Favorite),
-            super::ICON_STAR
+            super::ButtonAction::Favorite.icon()
         );
         assert_eq!(
             toolbar_action_icon(ToolbarAction::Delete),
-            super::ICON_TRASH
+            super::ButtonAction::Delete.icon()
         );
         assert_eq!(
             toolbar_action_icon(ToolbarAction::Restore),
@@ -14246,7 +13088,10 @@ mod tests {
     fn sidebar_indicators_never_include_save_loader() {
         assert_eq!(
             sidebar_note_indicator_icons(false, true, true),
-            vec![super::ICON_PIN, super::ICON_STAR]
+            vec![
+                super::ButtonAction::Pin.icon(),
+                super::ButtonAction::Favorite.icon()
+            ]
         );
         assert_eq!(
             sidebar_note_indicator_icons(true, false, false),

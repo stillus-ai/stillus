@@ -4,9 +4,7 @@
 //! Native chat presentation. Drafts, requests and metadata go through Application.
 use crate::*;
 use floem::kurbo::Rect;
-mod composer;
 
-const ICON_JOURNAL: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.8" stroke-linecap="round"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>"##;
 use application::{
     api::{Caller, Command as AppCommand, Query as AppQuery},
     chat::{Command, Query},
@@ -216,7 +214,7 @@ pub(super) fn panel(
                     let id = toolbar_id.clone();
                     let state_model = model.clone();
                     let state_id = id.clone();
-                    toolbar_action_button(
+                    toolbar_control(
                         action,
                         ToolbarSubject::Chat,
                         palette,
@@ -399,7 +397,7 @@ pub(super) fn panel(
     let earlier_id = id.clone();
     let earlier_state = model.clone();
     let earlier_state_id = id.clone();
-    let earlier = chat_icon_button(
+    let earlier = enabled_icon_button(
         ICON_ARROW_UP,
         || tr!(ChatLoadEarlier),
         IconButtonTone::Secondary,
@@ -440,7 +438,7 @@ pub(super) fn panel(
     let newest_state = model.clone();
     let newest_model = model.clone();
     let newest_id = id.clone();
-    let newest = chat_icon_button(
+    let newest = enabled_icon_button(
         ICON_ARROW_DOWN,
         || tr!(AiJournalNewest),
         IconButtonTone::Secondary,
@@ -567,7 +565,7 @@ pub(super) fn panel(
             let selected = create_rw_signal(Some(value));
             let model = alias_model.clone();
             let id = alias_id.clone();
-            crate::ai_settings::alias_dropdown(
+            select(
                 selected,
                 names,
                 |value| value.unwrap_or_default(),
@@ -655,30 +653,37 @@ pub(super) fn panel(
             let submit = composer_submit.clone();
             let model = composer_model.clone();
             let id = composer_id.clone();
-            composer::view(draft, sending, palette, submit, move |value| {
-                if loaded.try_get_untracked().is_none()
-                    || settings.open.get_untracked()
-                    || journal_open.get_untracked()
-                    || model.borrow().session_id() != session
-                {
-                    return;
-                }
-                draft.set(value.clone());
-                dispatch(
-                    &model,
-                    revision,
-                    Command::Compose {
-                        id: id.to_string(),
-                        version: draft_version.get_untracked(),
-                        text: value,
-                    },
-                );
-            })
+            TextArea::new(draft, palette)
+                .placeholder(i18n::Key::ChatPlaceholder)
+                .height(116.0)
+                .enabled(move || !sending.get())
+                .visible(move || !settings.open.get() && !journal_open.get())
+                .on_submit(move || submit())
+                .build(move |value| {
+                    if loaded.try_get_untracked().is_none()
+                        || settings.open.get_untracked()
+                        || journal_open.get_untracked()
+                        || model.borrow().session_id() != session
+                    {
+                        return;
+                    }
+                    draft.set(value.clone());
+                    dispatch(
+                        &model,
+                        revision,
+                        Command::Compose {
+                            id: id.to_string(),
+                            version: draft_version.get_untracked(),
+                            text: value,
+                        },
+                    );
+                })
         },
     );
     let send_model = model.clone();
     let send_id = id.clone();
     let send = action_button(
+        ButtonAction::Send,
         || tr!(ChatSend),
         IconButtonTone::Primary,
         palette,
@@ -696,6 +701,7 @@ pub(super) fn panel(
     let stop_state = model.clone();
     let stop_state_id = id.clone();
     let stop = action_button(
+        ButtonAction::Stop,
         || tr!(ChatStop),
         IconButtonTone::Secondary,
         palette,
@@ -718,6 +724,7 @@ pub(super) fn panel(
     let continue_state = model.clone();
     let continue_state_id = id.clone();
     let continue_button = action_button(
+        ButtonAction::Custom(ButtonAction::Send.icon()),
         || tr!(ChatContinue),
         IconButtonTone::Secondary,
         palette,
@@ -742,6 +749,7 @@ pub(super) fn panel(
         },
     );
     let connect = action_button(
+        ButtonAction::Custom(ButtonAction::Settings.icon()),
         || tr!(ChatConnect),
         IconButtonTone::Secondary,
         palette,
@@ -908,6 +916,7 @@ fn message_view(
         )
         .unwrap_or_default();
         let acknowledge = action_button(
+            ButtonAction::Custom(ButtonAction::Save.icon()),
             move || {
                 if confirm.get() {
                     tr!(Confirm)
@@ -940,7 +949,8 @@ fn message_view(
         .style(move |s| s.apply_if(!unknown, |s| s.hide()));
         return v_stack((
             acknowledge,
-            reliable_button(
+            content_button(
+                ICON_CHEVRON_DOWN,
                 text(title).style(move |s| s.font_size(12.0).line_height(1.5).color(palette.muted)),
                 move || open.update(|v| *v = !*v),
             )
@@ -996,7 +1006,7 @@ fn message_view(
         .map(|url| {
             let model = model.clone();
             let label = url.clone();
-            reliable_button(
+            selectable_row(
                 wrapped_text(label, move || message_width.get(), palette.accent, 13.0),
                 move || {
                     if let Err(e) = open_rss_original(&url) {
@@ -1009,6 +1019,7 @@ fn message_view(
         .collect::<Vec<_>>();
     let content = message.text.clone();
     let copy = action_button(
+        ButtonAction::Copy,
         || tr!(Copy),
         IconButtonTone::Secondary,
         palette,
@@ -1065,6 +1076,7 @@ fn markdown_blocks(source: &str, width: floem::reactive::Memo<f64>, palette: Pal
                 }
                 let content = code.clone();
                 let copy = action_button(
+                    ButtonAction::Copy,
                     || tr!(Copy),
                     IconButtonTone::Secondary,
                     palette,
@@ -1134,45 +1146,6 @@ fn wrapped_text(
         layout
     })
     .style(move |s| s.width(width()).min_width(0.0))
-    .into_any()
-}
-
-fn chat_icon_button(
-    icon: &'static str,
-    title: impl Fn() -> String + 'static,
-    tone: IconButtonTone,
-    palette: Palette,
-    enabled: impl Fn() -> bool + 'static,
-    action: impl Fn() + 'static,
-) -> AnyView {
-    let enabled = Rc::new(enabled);
-    let click_enabled = enabled.clone();
-    let disabled = enabled.clone();
-    let colors = button_colors(tone, palette);
-    reliable_button(svg(icon).style(|s| s.size(16.0, 16.0)), move || {
-        if click_enabled() {
-            action();
-        }
-    })
-    .disabled(move || !disabled())
-    .style(move |s| {
-        let enabled = enabled();
-        s.size(BUTTON_SIZE_PX, BUTTON_SIZE_PX)
-            .flex_shrink(0.0)
-            .items_center()
-            .justify_center()
-            .background(colors.background)
-            .color(if enabled {
-                colors.foreground
-            } else {
-                palette.divider
-            })
-            .border(1.0)
-            .border_color(colors.border)
-            .border_radius(5.0)
-            .hover(|s| s.background(colors.hover).color(colors.hover_foreground))
-    })
-    .tooltip(move || tooltip_label(title(), palette))
     .into_any()
 }
 
