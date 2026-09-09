@@ -52,6 +52,11 @@ pub(crate) struct Filter {
     pub status: Option<RequestStatus>,
 }
 
+pub(crate) struct SummaryPage {
+    pub rows: Vec<Summary>,
+    pub has_more: bool,
+}
+
 impl FileJournal {
     pub(crate) fn for_home(home: &Path) -> Arc<Self> {
         let directory = home.join(".stillus/ai/journal");
@@ -209,10 +214,22 @@ impl FileJournal {
         Ok(record)
     }
 
-    /// Only one page of summaries and one bounded record are retained while scanning.
+    #[cfg(test)]
     pub(crate) fn list(&self, before: Option<&str>, filter: Filter) -> io::Result<Vec<Summary>> {
+        self.list_page(before, filter).map(|page| page.rows)
+    }
+
+    /// One extra summary proves whether another page exists, without retaining its record.
+    pub(crate) fn list_page(
+        &self,
+        before: Option<&str>,
+        filter: Filter,
+    ) -> io::Result<SummaryPage> {
         if !self.directory.try_exists()? {
-            return Ok(Vec::new());
+            return Ok(SummaryPage {
+                rows: Vec::new(),
+                has_more: false,
+            });
         }
         stillus_platform::validate_real_path(&self.directory)?;
         let mut newest = BTreeMap::new();
@@ -251,11 +268,15 @@ impl FileJournal {
                 continue;
             }
             newest.insert(id.to_owned(), summary);
-            if newest.len() > PAGE_SIZE {
+            if newest.len() > PAGE_SIZE + 1 {
                 newest.pop_first();
             }
         }
-        Ok(newest.into_values().rev().collect())
+        let has_more = newest.len() > PAGE_SIZE;
+        Ok(SummaryPage {
+            rows: newest.into_values().rev().take(PAGE_SIZE).collect(),
+            has_more,
+        })
     }
 
     fn prune(&self, state: &State, reserve: u64, clear: bool) -> io::Result<()> {
@@ -434,6 +455,41 @@ mod tests {
         let id = record.id.clone();
         store.complete(record);
         id
+    }
+
+    #[test]
+    fn journal_pagination_requires_an_extra_matching_record() {
+        let home = Home::new();
+        let store = home.store();
+        let page = store.list_page(None, Filter::default()).unwrap();
+        assert!(page.rows.is_empty());
+        assert!(!page.has_more);
+        for _ in 0..PAGE_SIZE {
+            completed(&store);
+        }
+        let full = store.list_page(None, Filter::default()).unwrap();
+        assert_eq!(full.rows.len(), PAGE_SIZE);
+        assert!(!full.has_more);
+        completed(&store);
+        let first = store.list_page(None, Filter::default()).unwrap();
+        assert_eq!(first.rows.len(), PAGE_SIZE);
+        assert!(first.has_more);
+        let last = store
+            .list_page(Some(&first.rows.last().unwrap().id), Filter::default())
+            .unwrap();
+        assert_eq!(last.rows.len(), 1);
+        assert!(!last.has_more);
+        let filtered = store
+            .list_page(
+                None,
+                Filter {
+                    provider: Some(AiProvider::Anthropic),
+                    status: None,
+                },
+            )
+            .unwrap();
+        assert!(filtered.rows.is_empty());
+        assert!(!filtered.has_more);
     }
 
     #[test]

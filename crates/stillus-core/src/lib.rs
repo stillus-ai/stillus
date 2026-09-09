@@ -43,7 +43,7 @@ pub use stillus_rss::{
     RssDecision, RssEngine, RssEntry, RssFeedCache, RssFilterError, RssFilterMode, RssPreferences,
     RssReadState, RssRefreshRequest, RssRefreshResult, RssSchedule, RssSubscription,
     RssSubscriptionSummary, execute_refresh as execute_rss_refresh,
-    open_original as open_rss_original,
+    normalize_feed_url as normalize_rss_feed_url, open_original as open_rss_original,
 };
 use stillus_secure::{MasterPassword, SecureError, decrypt_body};
 use stillus_security::{SecurityError, SecurityStore, VaultId, WorkspaceSecurityState};
@@ -588,13 +588,39 @@ impl WorkspaceSession {
         timestamp: &str,
     ) -> Result<ItemId, CoreError> {
         self.ensure_workspace_action_ready()?;
+        let id = self.create_rss_unselected(url, categories, favorited, timestamp)?;
+        self.open_rss(&id)?;
+        Ok(id)
+    }
+
+    fn ensure_catalog_metadata_ready(&self) -> Result<(), CoreError> {
+        self.ensure_no_secure_operation()?;
+        if self.pending_integrity.is_some()
+            || self.password_change_recovery_blocked
+            || self.document.as_ref().is_some_and(|document| {
+                document.autosave.saving_revision.is_some()
+                    || document.autosave.recovery_saving_revision.is_some()
+            })
+        {
+            return Err(CoreError::UnsavedChanges);
+        }
+        Ok(())
+    }
+
+    pub fn create_rss_unselected(
+        &mut self,
+        url: &str,
+        categories: Vec<String>,
+        favorited: bool,
+        timestamp: &str,
+    ) -> Result<ItemId, CoreError> {
+        self.ensure_catalog_metadata_ready()?;
         let categories = normalize_rss_categories(&categories)?;
         let id = self
             .rss_engine
             .create_subscription(url, categories, favorited, timestamp)
             .map_err(|error| CoreError::Workspace(error.to_string()))?;
         self.refresh_catalog_categories();
-        self.open_rss(&id)?;
         Ok(id)
     }
 

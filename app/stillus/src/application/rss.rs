@@ -14,6 +14,7 @@ use std::sync::{
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use stillus_core::{ItemId, RssEngine, RssPreferences, RssRefreshResult, execute_rss_refresh};
+use stillus_engine::EngineError;
 
 static RSS_REQUESTS: AtomicUsize = AtomicUsize::new(0);
 
@@ -59,10 +60,14 @@ pub(crate) struct Snapshot {
     pub refreshing: BTreeSet<String>,
     pub status: BTreeMap<String, Status>,
     pub saves: BTreeMap<String, (u64, bool)>,
+    pub errors: BTreeMap<String, EngineError>,
+    /// Monotonic per-subscription fetch completions survive coalesced snapshots.
+    pub completed: BTreeMap<String, u64>,
 }
 
-pub(crate) type Executor =
-    Arc<dyn Fn(stillus_core::RssRefreshRequest) -> Result<RssRefreshResult, ()> + Send + Sync>;
+pub(crate) type Executor = Arc<
+    dyn Fn(stillus_core::RssRefreshRequest) -> Result<RssRefreshResult, EngineError> + Send + Sync,
+>;
 
 pub(crate) struct Service {
     pub sender: SyncSender<Command>,
@@ -77,15 +82,12 @@ impl Drop for Service {
 }
 
 enum Completion {
-    Fetch(ItemId, u64, Result<RssRefreshResult, ()>),
+    Fetch(ItemId, u64, Result<RssRefreshResult, EngineError>),
 }
 
 impl Service {
     pub fn start(root: PathBuf) -> Self {
-        Self::with_executor(
-            root,
-            Arc::new(|request| execute_rss_refresh(request).map_err(|_| ())),
-        )
+        Self::with_executor(root, Arc::new(execute_rss_refresh))
     }
     pub(crate) fn with_executor(root: PathBuf, executor: Executor) -> Self {
         let (sender, commands) = mpsc::sync_channel(64);
@@ -116,6 +118,8 @@ struct Coordinator {
     replies: BTreeMap<String, SyncSender<Result<(), super::actions::ActionError>>>,
     status: BTreeMap<String, Status>,
     saves: BTreeMap<String, (u64, bool)>,
+    errors: BTreeMap<String, EngineError>,
+    completed: BTreeMap<String, u64>,
 }
 
 #[cfg(test)]
@@ -130,7 +134,7 @@ fn run(
         commands,
         snapshots,
         alive,
-        Arc::new(|request| execute_rss_refresh(request).map_err(|_| ())),
+        Arc::new(execute_rss_refresh),
     );
 }
 fn run_with_executor(
@@ -148,6 +152,8 @@ fn run_with_executor(
         replies: BTreeMap::new(),
         status: BTreeMap::new(),
         saves: BTreeMap::new(),
+        errors: BTreeMap::new(),
+        completed: BTreeMap::new(),
     };
     let mut dirty = true;
     let mut last_tick = 0;
@@ -224,6 +230,8 @@ impl Coordinator {
             refreshing: self.fetching.clone(),
             status: self.status.clone(),
             saves: self.saves.clone(),
+            errors: self.errors.clone(),
+            completed: self.completed.clone(),
         }
     }
 
@@ -317,11 +325,14 @@ impl Coordinator {
         match result {
             Completion::Fetch(id, visit, result) => {
                 self.fetching.remove(id.as_str());
+                let completed = self.completed.entry(id.as_str().into()).or_default();
+                *completed = completed.saturating_add(1);
                 if engine.preferences(&id).is_err() {
                     self.reply(&id, Err(super::actions::ActionError::NotFound));
                     return;
                 }
                 let success = result.is_ok();
+                let fetch_error = result.as_ref().err().cloned();
                 let apply = result.map_or(Ok(()), |result| engine.apply_refresh(result));
                 let Ok((feed, state)) = engine.feed(&id) else {
                     self.reply(&id, Err(super::actions::ActionError::NotFound));
@@ -335,6 +346,17 @@ impl Coordinator {
                     }
                     Ok(())
                 });
+                let failure = apply
+                    .as_ref()
+                    .err()
+                    .cloned()
+                    .or_else(|| saved.as_ref().err().cloned())
+                    .or(fetch_error);
+                if let Some(error) = &failure {
+                    self.errors.insert(id.as_str().into(), error.clone());
+                } else {
+                    self.errors.remove(id.as_str());
+                }
                 self.reply(
                     &id,
                     if apply.is_err() || saved.is_err() {
@@ -343,7 +365,9 @@ impl Coordinator {
                         Ok(())
                     } else {
                         Err(super::actions::ActionError::Failed(
-                            "RSS refresh failed".into(),
+                            failure
+                                .expect("failed refresh retains its cause")
+                                .to_string(),
                         ))
                     },
                 );
@@ -375,6 +399,10 @@ impl Coordinator {
             .filter(|s| !s.deleted)
             .map(|s| s.id.clone())
             .collect::<Vec<_>>();
+        self.errors
+            .retain(|key, _| ids.iter().any(|id| id.as_str() == key));
+        self.completed
+            .retain(|key, _| ids.iter().any(|id| id.as_str() == key));
         for id in &ids {
             if engine
                 .feed(id)
@@ -521,6 +549,8 @@ mod tests {
             replies: BTreeMap::new(),
             status: BTreeMap::new(),
             saves: BTreeMap::new(),
+            errors: BTreeMap::new(),
+            completed: BTreeMap::new(),
         };
         coordinator.command(
             &mut engine,
@@ -601,6 +631,8 @@ mod tests {
             replies: BTreeMap::new(),
             status: BTreeMap::new(),
             saves: BTreeMap::new(),
+            errors: BTreeMap::new(),
+            completed: BTreeMap::new(),
         };
         c.command(&mut engine, Command::Visit(id.clone()));
         c.fetching.insert(id.as_str().into());
@@ -619,9 +651,40 @@ mod tests {
         );
         assert_eq!(engine.feed(&id).unwrap().1.schedule.iteration, 1);
         assert!(c.fetching.is_empty());
-        c.complete(&mut engine, Completion::Fetch(id.clone(), 2, Err(())));
+        assert_eq!(c.completed[id.as_str()], 1);
+        let cause = EngineError::Io("feed connection timed out".into());
+        c.complete(
+            &mut engine,
+            Completion::Fetch(id.clone(), 2, Err(cause.clone())),
+        );
         assert_eq!(engine.feed(&id).unwrap().1.schedule.iteration, 2);
         assert_eq!(c.status[id.as_str()], Status::Retry);
+        assert_eq!(
+            c.snapshot(RssEngine::open(&root).unwrap()).errors[id.as_str()],
+            cause
+        );
+        c.command(&mut engine, Command::Visit(id.clone()));
+        assert_eq!(c.errors[id.as_str()], cause);
+        // Reading only this snapshot still observes both completions even if
+        // the initial refreshing state was coalesced by the bounded channel.
+        assert_eq!(
+            c.snapshot(RssEngine::open(&root).unwrap()).completed[id.as_str()],
+            2
+        );
+        c.complete(
+            &mut engine,
+            Completion::Fetch(
+                id.clone(),
+                3,
+                Ok(RssRefreshResult::NotModified {
+                    item_id: id.clone(),
+                    fetched_at: "later".into(),
+                }),
+            ),
+        );
+        assert_eq!(c.status[id.as_str()], Status::Idle);
+        assert!(!c.errors.contains_key(id.as_str()));
+        assert_eq!(c.completed[id.as_str()], 3);
         std::fs::remove_dir_all(root).unwrap();
     }
 }

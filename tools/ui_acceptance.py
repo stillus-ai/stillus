@@ -7437,6 +7437,7 @@ def rss_filters_scenario(driver: WindowDriver, workspace: Path) -> None:
 
 
 def rss_cards_scenario(driver: WindowDriver, workspace: Path) -> None:
+    rss_states_scenario(driver, workspace)
     del workspace
     article_url = "https://example.test/article"
     workspace, config_path, cache = cached_rss_workspace(driver, "rss-cards", [{
@@ -8389,7 +8390,240 @@ def updates_scenario(driver: WindowDriver, workspace: Path) -> None:
 
 
 
+class ControlledRssServer:
+    """A loopback-only production-service fixture with explicit response release."""
+    def __init__(self) -> None:
+        import http.server
+        import threading
+        self.lock = threading.Lock()
+        self.responses: dict[str, list[tuple[int, bytes, object]]] = {}
+        self.counts: dict[str, int] = {}
+        owner = self
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self) -> None:
+                with owner.lock:
+                    index = owner.counts.get(self.path, 0)
+                    owner.counts[self.path] = index + 1
+                    planned = owner.responses.get(self.path, [])
+                    response = planned[index] if index < len(planned) else None
+                if response is None:
+                    self.send_error(500)
+                    return
+                status, body, released = response
+                if not released.wait(20):
+                    self.send_error(504)
+                    return
+                self.send_response(status)
+                self.send_header("Content-Type", "application/rss+xml")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, _format: str, *_args: object) -> None:
+                pass
+
+        self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.server.daemon_threads = True
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+
+    def plan(self, path: str, status: int, body: str):
+        import threading
+        released = threading.Event()
+        with self.lock:
+            self.responses.setdefault(path, []).append((status, body.encode(), released))
+        return released
+
+    def requested(self, path: str, count: int) -> bool:
+        with self.lock:
+            return self.counts.get(path, 0) >= count
+
+    def url(self, path: str) -> str:
+        return f"http://127.0.0.1:{self.server.server_port}{path}"
+
+    def close(self) -> None:
+        with self.lock:
+            for responses in self.responses.values():
+                for _, _, released in responses:
+                    released.set()
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(timeout=2)
+
+
+RSS_EMPTY_RESPONSE = ('<?xml version="1.0"?><rss version="2.0"><channel>'
+    '<title>Controlled feed</title><link>https://example.test/</link>'
+    '<description>Empty fixture</description></channel></rss>')
+
+
+def rss_states_scenario(driver: WindowDriver, workspace: Path) -> None:
+    """Validate create/retry completion and cached loading/error/empty rendering."""
+    del workspace
+    form_crop = (8, 48, 248, 215)
+    server = ControlledRssServer()
+    try:
+        failed = server.plan("/create", 503, "temporarily unavailable")
+        succeeded = server.plan("/create", 200, RSS_EMPTY_RESPONSE)
+        created_workspace = create_workspace(driver.temporary_root, "rss-create-states")
+        (created_workspace / "notes/Note.md").write_text("Existing note\n")
+        config = created_workspace / ".stillus/engines/rss/subscriptions.json"
+        driver.start_app(created_workspace, "rss-create-validation")
+        driver.click("create_menu")
+        driver.click("create_rss")
+        driver.type_text("not a URL")
+        driver.key("Return")
+        invalid = driver.wait_for_stable_frame("invalid URL is rejected locally", crop=(8, 126, 248, 100), stable_for=0.3)
+        if config.exists() and json.loads(config.read_text())["subscriptions"]:
+            raise AcceptanceFailure("invalid URL created a subscription")
+        if near_color_pixel_count(invalid, RSS_SUBMIT_ACCENT, crop=RSS_SUBMIT_CROP) > 100:
+            raise AcceptanceFailure("invalid URL leaves RSS submit enabled")
+        driver.key("ctrl+a")
+        driver.type_text(server.url("/create"))
+        driver.key("Return")
+        wait_until("RSS creation reaches the held production fetch", lambda: server.requested("/create", 1))
+        checking = driver.wait_for_stable_frame("Checking stays open until the held fetch completes", crop=(8, 126, 248, 100), stable_for=0.5)
+        if near_color_pixel_count(checking, RSS_SUBMIT_ACCENT, crop=RSS_SUBMIT_CROP) > 100:
+            raise AcceptanceFailure("Checking offers a second submission")
+        if dark_pixel_count(checking, crop=(20, 75, 210, 95)) < 80:
+            raise AcceptanceFailure("RSS create form closed before fetch completion")
+        created_id = json.loads(config.read_text())["subscriptions"][0]["id"]
+        failed.set()
+        error = driver.wait_for_visual_change("failed creation retains its URL and Retry action", checking,
+            crop=form_crop, minimum_pixels=50, timeout=10)
+        wait_until("creation Retry becomes enabled", lambda: near_color_pixel_count(
+            driver.capture("rss-create-retry"), RSS_SUBMIT_ACCENT, crop=form_crop) > 300)
+        retry_frame = driver.capture("rss-create-ready-retry")
+        retry_rows = [y for y in range(130, 235) if near_color_pixel_count(
+            retry_frame, RSS_SUBMIT_ACCENT, crop=(170, y, 55, 1)) > 20]
+        if not retry_rows:
+            raise AcceptanceFailure("creation Retry has no visible accent button")
+        driver.click_point(200, (min(retry_rows) + max(retry_rows)) // 2)
+        wait_until("Retry starts the next held fetch", lambda: server.requested("/create", 2))
+        if len(json.loads(config.read_text())["subscriptions"]) != 1:
+            raise AcceptanceFailure("creation Retry duplicated the subscription")
+        succeeded.set()
+        settings = created_workspace / ".stillus/settings.json"
+        wait_until("successful initial fetch selects its feed", lambda: settings.exists()
+            and json.loads(settings.read_text()).get("selected_rss") == created_id, timeout=10)
+        empty = driver.wait_for_stable_frame("successful empty feed", crop=(276, 76, 940, 300), stable_for=0.3)
+        if dark_pixel_count(empty, crop=(280, 76, 700, 55)) < 30:
+            raise AcceptanceFailure("empty feed has no localized empty-state text")
+        driver.xdotool("mousemove", "--window", driver.window_id, "700", "250", "click", "--repeat", "8", "5")
+        settled = driver.wait_for_stable_frame("empty feed has no artificial scrolling", crop=(276, 76, 940, 300), stable_for=1.2)
+        if image_difference(empty, settled, crop=(280, 76, 700, 55)) != 0:
+            raise AcceptanceFailure("empty feed scrolls its state off-screen")
+        driver.close_app()
+
+        # An existing cache remains visible while a real refresh waits or fails.
+        failed = server.plan("/cached", 503, "temporarily unavailable")
+        succeeded = server.plan("/cached", 200, RSS_EMPTY_RESPONSE)
+        cached, config, old_cache = cached_rss_workspace(driver, "rss-cached-states", [{
+            "id": "cached/entry", "title": "Cached article remains visible", "author": None,
+            "published": None, "updated": None, "summary": "Cached body remains visible.", "link": None,
+        }])
+        url = server.url("/cached")
+        digest = hashlib.sha256(url.encode()).hexdigest()
+        cache = old_cache.with_name(digest)
+        old_cache.rename(cache)
+        data = json.loads(config.read_text())
+        subscription = data["subscriptions"][0]
+        subscription.update(id=f"feeds/{digest}", url=url, deleted=False)
+        config.write_text(json.dumps(data))
+        (cached / ".stillus/settings.json").write_text(json.dumps({"version": 1,
+            "window": {"width": SCREEN_WIDTH, "height": SCREEN_HEIGHT},
+            "sidebar": {"width": SIDEBAR_WIDTH, "expanded": []}, "selected_rss": subscription["id"]}))
+        cache_before = (cache / "feed.json").read_bytes()
+        driver.start_app(cached, "rss-cached-loading")
+        wait_until("existing feed starts its held refresh", lambda: server.requested("/cached", 1))
+        driver.click_point(100, 172)
+        loading = driver.wait_for_stable_frame("loading state above cached cards", crop=(280, 76, 900, 270), stable_for=0.3)
+        if dark_pixel_count(loading, crop=(300, 140, 600, 100)) < 100:
+            raise AcceptanceFailure("loading hides cached articles")
+        failed.set()
+        failed_frame = driver.wait_for_visual_change("refresh error appears above cached cards", loading,
+            crop=(280, 76, 940, 38), minimum_pixels=40, timeout=10)
+        if (cache / "feed.json").read_bytes() != cache_before:
+            raise AcceptanceFailure("failed refresh changed the cached feed")
+        if dark_pixel_count(failed_frame, crop=(300, 140, 600, 100)) < 100:
+            raise AcceptanceFailure("refresh error hides cached articles")
+        driver.click_point(1204, 92)
+        wait_until("inline retry starts a held fetch", lambda: server.requested("/cached", 2))
+        succeeded.set()
+        wait_until("successful retry replaces the cache with an empty feed", lambda:
+            json.loads((cache / "feed.json").read_text())["entries"] == [], timeout=10)
+        driver.wait_for_stable_frame("empty state after retry", crop=(280, 76, 940, 160), stable_for=0.3)
+        driver.close_app()
+    finally:
+        server.close()
+
+
+def journal_page_states_scenario(driver: WindowDriver) -> None:
+    """Count-based pagination and the last JSON line use real journal files."""
+    workspace = create_workspace(driver.temporary_root, "journal-page-states")
+    (workspace / "notes/Note.md").write_text("Unchanged note\n")
+    directory = driver.home / ".stillus/ai/journal"
+    directory.mkdir(parents=True, exist_ok=True)
+    config = driver.home / ".stillus.cfg"
+    preferences = json.loads(config.read_text()) if config.exists() else {"version": 1}
+    preferences["locale"] = "en"
+    config.write_text(json.dumps(preferences))
+    stamp = int(time.time() * 1000)
+    for count in (0, 1, 40, 41):
+        for path in directory.glob("*.json"):
+            path.unlink()
+        for index in range(count):
+            identity = f"{stamp:016x}{1:016x}{index:016x}"
+            response = {"lines": [f"JSON line {line:03d}: " + "visible payload " * 3 for line in range(180)]}
+            record = {"version": 1, "id": identity, "operation": "ai/catalog/fixture", "started_ms": stamp,
+                "provider": "openai", "purpose": "models/list", "endpoint": "https://api.openai.com/v1/models",
+                "parameters": {}, "request": None, "response": response, "http_status": 200,
+                "duration_ms": 15, "status": "success", "error": None, "model": None,
+                "input_tokens": None, "output_tokens": None, "tool_call": None, "content_policy": "public"}
+            path = directory / f"{identity}.json"
+            path.write_text(json.dumps(record))
+            path.chmod(0o600)
+        driver.start_app(workspace, f"journal-count-{count}", environment_overrides={"STILLUS_TEST_AI": "1"})
+        driver.click("settings")
+        wait_for_ai_controls(driver)
+        driver.click_point(*AI_SIDEBAR_ITEM)
+        wait_for_ai_controls(driver)
+        driver.click_point(1140, 54)
+        page = driver.wait_for_stable_frame(f"journal page with {count} records", crop=(300, 200, 850, 150), stable_for=0.3)
+        pagination = dark_pixel_count(page, crop=(300, 374, 450, 36))
+        if count <= 40 and pagination > 15:
+            raise AcceptanceFailure(f"journal shows pagination for only {count} records")
+        if count == 0:
+            if dark_pixel_count(page, crop=(342, 30, 130, 32)) > 10:
+                raise AcceptanceFailure("empty journal shows Clear or Retry actions")
+        if count == 41:
+            if pagination < 30:
+                raise AcceptanceFailure("journal omits the real next page at 41 records")
+            driver.click_point(430, 390)
+            driver.wait_for_visual_change("older page contains only the extra record", page,
+                crop=(300, 184, 700, 180), minimum_pixels=150, timeout=10)
+        if count == 1:
+            driver.click_point(420, 208)
+            detail = driver.wait_for_visual_change("long journal JSON opens", page,
+                crop=(300, 380, 850, 330), minimum_pixels=100, timeout=10)
+            # The fixture occupies two chunks; the second ends with the record's closing brace.
+            driver.click_point(490, 754)
+            driver.wait_for_visual_change("last JSON chunk opens", detail,
+                crop=(300, 380, 850, 330), minimum_pixels=100, timeout=10)
+            driver.xdotool("mousemove", "--window", driver.window_id, "700", "530", "click", "--repeat", "35", "--delay", "20", "5")
+            last = driver.wait_for_stable_frame("JSON scrolled to its final line", crop=(276, 410, 874, 320), stable_for=0.3)
+            rows = {y for (_, y), value in crop_luminances(last, (276, 430, 874, 300)).items() if value < 160}
+            if not rows or not 600 <= max(rows) <= 680:
+                raise AcceptanceFailure("last JSON line is hidden behind fixed chunk controls or its 56px inset is missing")
+        driver.close_app()
+    for path in directory.glob("*.json"):
+        path.unlink()
+
+
+
+
 def ai_journal_scenario(driver: WindowDriver, workspace: Path) -> None:
+    journal_page_states_scenario(driver)
     """Exercise the journal without credentials, including restart and real file cleanup."""
     original = {path: path.read_bytes() for path in (workspace / "notes").glob("*.md")}
     driver.start_app(workspace, "journal", environment_overrides={"STILLUS_TEST_AI": "1"})
@@ -8587,7 +8821,7 @@ def chat_scenario(driver: WindowDriver, workspace: Path) -> None:
     driver.click_point(946, 28)
     driver.wait_for_stable_frame("chat request journal", crop=(280, 100, 850, 300), stable_for=0.2)
     export_screenshot(driver.capture("chat-journal"), Path("/workspace/dist/chat-journal.png"))
-    driver.click_point(302, 45)
+    driver.click_point(316, 45)
 
     def create_and_send(text: str) -> Path:
         before = set(root.glob("*/metadata.json"))
@@ -8786,7 +9020,7 @@ def chat_paging_layout_scenario(driver: WindowDriver, workspace: Path, chat: Pat
     driver.click_point(666, 28)
     driver.wait_for_visual_change("journal opens from fixed toolbar", scrolled_narrow,
                                   crop=(220, 100, 700, 200), minimum_pixels=100)
-    driver.click_point(246, 45)
+    driver.click_point(260, 45)
     returned = driver.wait_for_stable_frame("journal Back restores narrow chat",
                                            crop=(220, 415, 710, 110), stable_for=0.3)
     if image_difference(narrow, returned, crop=(220, 415, 710, 110)) != 0:

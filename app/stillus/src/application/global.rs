@@ -46,6 +46,7 @@ pub(crate) struct GlobalApplication {
 #[derive(Clone)]
 pub(crate) struct JournalPage {
     pub rows: Vec<Summary>,
+    pub has_more: bool,
     pub detail: Option<RequestRecord>,
     pub blocked: bool,
 }
@@ -163,8 +164,10 @@ impl GlobalApplication {
                 if request.clear {
                     store.clear()?;
                 }
+                let page = store.list_page(request.before.as_deref(), request.filter)?;
                 Ok(JournalPage {
-                    rows: store.list(request.before.as_deref(), request.filter)?,
+                    rows: page.rows,
+                    has_more: page.has_more,
                     detail: request.selected.map(|id| store.read(&id)).transpose()?,
                     blocked: store.blocked(),
                 })

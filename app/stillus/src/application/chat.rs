@@ -286,6 +286,11 @@ impl Coordinator {
     }
 }
 impl Application {
+    pub(super) fn cancel_pending_chat_open(&mut self) {
+        if let Some(coordinator) = self.chats.as_mut() {
+            coordinator.pending_open = None;
+        }
+    }
     pub(super) fn chat_coordinator(&mut self) -> Result<&mut Coordinator, ActionError> {
         if self.chats.is_none() {
             let w = self.workspace.as_ref().ok_or(ActionError::NotFound)?;
@@ -475,6 +480,7 @@ impl Application {
             Command::Open { id } => {
                 let id = self.chat_id(id)?;
                 self.chat_coordinator()?.pending_open = Some(id);
+                self.cancel_pending_document_navigation();
                 self.state_dirty = true;
                 Ok(super::api::CommandResult::Changed {
                     changed: true,

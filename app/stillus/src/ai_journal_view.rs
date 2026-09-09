@@ -3,7 +3,7 @@
 
 #![forbid(unsafe_code)]
 
-use crate::ai_journal::{Filter, PAGE_SIZE, Summary};
+use crate::ai_journal::{Filter, Summary};
 use crate::*;
 use stillus_ai::{AiProvider, journal::RequestStatus};
 
@@ -13,6 +13,7 @@ struct JournalView {
     open: RwSignal<bool>,
     rows: RwSignal<Vec<Summary>>,
     before: RwSignal<Option<String>>,
+    has_more: RwSignal<bool>,
     provider: RwSignal<Option<AiProvider>>,
     status: RwSignal<Option<RequestStatus>>,
     selected: RwSignal<Option<String>>,
@@ -86,6 +87,7 @@ fn poll(view: JournalView, id: u64, generation: u64) {
         }
         match result {
             Ok(page) => {
+                view.has_more.set(page.has_more);
                 if view.rows.get_untracked() != page.rows {
                     view.rows.set(page.rows);
                 }
@@ -151,6 +153,7 @@ pub(super) fn page_at(
         open,
         rows: create_rw_signal(Vec::new()),
         before: create_rw_signal(None),
+        has_more: create_rw_signal(false),
         provider: create_rw_signal(None),
         status: create_rw_signal(None),
         selected,
@@ -191,6 +194,7 @@ pub(super) fn page_at(
     let provider = view.provider;
     let status = view.status;
     let before = view.before;
+    let has_more = view.has_more;
     let confirm = view.confirm;
     let busy = view.busy;
     let error = view.error;
@@ -216,18 +220,21 @@ pub(super) fn page_at(
                 move || tr!(AiJournalClear),
                 IconButtonTone::Danger,
                 palette,
-                || true,
+                move || !busy.get() && !rows.get().is_empty(),
                 move || confirm.set(true),
-            ),
+            )
+            .style(move |s| s.apply_if(rows.get().is_empty(), |s| s.hide())),
             action_button(
                 ButtonAction::Retry,
                 move || tr!(AiJournalRetry),
                 IconButtonTone::Secondary,
                 palette,
-                || true,
+                move || !busy.get(),
                 move || retry.refresh(false, true),
-            ),
-        )),
+            )
+            .style(move |s| s.apply_if(!error.get(), |s| s.hide())),
+        ))
+        .style(move |s| s.flex_shrink(0.0)),
         page_title(i18n::Key::AiJournal, palette),
         page_description(i18n::Key::AiJournalHint, palette),
         actions((
@@ -277,7 +284,13 @@ pub(super) fn page_at(
                     before.set(None);
                 },
             ),
-        )),
+        ))
+        .style(move |s| {
+            s.flex_shrink(0.0).apply_if(
+                rows.get().is_empty() && provider.get().is_none() && status.get().is_none(),
+                |s| s.hide(),
+            )
+        }),
         label(move || tr!(AiJournalError))
             .style(move |s| s.color(palette.danger).apply_if(!error.get(), |s| s.hide())),
         v_stack((
@@ -343,7 +356,12 @@ pub(super) fn page_at(
             )
             .style(|s| s.flex_col().width_full()),
         )
-        .style(|s| s.width_full().height(180.0)),
+        .style(move |s| {
+            s.width_full()
+                .height(180.0)
+                .min_height(0.0)
+                .apply_if(rows.get().is_empty(), |s| s.hide())
+        }),
         actions((
             action_button(
                 ButtonAction::Custom(ICON_ARROW_DOWN),
@@ -358,10 +376,14 @@ pub(super) fn page_at(
                 move || tr!(AiJournalOlder),
                 IconButtonTone::Secondary,
                 palette,
-                move || rows.get().len() == PAGE_SIZE,
+                move || has_more.get() && !busy.get(),
                 move || before.set(rows.get_untracked().last().map(|r| r.id.clone())),
             ),
-        )),
+        ))
+        .style(move |s| {
+            s.flex_shrink(0.0)
+                .apply_if(!has_more.get() && before.get().is_none(), |s| s.hide())
+        }),
         scroll(
             dyn_stack(
                 move || {
@@ -376,7 +398,7 @@ pub(super) fn page_at(
                         .map(|(i, line)| (i, line.to_owned()))
                         .collect::<Vec<_>>()
                 },
-                |(i, _)| *i,
+                |(i, line)| (*i, line.clone()),
                 move |(_, line)| {
                     text(line).style(move |s| {
                         s.min_height(18.0)
@@ -387,9 +409,16 @@ pub(super) fn page_at(
                     })
                 },
             )
-            .style(|s| s.flex_col().min_width(0.0)),
+            .style(|s| s.flex_col().min_width(0.0).padding_bottom(56.0)),
         )
-        .style(|s| s.width_full().min_height(100.0).flex_grow(1.0)),
+        .style(move |s| {
+            s.width_full()
+                .min_width(0.0)
+                .min_height(0.0)
+                .flex_basis(0.0)
+                .flex_grow(1.0)
+                .apply_if(detail.get().is_empty(), |s| s.hide())
+        }),
         actions((
             action_button(
                 ButtonAction::Custom(ButtonAction::Back.icon()),
@@ -407,14 +436,21 @@ pub(super) fn page_at(
                 move || detail.get().chars().count() > (chunk.get() + 1) * 8000,
                 move || chunk.update(|n| *n += 1),
             ),
-        )),
+        ))
+        .style(move |s| {
+            s.flex_shrink(0.0)
+                .apply_if(detail.get().chars().count() <= 8000, |s| s.hide())
+        }),
     ))
     .style(move |s| {
         rtl_column(s)
-            .padding(30.0)
+            .padding_horiz(SETTINGS_PAGE_INSET_PX)
+            .padding_vert(30.0)
             .gap(10.0)
             .width_full()
+            .min_width(0.0)
             .height_full()
+            .min_height(0.0)
             .background(palette.canvas)
             .apply_if(!open.get(), |s| s.hide())
     })

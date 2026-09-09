@@ -397,6 +397,23 @@ impl Workspace {
         result
     }
 
+    pub(crate) fn create_rss_unselected(
+        &mut self,
+        url: &str,
+        categories: Vec<String>,
+        favorited: bool,
+        timestamp: &str,
+    ) -> Result<ItemId, CoreError> {
+        if self.operations.writing() {
+            return Err(CoreError::UnsavedChanges);
+        }
+        let result = self
+            .core
+            .create_rss_unselected(url, categories, favorited, timestamp);
+        self.actions_dirty = true;
+        result
+    }
+
     pub fn update_selected_rss_metadata(
         &mut self,
         timestamp: &str,

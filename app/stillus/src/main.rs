@@ -1252,11 +1252,6 @@ impl AppModel {
         self.sync_effects();
         result
     }
-    fn create_rss(&mut self, url: &str, active: &SidebarFilter) -> Option<ItemId> {
-        let result = self.application.create_rss(url, active);
-        self.sync_effects();
-        result
-    }
     fn rss_command(&mut self, command: rss_service::Command) -> bool {
         let result = self.application.rss_command(command);
         self.sync_effects();
@@ -6116,21 +6111,73 @@ fn rss_creation_form(
     rss_error: RwSignal<Option<UiText>>,
     palette: Palette,
 ) -> impl IntoView {
-    let rss_submit_model = model;
-    let submit: Rc<dyn Fn()> = Rc::new(move || {
-        let url = rss_url.get_untracked();
-        let active = sidebar_state.get_untracked().creation_group;
-        let item_id = rss_submit_model.borrow_mut().create_rss(&url, &active);
-        if let Some(item_id) = item_id {
-            if rss_submit_model.borrow_mut().start_rss_refresh(item_id) {
-                schedule_rss_poll(rss_submit_model.clone(), revision);
-            }
+    let created = create_rw_signal(None::<ItemId>);
+    let pending = create_rw_signal(None::<(ItemId, u64)>);
+    let completion_model = model.clone();
+    create_effect(move |_| {
+        revision.get();
+        let Some((id, before)) = pending.get_untracked() else {
+            return;
+        };
+        let model = completion_model.borrow();
+        if model.rss_completed.get(id.as_str()).copied().unwrap_or(0) <= before {
+            return;
+        }
+        let error = model
+            .rss_errors
+            .get(id.as_str())
+            .map(|error| UiText::from(error.to_string()));
+        drop(model);
+        pending.set(None);
+        if let Some(error) = error {
+            rss_error.set(Some(error));
+        } else {
+            completion_model.borrow_mut().open_rss(&id);
             rss_url.set(String::new());
             rss_error.set(None);
             rss_mode.set(false);
             open.set(false);
             revision.update(|value| *value = value.saturating_add(1));
-            schedule_autosave(rss_submit_model.clone(), revision);
+            schedule_autosave(completion_model.clone(), revision);
+        }
+    });
+    let rss_submit_model = model;
+    let submit: Rc<dyn Fn()> = Rc::new(move || {
+        if pending.get_untracked().is_some() {
+            return;
+        }
+        let url = match stillus_core::normalize_rss_feed_url(&rss_url.get_untracked()) {
+            Ok(url) => url,
+            Err(error) => {
+                rss_error.set(Some(error.to_string().into()));
+                return;
+            }
+        };
+        let active = sidebar_state.get_untracked().creation_group;
+        let item_id = created.get_untracked().or_else(|| {
+            rss_submit_model
+                .borrow_mut()
+                .create_rss_draft(&url, &active)
+        });
+        if let Some(item_id) = item_id {
+            created.set(Some(item_id.clone()));
+            let before = rss_submit_model
+                .borrow()
+                .rss_completed
+                .get(item_id.as_str())
+                .copied()
+                .unwrap_or(0);
+            if rss_submit_model
+                .borrow_mut()
+                .start_rss_refresh(item_id.clone())
+            {
+                pending.set(Some((item_id, before)));
+                rss_error.set(None);
+                schedule_rss_poll(rss_submit_model.clone(), revision);
+            } else {
+                rss_error.set(rss_submit_model.borrow().error.clone());
+            }
+            revision.update(|value| *value = value.saturating_add(1));
         } else {
             rss_error.set(rss_submit_model.borrow().error.clone());
         }
@@ -6140,6 +6187,7 @@ fn rss_creation_form(
         .style(move |style| {
             form_field_style(style, palette, rss_error.get().is_some()).width_full()
         })
+        .disabled(move || created.get().is_some())
         .on_event(EventListener::KeyDown, move |event| {
             let Event::KeyDown(key) = event else {
                 return EventPropagation::Continue;
@@ -6181,34 +6229,26 @@ fn rss_creation_form(
     // One status slot carries both the hint and the submission error, so the
     // swap keeps the buttons in place; a long error wraps inside the card
     // instead of running past its edge.
-    let status = dyn_container(
-        move || rss_error.get(),
-        move |message| match message {
-            Some(message) => text(message)
-                .style(move |style| {
-                    style
-                        .width_full()
-                        .font_size(crate::ui::FONT_CAPTION as f32)
-                        .color(palette.danger)
-                        .selectable(false)
-                })
-                .into_any(),
-            None => label(move || tr!(FeedLink))
-                .style(move |style| {
-                    style
-                        .width_full()
-                        .font_size(crate::ui::FONT_CAPTION as f32)
-                        .color(palette.muted)
-                        .selectable(false)
-                })
-                .into_any(),
-        },
-    )
-    .style(|style| {
+    let status = label(move || {
+        if let Some(message) = rss_error.get() {
+            i18n::user_error_text(&message)
+        } else if pending.get().is_some() {
+            tr!(RssChecking)
+        } else {
+            tr!(FeedLink)
+        }
+    })
+    .style(move |style| {
         style
             .width_full()
             .min_height(RSS_FORM_STATUS_HEIGHT_PX)
-            .items_center()
+            .font_size(crate::ui::FONT_CAPTION as f32)
+            .color(if rss_error.get().is_some() {
+                palette.danger
+            } else {
+                palette.muted
+            })
+            .selectable(false)
     });
     let footer = h_stack((
         content_button(
@@ -6240,14 +6280,26 @@ fn rss_creation_form(
         empty().style(|style| style.flex_grow(1.0)),
         content_button(
             ButtonAction::Add.icon(),
-            label(move || tr!(Add)).style(|style| {
+            label(move || {
+                if pending.get().is_some() {
+                    tr!(RssChecking)
+                } else if created.get().is_some() {
+                    tr!(Retry)
+                } else {
+                    tr!(Add)
+                }
+            })
+            .style(|style| {
                 style
                     .font_size(crate::ui::FONT_CAPTION as f32)
                     .selectable(false)
             }),
             move || button_submit(),
         )
-        .disabled(move || submit_enabled.get().trim().is_empty())
+        .disabled(move || {
+            pending.get().is_some()
+                || stillus_core::normalize_rss_feed_url(&submit_enabled.get()).is_err()
+        })
         .style(move |style| {
             style
                 .height(RSS_FORM_BUTTON_HEIGHT_PX)
@@ -7762,7 +7814,31 @@ fn sidebar_panel(
     let tree_scrollbar_visible = create_rw_signal(false);
     let tree_scrollbar_generation = create_rw_signal(0_u64);
     let tree_scroll_origin = create_rw_signal(None::<Point>);
-    let tree = scroll(tree_rows)
+    let empty_trash_model = model.clone();
+    let empty_trash = label(move || tr!(EmptyTrash)).style(move |s| {
+        revision.get();
+        let state = sidebar_state.get();
+        let show = state.is_expanded(&SidebarFilter::Trash)
+            && current_sidebar_rows(&empty_trash_model.borrow(), &state)
+                .iter()
+                .any(|row| {
+                    matches!(
+                        row,
+                        SidebarRow::Group {
+                            filter: SidebarFilter::Trash,
+                            count: 0,
+                            ..
+                        }
+                    )
+                });
+        s.width_full()
+            .padding_horiz(18.0)
+            .padding_vert(12.0)
+            .font_size(crate::ui::FONT_CAPTION as f32)
+            .color(palette.sidebar_muted)
+            .apply_if(!show, |s| s.hide())
+    });
+    let tree = scroll(v_stack((tree_rows, empty_trash)).style(|s| s.width_full()))
         .on_scroll(move |viewport| {
             let origin = viewport.origin();
             let previous = tree_scroll_origin.get_untracked();
@@ -8559,12 +8635,16 @@ fn rss_panel(
         move || {
             revision.get();
             rss_subscription_summary(&title_model, &title_id)
-                .map(|summary| summary.display_title).unwrap_or_else(|| tr!(RssFeed))
+                .map(|summary| summary.display_title)
+                .unwrap_or_else(|| tr!(RssFeed))
         },
         actions,
         Some(Rc::new(move || {
-            signals.rename.value.set(rss_subscription_summary(&title_click_model, &title_click_id)
-                .map(|summary| summary.display_title).unwrap_or_default());
+            signals.rename.value.set(
+                rss_subscription_summary(&title_click_model, &title_click_id)
+                    .map(|summary| summary.display_title)
+                    .unwrap_or_default(),
+            );
             signals.categories.open.set(false);
             signals.rename.open.set(true);
         })),
@@ -8795,15 +8875,89 @@ fn rss_panel(
         },
     )
     .style(|style| style.width_full().flex_col().gap(16.0));
-    let list = scroll(v_stack((cards,)).style(move |style| {
+    let state_model = model.clone();
+    let state_id = item_id.clone();
+    let retry_model = model.clone();
+    let retry_id = item_id.clone();
+    let feed_state = floem::reactive::create_memo(move |_| {
+        revision.get();
+        let model = state_model.borrow();
+        let loading = model.rss_refreshing.contains(state_id.as_str());
+        let error = model
+            .rss_errors
+            .get(state_id.as_str())
+            .map(|error| error.to_string());
+        let empty = model
+            .workspace
+            .as_ref()
+            .and_then(|workspace| workspace.rss_feed(&state_id).ok())
+            .is_none_or(|(feed, _)| feed.entries.is_empty());
+        (loading, error, empty)
+    });
+    let data_state = dyn_container(
+        move || feed_state.get(),
+        move |(loading, error, is_empty)| {
+            let retry_model = retry_model.clone();
+            let retry_id = retry_id.clone();
+            let has_error = error.is_some();
+            let message = if loading {
+                tr!(RssLoading)
+            } else if let Some(error) = &error {
+                i18n::user_error_text(&error.clone().into())
+            } else if is_empty {
+                tr!(RssEmpty)
+            } else {
+                String::new()
+            };
+            h_stack((
+                label(move || message.clone())
+                    .style(move |s| s.min_width(0.0).flex_grow(1.0).color(palette.muted)),
+                enabled_icon_button(
+                    ButtonAction::Refresh.icon(),
+                    || tr!(Retry),
+                    IconButtonTone::Secondary,
+                    palette,
+                    move || !loading,
+                    move || {
+                        if retry_model.borrow_mut().start_rss_refresh(retry_id.clone()) {
+                            schedule_rss_poll(retry_model.clone(), revision);
+                        }
+                        revision.update(|value| *value = value.saturating_add(1));
+                    },
+                )
+                .style(move |s| s.apply_if(!has_error, |s| s.hide())),
+            ))
+            .style(move |s| {
+                s.width_full()
+                    .items_center()
+                    .gap(8.0)
+                    .apply_if(!loading && !is_empty && !has_error, |s| s.hide())
+            })
+        },
+    )
+    .style(move |style| {
+        let (loading, error, empty) = feed_state.get();
+        style.apply_if(!loading && error.is_none() && !empty, |style| style.hide())
+    });
+    let scrollbar_visible = create_rw_signal(false);
+    let scrollbar_generation = create_rw_signal(0_u64);
+    let list = scroll(v_stack((data_state, cards)).style(move |style| {
         style
             .width_full()
             .padding(20.0)
-            // Leave room to top-align even the final card in a short feed.
-            .padding_bottom(viewport_height.get().max(20.0))
+            // Retain keyboard top-alignment for the final article without
+            // adding scrollable padding to loading, error or empty feeds.
+            .padding_bottom(if feed_state.get().2 {
+                20.0
+            } else {
+                viewport_height.get().max(20.0)
+            })
+            .gap(16.0)
     }))
     .scroll_to(move || scroll_target.get())
-    .style(|style| style.width_full().min_height(0.0).flex_grow(1.0))
+    .on_scroll(move |_| show_scrollbar_temporarily(scrollbar_visible, scrollbar_generation))
+    .style(move |style| style.width_full().min_height(0.0).flex_grow(1.0))
+    .scroll_style(move |style| style.hide_bars(!scrollbar_visible.get()))
     .on_resize(move |rect| viewport_height.set(rect.height()));
     let status_model = model.clone();
     let status_style_model = model.clone();
