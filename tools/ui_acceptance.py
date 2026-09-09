@@ -3266,6 +3266,12 @@ def tags_scenario(driver: WindowDriver, workspace: Path) -> None:
         lambda: "  - 'Keep'" in read_text(target),
     )
     final_categories = ("Acceptance", "Keep", "Perennial", "Personal", "Planning", "Project")
+    # The first outside click dismisses the layer and is consumed. A second
+    # click performs navigation, so dismissing never changes the active note.
+    before_navigation = driver.capture("tags-before-outside-navigation")
+    driver.click_note(1, expanded="all", counts=counts, categories=final_categories)
+    driver.wait_for_visual_change("outside note click only dismisses tags", before_navigation,
+                                  crop=popover_crop, minimum_pixels=200)
     driver.click_note(1, expanded="all", counts=counts, categories=final_categories)
     driver.click("editor")
     # The marker goes below the title line: editing the first line would
@@ -6989,6 +6995,28 @@ def creation_scenario(driver: WindowDriver, workspace: Path) -> None:
     driver.start_app(workspace, "creation")
     closed = driver.wait_for_stable_frame("creation menu closed")
 
+    # A dismissed layer consumes the interaction instead of creating a note
+    # or sending the outside click to the editor underneath it.
+    before_notes = {path.name: path.read_bytes() for path in (workspace / "notes").iterdir() if path.is_file()}
+    for dismiss in ("escape", "outside", "anchor"):
+        print(f"UI_ACCEPTANCE_STEP creation dismiss={dismiss}", flush=True)
+        closed = driver.capture("creation-closed-before-dismiss")
+        driver.click("create_menu")
+        opened = driver.wait_for_visual_change(f"creation menu before {dismiss}", closed,
+                                              crop=CREATE_POPOVER_CROP, minimum_pixels=5000)
+        if dismiss == "escape":
+            driver.key("Escape")
+        elif dismiss == "outside":
+            driver.click_point(650, 400)
+        else:
+            driver.click("create_menu")
+        driver.wait_for_visual_change(
+            f"creation menu dismissed by {dismiss}", opened,
+            crop=CREATE_POPOVER_CROP, minimum_pixels=250,
+        )
+        if {path.name: path.read_bytes() for path in (workspace / "notes").iterdir() if path.is_file()} != before_notes:
+            raise AcceptanceFailure(f"dismissal by {dismiss} changed workspace notes")
+
     driver.click("create_menu")
     driver.wait_for_visual_change(
         "creation menu with note and file choices",
@@ -7441,6 +7469,19 @@ def localization_scenario(driver: WindowDriver, workspace: Path) -> None:
     driver.wait_for_stable_frame("language settings", stable_for=0.3, timeout=10)
     driver.resize_window(860, 560)
     baseline = driver.wait_for_stable_frame("English language control", stable_for=0.3, timeout=10)
+    escape_control_y = open_language_picker(False)
+    language_list_crop = (298, escape_control_y + 24, 300, 520 - escape_control_y - 24)
+    expanded = driver.wait_for_visual_change("language list is open before Escape", baseline,
+                                            crop=language_list_crop, minimum_pixels=1000)
+    driver.key("Escape")
+    driver.wait_for_visual_change("Escape closes only the language list", expanded,
+                                  crop=language_list_crop, minimum_pixels=1000)
+    dismissed = driver.wait_for_stable_frame("settings remain after language Escape", stable_for=0.3)
+    if image_difference(baseline, dismissed, crop=(0, 0, 230, 180)) != 0:
+        raise AcceptanceFailure("language Escape also closed settings")
+    if image_difference(baseline, dismissed, crop=language_list_crop) != 0:
+        raise AcceptanceFailure("language list remained after Escape")
+    baseline = dismissed
     config = driver.home / ".stillus.cfg"
     preserved_config = config.with_suffix(".preserved")
     original_config = config.read_bytes()
@@ -7472,6 +7513,7 @@ def localization_scenario(driver: WindowDriver, workspace: Path) -> None:
     driver.wait_for_stable_frame("cleared language error", stable_for=0.3, timeout=10)
     current = "en"
     for index, locale in enumerate(languages):
+        print(f"UI_ACCEPTANCE_STEP locale={locale} index={index}", flush=True)
         rtl = current in {"ar", "ur"}
         previous = driver.capture("before-language-change")
         open_language_picker(rtl)

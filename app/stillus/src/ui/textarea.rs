@@ -167,6 +167,11 @@ impl TextArea {
             move |_| active.get(),
             move |key, mods| {
                 use floem::views::editor::keypress::key::KeyInput;
+                if matches!(&key.key, KeyInput::Keyboard(Key::Named(NamedKey::Escape), _))
+                    && super::popover_close_top_on_escape()
+                {
+                    return CommandExecuted::Yes;
+                }
                 if matches!(
                     &key.key,
                     KeyInput::Keyboard(Key::Named(NamedKey::Escape), _)

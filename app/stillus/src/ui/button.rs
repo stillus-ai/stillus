@@ -151,11 +151,34 @@ pub(crate) enum ButtonContext {
 
 /// Icon-only buttons retain a title even when unavailable.
 /// The native tooltip handles hover; the same reactive content handles keyboard focus.
+thread_local! {
+    static BUTTON_FOCUS_TARGETS: RefCell<std::collections::HashMap<ViewId, ViewId>> = RefCell::new(std::collections::HashMap::new());
+    static POINTER_FOCUS_RESTORE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+pub(crate) fn button_focus_is_pointer() -> bool {
+    POINTER_FOCUS_RESTORE.with(|pointer| pointer.get())
+}
+
+pub(crate) fn button_request_pointer_focus(id: ViewId) {
+    POINTER_FOCUS_RESTORE.with(|pointer| pointer.set(true));
+    id.request_focus();
+    exec_after(Duration::from_millis(50), |_| {
+        POINTER_FOCUS_RESTORE.with(|pointer| pointer.set(false));
+    });
+}
+
+pub(crate) fn button_focus_target(id: ViewId) -> ViewId {
+    BUTTON_FOCUS_TARGETS.with(|targets| targets.borrow().get(&id).copied().unwrap_or(id))
+}
+
 fn titled_button(
     child: impl IntoView + 'static,
     title: Rc<dyn Fn() -> String>,
     palette: Palette,
 ) -> floem::views::Tooltip {
+    let child = child.into_view();
+    let focus_target = child.id();
     let origin = Rc::new(std::cell::Cell::new(Point::ZERO));
     let moved = origin.clone();
     let overlay = Rc::new(RefCell::new(None));
@@ -173,7 +196,7 @@ fn titled_button(
         })
         .on_move(move |point| moved.set(point))
         .on_event_cont(EventListener::FocusGained, move |_| {
-            if !pointer_focus.get() && opened.borrow().is_none() {
+            if !pointer_focus.get() && !button_focus_is_pointer() && opened.borrow().is_none() {
                 let title = focus_title.clone();
                 let id = add_overlay(origin.get() + (0.0, BUTTON_SIZE_PX + 6.0), move |_| {
                     tooltip_content(title.clone(), palette).pointer_events(|| false)
@@ -183,13 +206,18 @@ fn titled_button(
         });
     let lost = overlay.clone();
     let inactive = overlay.clone();
-    focused
+    let tooltip = focused
         .on_event_cont(EventListener::FocusLost, move |_| close_tooltip(&lost))
         .on_event_cont(EventListener::WindowLostFocus, move |_| {
             close_tooltip(&inactive)
         })
         .on_cleanup(move || close_tooltip(&overlay))
-        .tooltip(move || tooltip_content(title.clone(), palette).pointer_events(|| false))
+        .tooltip(move || tooltip_content(title.clone(), palette).pointer_events(|| false));
+    let tooltip_id = tooltip.id();
+    BUTTON_FOCUS_TARGETS.with(|targets| targets.borrow_mut().insert(tooltip_id, focus_target));
+    tooltip.on_cleanup(move || {
+        BUTTON_FOCUS_TARGETS.with(|targets| targets.borrow_mut().remove(&tooltip_id));
+    })
 }
 fn close_tooltip(overlay: &RefCell<Option<ViewId>>) {
     if let Some(id) = overlay.borrow_mut().take() {

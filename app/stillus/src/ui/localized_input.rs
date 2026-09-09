@@ -80,6 +80,9 @@ impl View for LocalizedInput {
         self.input.update(cx, state);
     }
     fn event_before_children(&mut self, cx: &mut EventCx, event: &Event) -> EventPropagation {
+        if super::popover_handle_escape(event) {
+            return EventPropagation::Stop;
+        }
         // Native TextInput consumes Escape to clear focus before decorators
         // run. Forms may instead close themselves and choose the next focus.
         if matches!(event, Event::KeyDown(key) if key.key.logical_key == LogicalKey::Named(NamedKey::Escape))

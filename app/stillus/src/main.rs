@@ -2232,6 +2232,7 @@ fn app_view(
             return;
         }
         drop(model);
+        popover_close_all();
         settings_page.picker_active.set(false);
         settings_page.feedback.set(None);
         settings_page.encryption_feedback.set(None);
@@ -2348,21 +2349,33 @@ fn app_view(
         startup_overlay,
     ))
     .style(|style| style.size_full());
-    let outside_tag_popover = tag_popover;
+    let overlay_owner_model = model.clone();
+    create_effect(move |previous| {
+        revision.get();
+        let owner = {
+            let model = overlay_owner_model.borrow();
+            (
+                settings_page.open.get(),
+                settings_page.section.get(),
+                model.workspace.as_ref().map(|workspace| workspace.root().to_owned()),
+                model.workspace.as_ref().and_then(|workspace| workspace.selected_target()),
+                model.workspace.as_ref().and_then(|workspace| workspace.selected_engine_item()).cloned(),
+            )
+        };
+        if previous.as_ref().is_some_and(|previous| previous != &owner) {
+            popover_close_all();
+        }
+        owner
+    });
     let root_find_model = model.clone();
     let root_go_to_line_model = model.clone();
     let resize_window_size = window_size;
     let close_settings_store = settings_store;
     root
-        .on_event(EventListener::PointerDown, move |_| {
-            if outside_tag_popover.open.get_untracked()
-                && !outside_tag_popover.trigger_pointer_down.get_untracked()
-            {
-                close_tag_popover(outside_tag_popover);
-            }
-            EventPropagation::Continue
-        })
         .on_event(EventListener::KeyDown, move |event| {
+            if popover_handle_escape(event) {
+                return EventPropagation::Stop;
+            }
             if startup_workspace.open.get_untracked() {
                 return EventPropagation::Stop;
             }
@@ -2429,6 +2442,9 @@ fn app_view(
             }
         })
         .on_event(EventListener::KeyUp, move |event| {
+            if popover_handle_escape(event) {
+                return EventPropagation::Stop;
+            }
             if startup_workspace.open.get_untracked() {
                 return EventPropagation::Stop;
             }
@@ -9480,6 +9496,9 @@ fn editor_panel(
             EventPropagation::Continue
         })
         .on_event_stop(EventListener::KeyDown, move |event| {
+            if popover_handle_escape(event) {
+                return;
+            }
             if let Event::KeyDown(key_event) = event {
                 if is_go_to_line_shortcut(key_event) {
                     open_go_to_line(
