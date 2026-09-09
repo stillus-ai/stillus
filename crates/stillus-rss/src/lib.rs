@@ -1007,6 +1007,63 @@ fn now_timestamp() -> String {
     chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
 }
 
+impl RssEngine {
+    pub fn update_metadata_at(
+        &mut self,
+        item_id: &ItemId,
+        expected_version: &str,
+        patch: CommonMetadataPatch,
+        timestamp: &str,
+    ) -> Result<String, EngineError> {
+        if patch
+            .title
+            .as_ref()
+            .is_some_and(|title| title.trim().is_empty() || title.len() > 200)
+        {
+            return Err(EngineError::InvalidSetting("title".to_owned()));
+        }
+        let expected = expected_version
+            .parse::<u64>()
+            .map_err(|_| EngineError::Conflict)?;
+        let current = self
+            .subscriptions
+            .iter()
+            .find(|item| &item.id == item_id)
+            .ok_or_else(|| EngineError::Io("unknown RSS subscription".to_owned()))?;
+        if current.revision != expected {
+            return Err(EngineError::Conflict);
+        }
+        self.update_subscription(item_id, |item| {
+            item.modified = timestamp.to_owned();
+            if let Some(title) = patch.title {
+                item.title_override = Some(title);
+            }
+            if let Some(categories) = patch.categories {
+                item.categories = categories;
+            }
+            if let Some(pinned) = patch.pinned {
+                item.pinned = pinned;
+            }
+            if let Some(favorited) = patch.favorited {
+                item.favorited = favorited;
+            }
+            if let Some(deleted) = patch.deleted {
+                item.deleted = deleted;
+            }
+            if let Some(order) = patch.order {
+                item.order = order;
+            }
+        })?;
+        Ok(self
+            .subscriptions
+            .iter()
+            .find(|item| &item.id == item_id)
+            .expect("updated RSS subscription remains available")
+            .revision
+            .to_string())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1290,62 +1347,5 @@ mod tests {
                 .apply_refresh(RssRefreshResult::Fetched { item_id: id, cache })
                 .is_err()
         );
-    }
-}
-
-impl RssEngine {
-    pub fn update_metadata_at(
-        &mut self,
-        item_id: &ItemId,
-        expected_version: &str,
-        patch: CommonMetadataPatch,
-        timestamp: &str,
-    ) -> Result<String, EngineError> {
-        if patch
-            .title
-            .as_ref()
-            .is_some_and(|title| title.trim().is_empty() || title.len() > 200)
-        {
-            return Err(EngineError::InvalidSetting("title".to_owned()));
-        }
-        let expected = expected_version
-            .parse::<u64>()
-            .map_err(|_| EngineError::Conflict)?;
-        let current = self
-            .subscriptions
-            .iter()
-            .find(|item| &item.id == item_id)
-            .ok_or_else(|| EngineError::Io("unknown RSS subscription".to_owned()))?;
-        if current.revision != expected {
-            return Err(EngineError::Conflict);
-        }
-        self.update_subscription(item_id, |item| {
-            item.modified = timestamp.to_owned();
-            if let Some(title) = patch.title {
-                item.title_override = Some(title);
-            }
-            if let Some(categories) = patch.categories {
-                item.categories = categories;
-            }
-            if let Some(pinned) = patch.pinned {
-                item.pinned = pinned;
-            }
-            if let Some(favorited) = patch.favorited {
-                item.favorited = favorited;
-            }
-            if let Some(deleted) = patch.deleted {
-                item.deleted = deleted;
-            }
-            if let Some(order) = patch.order {
-                item.order = order;
-            }
-        })?;
-        Ok(self
-            .subscriptions
-            .iter()
-            .find(|item| &item.id == item_id)
-            .expect("updated RSS subscription remains available")
-            .revision
-            .to_string())
     }
 }

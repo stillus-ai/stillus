@@ -279,9 +279,8 @@ impl Workspace {
 
     pub fn accept_rss_snapshot(&mut self, engine: RssEngine) {
         let old = self.selected_path();
-        let result = self.core.accept_rss_snapshot(engine);
+        self.core.accept_rss_snapshot(engine);
         self.track_rename(old);
-        result
     }
 
     pub fn rss_preferences(&self, id: &ItemId) -> Result<RssPreferences, CoreError> {

@@ -628,7 +628,7 @@ pub(crate) enum OperationOutput {
     Rss(super::rss::AddressedResult),
     Journal {
         rows: Vec<super::journal::Summary>,
-        detail: Option<stillus_ai::journal::RequestRecord>,
+        detail: Option<Box<stillus_ai::journal::RequestRecord>>,
         blocked: bool,
     },
 }

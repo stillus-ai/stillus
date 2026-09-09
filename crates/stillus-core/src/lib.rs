@@ -5706,6 +5706,49 @@ fn civil_from_days(days_since_epoch: i64) -> (i64, i64, i64) {
     (year, month, day)
 }
 
+/// Shared category validation for native and addressed RSS operations.
+pub fn normalize_rss_categories(categories: &[String]) -> Result<Vec<String>, CoreError> {
+    if categories.len() > 100 {
+        return Err(CoreError::NoteUnavailable("too many RSS categories".into()));
+    }
+    let mut normalized = Vec::new();
+    for category in categories {
+        let category = validate_tag(category)?;
+        if category == FAVORITED_ORDER_KEY {
+            return Err(CoreError::NoteUnavailable(
+                "category name is reserved for Favorites ordering".into(),
+            ));
+        }
+        if !normalized.contains(&category) {
+            normalized.push(category);
+        }
+    }
+    Ok(normalized)
+}
+
+pub fn apply_rss_metadata(
+    engine: &mut RssEngine,
+    id: &ItemId,
+    version: u64,
+    mut patch: stillus_engine::CommonMetadataPatch,
+    timestamp: &str,
+) -> Result<(), CoreError> {
+    if let Some(categories) = &patch.categories {
+        patch.categories = Some(normalize_rss_categories(categories)?);
+    }
+    if let Some(title) = &patch.title {
+        let title = title.trim();
+        if title.is_empty() || title.len() > 200 {
+            return Err(CoreError::NoteUnavailable("invalid RSS title".into()));
+        }
+        patch.title = Some(title.into());
+    }
+    engine
+        .update_metadata_at(id, &version.to_string(), patch, timestamp)
+        .map_err(CoreError::Engine)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -8588,47 +8631,4 @@ mod tests {
             fs::remove_dir_all(&self.root).unwrap();
         }
     }
-}
-
-/// Shared category validation for native and addressed RSS operations.
-pub fn normalize_rss_categories(categories: &[String]) -> Result<Vec<String>, CoreError> {
-    if categories.len() > 100 {
-        return Err(CoreError::NoteUnavailable("too many RSS categories".into()));
-    }
-    let mut normalized = Vec::new();
-    for category in categories {
-        let category = validate_tag(category)?;
-        if category == FAVORITED_ORDER_KEY {
-            return Err(CoreError::NoteUnavailable(
-                "category name is reserved for Favorites ordering".into(),
-            ));
-        }
-        if !normalized.contains(&category) {
-            normalized.push(category);
-        }
-    }
-    Ok(normalized)
-}
-
-pub fn apply_rss_metadata(
-    engine: &mut RssEngine,
-    id: &ItemId,
-    version: u64,
-    mut patch: stillus_engine::CommonMetadataPatch,
-    timestamp: &str,
-) -> Result<(), CoreError> {
-    if let Some(categories) = &patch.categories {
-        patch.categories = Some(normalize_rss_categories(categories)?);
-    }
-    if let Some(title) = &patch.title {
-        let title = title.trim();
-        if title.is_empty() || title.len() > 200 {
-            return Err(CoreError::NoteUnavailable("invalid RSS title".into()));
-        }
-        patch.title = Some(title.into());
-    }
-    engine
-        .update_metadata_at(id, &version.to_string(), patch, timestamp)
-        .map_err(CoreError::Engine)?;
-    Ok(())
 }

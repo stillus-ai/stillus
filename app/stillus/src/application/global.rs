@@ -27,14 +27,16 @@ pub(crate) struct GlobalLoad {
     pub diagnostic: Option<String>,
 }
 
+type AiWorker = (
+    u64,
+    Receiver<Result<AiSettings, ai::Failure>>,
+    Arc<AtomicBool>,
+);
+
 pub(crate) struct GlobalApplication {
     store: GlobalSettingsStore,
     next: u64,
-    ai_worker: Option<(
-        u64,
-        Receiver<Result<AiSettings, ai::Failure>>,
-        Arc<AtomicBool>,
-    )>,
+    ai_worker: Option<AiWorker>,
     ai_results: BTreeMap<u64, Result<AiSettings, ai::Failure>>,
     journal_worker: Option<(u64, Receiver<Result<JournalPage, String>>)>,
     journal_results: BTreeMap<u64, Result<JournalPage, String>>,

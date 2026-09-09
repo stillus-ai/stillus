@@ -180,6 +180,284 @@ fn call_workspace(
         .and_then(|result| serde_json::to_value(result).map_err(|_| ActionError::InvalidArguments))
 }
 
+pub(crate) fn call(
+    app: &mut super::Application,
+    context: super::api::ToolContext,
+    name: &str,
+    value: Value,
+) -> Result<Value, ActionError> {
+    app.authorize(context.caller())?;
+    use super::{
+        api::{Command as C, Query as Q},
+        catalog::{Access, Handler as H},
+        rss::Addressed as R,
+    };
+    let descriptor = list()
+        .into_iter()
+        .find(|tool| tool.name == name)
+        .ok_or(ActionError::NotFound)?;
+    let object = value.as_object().ok_or(ActionError::InvalidArguments)?;
+    if object
+        .keys()
+        .any(|key| descriptor.input_schema["properties"].get(key).is_none())
+    {
+        return Err(ActionError::InvalidArguments);
+    }
+    let a: Arguments = serde_json::from_value(value).map_err(|_| ActionError::InvalidArguments)?;
+    let handler = super::catalog::ACTIONS
+        .iter()
+        .find(|action| action.name == name && action.access == Access::Tool)
+        .ok_or(ActionError::NotFound)?
+        .handler;
+    let required = |value: Option<String>| value.ok_or(ActionError::InvalidArguments);
+    let item = |value: Option<String>| {
+        stillus_core::ItemId::new(value.ok_or(ActionError::InvalidArguments)?)
+            .map_err(|_| ActionError::InvalidArguments)
+    };
+    let scope = |value: Option<String>| -> Result<super::runtime::SidebarFilter, ActionError> {
+        let value = required(value)?;
+        Ok(if value == "favorites" {
+            super::runtime::SidebarFilter::Favorites
+        } else {
+            super::runtime::SidebarFilter::Tag(value)
+        })
+    };
+    let query = match handler {
+        H::ChatsList => Some(Q::Chat(super::chat::Query::List {
+            offset: a.offset.unwrap_or(0),
+            limit: a.limit.unwrap_or(100),
+        })),
+        H::ChatsRead => Some(Q::Chat(super::chat::Query::Read {
+            id: required(a.id.clone())?,
+            before: a.before.clone(),
+            limit: a.limit.unwrap_or(32),
+        })),
+        H::WorkspaceState => Some(Q::Workspace),
+        H::SettingsRead => Some(Q::Settings),
+        H::NotesList => Some(Q::Notes {
+            offset: a.offset.unwrap_or(0),
+            limit: a.limit.unwrap_or(100),
+        }),
+        H::NotesRead => Some(Q::Read {
+            id: required(a.id.clone())?,
+            offset: a.offset.unwrap_or(0),
+            limit: a.limit.unwrap_or(65536),
+        }),
+        H::ExternalList => Some(Q::External {
+            offset: a.offset.unwrap_or(0),
+            limit: a.limit.unwrap_or(100),
+        }),
+        H::Categories => Some(Q::Categories),
+        H::SearchDocument => Some(Q::Find {
+            id: required(a.id.clone())?,
+            version: required(a.version.clone())?,
+            text: required(a.query.clone())?,
+            limit: a.limit.unwrap_or(100),
+        }),
+        H::AiSettings => Some(Q::Ai),
+        H::UpdatesState => Some(Q::Updates),
+        H::OperationStatus => Some(Q::Operation(required(a.id.clone())?)),
+        H::OperationProgress => Some(Q::OperationProgress(required(a.id.clone())?)),
+        _ => None,
+    };
+    if let Some(query) = query {
+        return serde_json::to_value(app.query(context.caller(), query)?)
+            .map_err(|_| ActionError::InvalidArguments);
+    }
+    let command = match handler {
+        H::ChatsCreate => C::Chat(super::chat::Command::Create {
+            title: required(a.title)?,
+            categories: a.categories.unwrap_or_default(),
+            favorited: a.favorited.unwrap_or(false),
+            open: false,
+        }),
+        H::ChatsMetadata => C::Chat(super::chat::Command::Metadata {
+            id: required(a.id)?,
+            version: required(a.version)?,
+            patch: stillus_engine::CommonMetadataPatch {
+                title: a.title,
+                categories: a.categories,
+                pinned: a.pinned,
+                favorited: a.favorited,
+                deleted: a.deleted,
+                order: None,
+            },
+            alias: a.alias,
+        }),
+        H::NotesUpdate => C::Notes(Action::Edit {
+            id: required(a.id)?,
+            version: required(a.version)?,
+            edit: NoteEdit {
+                start: a.start.ok_or(ActionError::InvalidArguments)?,
+                end: a.end.ok_or(ActionError::InvalidArguments)?,
+                text: required(a.text)?,
+            },
+        }),
+        H::NotesCreate => C::Notes(Action::Create {
+            title: required(a.title)?,
+        }),
+        H::NotesRename => C::Notes(Action::Rename {
+            id: required(a.id)?,
+            version: required(a.version)?,
+            title: required(a.title)?,
+        }),
+        H::NotesMetadata => C::Notes(Action::Metadata {
+            id: required(a.id)?,
+            version: required(a.version)?,
+            edit: NoteMetadataEdit {
+                tags: a.tags,
+                pinned: a.pinned,
+                favorited: a.favorited,
+                deleted: a.deleted,
+            },
+        }),
+        H::NotesOpen => C::Notes(Action::Open {
+            id: required(a.id)?,
+        }),
+        H::NotesSave => C::Save {
+            id: required(a.id)?,
+            version: required(a.version)?,
+        },
+        H::NotesRestore => C::Restore {
+            id: required(a.id)?,
+            version: required(a.version)?,
+        },
+        H::ExternalOpen => C::ExternalOpen {
+            path: required(a.path)?.into(),
+        },
+        H::ExternalClose => C::ExternalClose {
+            id: required(a.id)?,
+            version: required(a.version)?,
+        },
+        H::EditorUndo | H::EditorRedo => C::Editor {
+            id: required(a.id)?,
+            version: required(a.version)?,
+            command: if handler == H::EditorUndo {
+                stillus_core::EditorCommand::Undo
+            } else {
+                stillus_core::EditorCommand::Redo
+            },
+        },
+        H::CatalogOrder => C::Order {
+            scope: scope(a.scope)?,
+            items: a.items.ok_or(ActionError::InvalidArguments)?,
+            version: required(a.version)?,
+        },
+        H::CatalogSort => C::Sort {
+            scope: scope(a.scope)?,
+            field: a.field,
+            direction: a
+                .direction
+                .unwrap_or(super::settings::SortDirection::Ascending),
+            version: required(a.version)?,
+        },
+        H::CategoriesOrder => C::CategoryOrder {
+            categories: a.categories.ok_or(ActionError::InvalidArguments)?,
+            version: required(a.version)?,
+        },
+        H::CatalogOrderClear => C::ClearOrder {
+            scope: scope(a.scope)?,
+            version: required(a.version)?,
+        },
+        H::SearchQuery => C::Notes(Action::Search {
+            query: required(a.query)?,
+        }),
+        H::SearchRebuild => C::RebuildSearch,
+        H::RssList => C::Notes(Action::RssList),
+        H::RssRefresh => C::Notes(Action::RssRefresh {
+            id: required(a.id)?,
+        }),
+        H::RssCreate => C::Rss(R::Create {
+            url: required(a.url)?,
+            categories: a.categories.unwrap_or_default(),
+            favorited: a.favorited.unwrap_or(false),
+        }),
+        H::RssMetadata => C::Rss(R::Metadata {
+            id: item(a.id)?,
+            version: a.revision.ok_or(ActionError::InvalidArguments)?,
+            patch: stillus_engine::CommonMetadataPatch {
+                title: a.title,
+                categories: a.categories,
+                pinned: a.pinned,
+                favorited: a.favorited,
+                deleted: a.deleted,
+                ..Default::default()
+            },
+        }),
+        H::RssRead => C::Rss(R::Read {
+            id: item(a.id)?,
+            offset: a.offset.unwrap_or(0),
+            limit: a.limit.unwrap_or(40),
+        }),
+        H::RssMarkRead => C::Rss(R::MarkRead {
+            id: item(a.id)?,
+            version: a.revision.ok_or(ActionError::InvalidArguments)?,
+            entry: required(a.entry)?,
+        }),
+        H::RssFilters => C::Rss(R::Filters {
+            id: item(a.id)?,
+            version: a.revision.ok_or(ActionError::InvalidArguments)?,
+            preferences: a.preferences.ok_or(ActionError::InvalidArguments)?,
+            apply: a.apply.unwrap_or(false),
+        }),
+        H::SettingsLocale => C::Locale {
+            value: a.locale.ok_or(ActionError::InvalidArguments)?,
+            version: required(a.version)?,
+        },
+        H::AiRefresh | H::AiDisconnect | H::AiCleanup | H::AiAliasSave | H::AiAliasRemove => {
+            let expected = app.ai_expected(&required(a.version)?)?;
+            let action = match handler {
+                H::AiRefresh => super::ai::Action::Refresh,
+                H::AiDisconnect => super::ai::Action::Disconnect,
+                H::AiCleanup => super::ai::Action::Cleanup,
+                H::AiAliasRemove => super::ai::Action::Remove(required(a.name)?),
+                H::AiAliasSave => super::ai::Action::Save {
+                    old: a.old,
+                    name: required(a.name)?,
+                    profile: stillus_ai::AiProfile {
+                        model: required(a.model)?,
+                        effort: a.effort,
+                    },
+                },
+                _ => unreachable!(),
+            };
+            C::Ai { expected, action }
+        }
+        H::SecurityDisable => C::DisableProtection {
+            id: required(a.id)?,
+        },
+        H::UpdatesCheck => C::CheckUpdates,
+        H::UpdatesInstall => C::InstallUpdate,
+        H::UpdatesAutomatic => C::UpdateAutomatic {
+            value: a.enabled.ok_or(ActionError::InvalidArguments)?,
+            version: required(a.version)?,
+        },
+        H::JournalList | H::JournalRead | H::JournalRetry => {
+            C::Journal(super::global::JournalRequest {
+                before: a.before,
+                filter: super::journal::Filter {
+                    provider: a.provider,
+                    status: a.status,
+                },
+                selected: if handler == H::JournalRead {
+                    Some(required(a.id)?)
+                } else {
+                    None
+                },
+                clear: false,
+                retry: handler == H::JournalRetry,
+            })
+        }
+        H::OperationCancel => C::Notes(Action::Cancel {
+            id: required(a.id)?,
+        }),
+        // UI-only handlers are rejected both by the catalogue and the typed dispatcher.
+        _ => return Err(ActionError::RequiresUserInteraction),
+    };
+    serde_json::to_value(app.dispatch(context.caller(), command)?)
+        .map_err(|_| ActionError::InvalidArguments)
+}
+
 #[cfg(test)]
 mod tests {
     use super::call_workspace as call;
@@ -622,282 +900,4 @@ mod tests {
             Err(ActionError::NotFound)
         );
     }
-}
-
-pub(crate) fn call(
-    app: &mut super::Application,
-    context: super::api::ToolContext,
-    name: &str,
-    value: Value,
-) -> Result<Value, ActionError> {
-    app.authorize(context.caller())?;
-    use super::{
-        api::{Command as C, Query as Q},
-        catalog::{Access, Handler as H},
-        rss::Addressed as R,
-    };
-    let descriptor = list()
-        .into_iter()
-        .find(|tool| tool.name == name)
-        .ok_or(ActionError::NotFound)?;
-    let object = value.as_object().ok_or(ActionError::InvalidArguments)?;
-    if object
-        .keys()
-        .any(|key| descriptor.input_schema["properties"].get(key).is_none())
-    {
-        return Err(ActionError::InvalidArguments);
-    }
-    let a: Arguments = serde_json::from_value(value).map_err(|_| ActionError::InvalidArguments)?;
-    let handler = super::catalog::ACTIONS
-        .iter()
-        .find(|action| action.name == name && action.access == Access::Tool)
-        .ok_or(ActionError::NotFound)?
-        .handler;
-    let required = |value: Option<String>| value.ok_or(ActionError::InvalidArguments);
-    let item = |value: Option<String>| {
-        stillus_core::ItemId::new(value.ok_or(ActionError::InvalidArguments)?)
-            .map_err(|_| ActionError::InvalidArguments)
-    };
-    let scope = |value: Option<String>| -> Result<super::runtime::SidebarFilter, ActionError> {
-        let value = required(value)?;
-        Ok(if value == "favorites" {
-            super::runtime::SidebarFilter::Favorites
-        } else {
-            super::runtime::SidebarFilter::Tag(value)
-        })
-    };
-    let query = match handler {
-        H::ChatsList => Some(Q::Chat(super::chat::Query::List {
-            offset: a.offset.unwrap_or(0),
-            limit: a.limit.unwrap_or(100),
-        })),
-        H::ChatsRead => Some(Q::Chat(super::chat::Query::Read {
-            id: required(a.id.clone())?,
-            before: a.before.clone(),
-            limit: a.limit.unwrap_or(32),
-        })),
-        H::WorkspaceState => Some(Q::Workspace),
-        H::SettingsRead => Some(Q::Settings),
-        H::NotesList => Some(Q::Notes {
-            offset: a.offset.unwrap_or(0),
-            limit: a.limit.unwrap_or(100),
-        }),
-        H::NotesRead => Some(Q::Read {
-            id: required(a.id.clone())?,
-            offset: a.offset.unwrap_or(0),
-            limit: a.limit.unwrap_or(65536),
-        }),
-        H::ExternalList => Some(Q::External {
-            offset: a.offset.unwrap_or(0),
-            limit: a.limit.unwrap_or(100),
-        }),
-        H::Categories => Some(Q::Categories),
-        H::SearchDocument => Some(Q::Find {
-            id: required(a.id.clone())?,
-            version: required(a.version.clone())?,
-            text: required(a.query.clone())?,
-            limit: a.limit.unwrap_or(100),
-        }),
-        H::AiSettings => Some(Q::Ai),
-        H::UpdatesState => Some(Q::Updates),
-        H::OperationStatus => Some(Q::Operation(required(a.id.clone())?)),
-        H::OperationProgress => Some(Q::OperationProgress(required(a.id.clone())?)),
-        _ => None,
-    };
-    if let Some(query) = query {
-        return serde_json::to_value(app.query(context.caller(), query)?)
-            .map_err(|_| ActionError::InvalidArguments);
-    }
-    let command = match handler {
-        H::ChatsCreate => C::Chat(super::chat::Command::Create {
-            title: required(a.title)?,
-            categories: a.categories.unwrap_or_default(),
-            favorited: a.favorited.unwrap_or(false),
-            open: false,
-        }),
-        H::ChatsMetadata => C::Chat(super::chat::Command::Metadata {
-            id: required(a.id)?,
-            version: required(a.version)?,
-            patch: stillus_engine::CommonMetadataPatch {
-                title: a.title,
-                categories: a.categories,
-                pinned: a.pinned,
-                favorited: a.favorited,
-                deleted: a.deleted,
-                order: None,
-            },
-            alias: a.alias,
-        }),
-        H::NotesUpdate => C::Notes(Action::Edit {
-            id: required(a.id)?,
-            version: required(a.version)?,
-            edit: NoteEdit {
-                start: a.start.ok_or(ActionError::InvalidArguments)?,
-                end: a.end.ok_or(ActionError::InvalidArguments)?,
-                text: required(a.text)?,
-            },
-        }),
-        H::NotesCreate => C::Notes(Action::Create {
-            title: required(a.title)?,
-        }),
-        H::NotesRename => C::Notes(Action::Rename {
-            id: required(a.id)?,
-            version: required(a.version)?,
-            title: required(a.title)?,
-        }),
-        H::NotesMetadata => C::Notes(Action::Metadata {
-            id: required(a.id)?,
-            version: required(a.version)?,
-            edit: NoteMetadataEdit {
-                tags: a.tags,
-                pinned: a.pinned,
-                favorited: a.favorited,
-                deleted: a.deleted,
-            },
-        }),
-        H::NotesOpen => C::Notes(Action::Open {
-            id: required(a.id)?,
-        }),
-        H::NotesSave => C::Save {
-            id: required(a.id)?,
-            version: required(a.version)?,
-        },
-        H::NotesRestore => C::Restore {
-            id: required(a.id)?,
-            version: required(a.version)?,
-        },
-        H::ExternalOpen => C::ExternalOpen {
-            path: required(a.path)?.into(),
-        },
-        H::ExternalClose => C::ExternalClose {
-            id: required(a.id)?,
-            version: required(a.version)?,
-        },
-        H::EditorUndo | H::EditorRedo => C::Editor {
-            id: required(a.id)?,
-            version: required(a.version)?,
-            command: if handler == H::EditorUndo {
-                stillus_core::EditorCommand::Undo
-            } else {
-                stillus_core::EditorCommand::Redo
-            },
-        },
-        H::CatalogOrder => C::Order {
-            scope: scope(a.scope)?,
-            items: a.items.ok_or(ActionError::InvalidArguments)?,
-            version: required(a.version)?,
-        },
-        H::CatalogSort => C::Sort {
-            scope: scope(a.scope)?,
-            field: a.field,
-            direction: a
-                .direction
-                .unwrap_or(super::settings::SortDirection::Ascending),
-            version: required(a.version)?,
-        },
-        H::CategoriesOrder => C::CategoryOrder {
-            categories: a.categories.ok_or(ActionError::InvalidArguments)?,
-            version: required(a.version)?,
-        },
-        H::CatalogOrderClear => C::ClearOrder {
-            scope: scope(a.scope)?,
-            version: required(a.version)?,
-        },
-        H::SearchQuery => C::Notes(Action::Search {
-            query: required(a.query)?,
-        }),
-        H::SearchRebuild => C::RebuildSearch,
-        H::RssList => C::Notes(Action::RssList),
-        H::RssRefresh => C::Notes(Action::RssRefresh {
-            id: required(a.id)?,
-        }),
-        H::RssCreate => C::Rss(R::Create {
-            url: required(a.url)?,
-            categories: a.categories.unwrap_or_default(),
-            favorited: a.favorited.unwrap_or(false),
-        }),
-        H::RssMetadata => C::Rss(R::Metadata {
-            id: item(a.id)?,
-            version: a.revision.ok_or(ActionError::InvalidArguments)?,
-            patch: stillus_engine::CommonMetadataPatch {
-                title: a.title,
-                categories: a.categories,
-                pinned: a.pinned,
-                favorited: a.favorited,
-                deleted: a.deleted,
-                ..Default::default()
-            },
-        }),
-        H::RssRead => C::Rss(R::Read {
-            id: item(a.id)?,
-            offset: a.offset.unwrap_or(0),
-            limit: a.limit.unwrap_or(40),
-        }),
-        H::RssMarkRead => C::Rss(R::MarkRead {
-            id: item(a.id)?,
-            version: a.revision.ok_or(ActionError::InvalidArguments)?,
-            entry: required(a.entry)?,
-        }),
-        H::RssFilters => C::Rss(R::Filters {
-            id: item(a.id)?,
-            version: a.revision.ok_or(ActionError::InvalidArguments)?,
-            preferences: a.preferences.ok_or(ActionError::InvalidArguments)?,
-            apply: a.apply.unwrap_or(false),
-        }),
-        H::SettingsLocale => C::Locale {
-            value: a.locale.ok_or(ActionError::InvalidArguments)?,
-            version: required(a.version)?,
-        },
-        H::AiRefresh | H::AiDisconnect | H::AiCleanup | H::AiAliasSave | H::AiAliasRemove => {
-            let expected = app.ai_expected(&required(a.version)?)?;
-            let action = match handler {
-                H::AiRefresh => super::ai::Action::Refresh,
-                H::AiDisconnect => super::ai::Action::Disconnect,
-                H::AiCleanup => super::ai::Action::Cleanup,
-                H::AiAliasRemove => super::ai::Action::Remove(required(a.name)?),
-                H::AiAliasSave => super::ai::Action::Save {
-                    old: a.old,
-                    name: required(a.name)?,
-                    profile: stillus_ai::AiProfile {
-                        model: required(a.model)?,
-                        effort: a.effort,
-                    },
-                },
-                _ => unreachable!(),
-            };
-            C::Ai { expected, action }
-        }
-        H::SecurityDisable => C::DisableProtection {
-            id: required(a.id)?,
-        },
-        H::UpdatesCheck => C::CheckUpdates,
-        H::UpdatesInstall => C::InstallUpdate,
-        H::UpdatesAutomatic => C::UpdateAutomatic {
-            value: a.enabled.ok_or(ActionError::InvalidArguments)?,
-            version: required(a.version)?,
-        },
-        H::JournalList | H::JournalRead | H::JournalRetry => {
-            C::Journal(super::global::JournalRequest {
-                before: a.before,
-                filter: super::journal::Filter {
-                    provider: a.provider,
-                    status: a.status,
-                },
-                selected: if handler == H::JournalRead {
-                    Some(required(a.id)?)
-                } else {
-                    None
-                },
-                clear: false,
-                retry: handler == H::JournalRetry,
-            })
-        }
-        H::OperationCancel => C::Notes(Action::Cancel {
-            id: required(a.id)?,
-        }),
-        // UI-only handlers are rejected both by the catalogue and the typed dispatcher.
-        _ => return Err(ActionError::RequiresUserInteraction),
-    };
-    serde_json::to_value(app.dispatch(context.caller(), command)?)
-        .map_err(|_| ActionError::InvalidArguments)
 }

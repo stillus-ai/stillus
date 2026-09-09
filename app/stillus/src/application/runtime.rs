@@ -3213,7 +3213,7 @@ pub(super) type WorkspaceExecutor = std::sync::Arc<
     dyn Fn(PathBuf, bool) -> Result<LoadedWorkspace, WorkspaceLoadError> + Send + Sync,
 >;
 enum WorkspaceLoadOutput {
-    Loaded(LoadedWorkspace),
+    Loaded(Box<LoadedWorkspace>),
     Unchanged(PathBuf),
 }
 struct WorkspaceLoadTask {
@@ -3332,7 +3332,9 @@ impl Application {
                 let result = if let Some(path) = same_path {
                     Ok(WorkspaceLoadOutput::Unchanged(path))
                 } else {
-                    executor(path, initialize).map(WorkspaceLoadOutput::Loaded)
+                    executor(path, initialize)
+                        .map(Box::new)
+                        .map(WorkspaceLoadOutput::Loaded)
                 };
                 if worker_gate.load(Ordering::Acquire) == 2 {
                     drop(result);
@@ -3445,7 +3447,7 @@ impl Application {
                         changed: false,
                     });
                 }
-                WorkspaceLoadOutput::Loaded(loaded) => loaded,
+                WorkspaceLoadOutput::Loaded(loaded) => *loaded,
             };
             let prepared = loaded.into_prepared();
             self.apply_workspace_switch(prepared.canonical_path.clone(), prepared)

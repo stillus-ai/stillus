@@ -46,8 +46,7 @@ impl ResponsesTransport for Transport {
             .ok_or(stillus_ai::AiError::Response)?;
         let instruction = input
             .iter()
-            .filter(|i| i["role"] == "user")
-            .last()
+            .rfind(|i| i["role"] == "user")
             .and_then(|i| i["content"].as_str())
             .unwrap_or("");
         let outputs = input

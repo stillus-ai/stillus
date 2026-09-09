@@ -1405,14 +1405,12 @@ impl AppModel {
     }
     #[cfg(test)]
     fn shutdown_search_worker(&mut self) {
-        let result = self.application.shutdown_search_worker();
+        self.application.shutdown_search_worker();
         self.sync_effects();
-        result
     }
     fn open_note(&mut self, index: usize) {
-        let result = self.application.open_note(index);
+        self.application.open_note(index);
         self.sync_effects();
-        result
     }
     fn open_external_path(&mut self, path: &Path) -> bool {
         let result = self.application.open_external_path(path);
@@ -1497,15 +1495,13 @@ impl AppModel {
         result
     }
     fn submit_search(&mut self, query: String) {
-        let result = self.application.submit_search(query);
+        self.application.submit_search(query);
         self.sync_effects();
-        result
     }
     #[cfg(test)]
     fn request_search_reconcile(&mut self) {
-        let result = self.application.request_search_reconcile();
+        self.application.request_search_reconcile();
         self.sync_effects();
-        result
     }
     #[cfg(test)]
     fn next_search_operation_id(&mut self) -> u64 {
@@ -1538,9 +1534,8 @@ impl AppModel {
     }
     #[cfg(test)]
     fn invalidate_search_projection(&mut self) {
-        let result = self.application.invalidate_search_projection();
+        self.application.invalidate_search_projection();
         self.sync_effects();
-        result
     }
     #[cfg(test)]
     fn accept_search_results(&mut self, generation: u64, results: Vec<SearchResult>) -> bool {

@@ -689,7 +689,7 @@ impl Application {
     ) -> Result<QueryResult, ActionError> {
         self.authorize(caller)?;
         match query {
-            Query::Chat(query) => return self.chat_query(caller, query),
+            Query::Chat(query) => self.chat_query(caller, query),
             Query::Settings => {
                 let settings = self
                     .global
@@ -1151,7 +1151,7 @@ impl Application {
                         result
                             .map(|page| OperationOutput::Journal {
                                 rows: page.rows,
-                                detail: page.detail,
+                                detail: page.detail.map(Box::new),
                                 blocked: page.blocked,
                             })
                             .map_err(|_| ActionError::Failed("journal request failed".into()))

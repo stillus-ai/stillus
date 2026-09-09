@@ -111,7 +111,7 @@ pub(crate) enum Output {
     List {
         chats: Vec<ChatSnapshot>,
     },
-    View(ChatView),
+    View(Box<ChatView>),
     Metadata {
         id: String,
         metadata: Versioned<Metadata>,
@@ -624,7 +624,7 @@ impl Application {
                                 tool.state = ToolState::Failed;
                                 tool.result = Some(json!({"outcome":"unknown","user_acknowledged":true,"instruction":"The user chose to continue without repeating this action. Its effect remains unconfirmed."}));
                                 store.save_message(&id,Some(&version),&value)?;
-                                return read_view(&store,&id,None,32).map(Output::View);
+                                return read_view(&store,&id,None,32).map(Box::new).map(Output::View);
                             }
                             if page.next.is_none() { return Err(ActionError::NotFound); }
                             cursor = page.next;
@@ -842,7 +842,9 @@ impl Application {
             })();
             match result {
                 Ok(start) => (
-                    read_view(&store, &start.id, None, 32).map(Output::View),
+                    read_view(&store, &start.id, None, 32)
+                        .map(Box::new)
+                        .map(Output::View),
                     Some(start),
                     None,
                 ),
@@ -908,7 +910,7 @@ impl Application {
                     let result =
                         read_view(&store, &id, before.as_deref(), limit).map(|mut view| {
                             view.for_display = for_display;
-                            Output::View(view)
+                            Output::View(Box::new(view))
                         });
                     (result, None, None)
                 })?;
@@ -1014,7 +1016,7 @@ impl Application {
                             engine == &engine_id() && id.as_str() == view.id
                         })
                 {
-                    let mut view = view.clone();
+                    let mut view = view.as_ref().clone();
                     if view.before.is_some() {
                         if let Some(old) = c.view.as_ref().filter(|old| old.id == view.id) {
                             let mut entries = old.history.entries.clone();
@@ -1337,14 +1339,16 @@ impl Application {
                 let result = run_worker(
                     &store,
                     &worker_start,
-                    home,
-                    registry,
-                    credentials,
-                    context,
-                    tools,
                     &worker_cancel,
-                    worker_progress,
-                    update_send,
+                    WorkerContext {
+                        home,
+                        registry,
+                        credentials,
+                        context,
+                        tools,
+                        progress: worker_progress,
+                        updates: update_send,
+                    },
                 );
                 let _ = send.send(result);
             });
@@ -1565,18 +1569,31 @@ fn read_view(
     })
 }
 
-fn run_worker(
-    store: &ChatStore,
-    start: &Start,
+struct WorkerContext {
     home: Option<PathBuf>,
     registry: ProviderRegistry,
     credentials: Arc<dyn CredentialStore>,
     context: ToolContext,
     tools: SyncSender<ToolRequest>,
-    cancel: &Cancellation,
     progress: Arc<Mutex<Option<(String, String)>>>,
     updates: SyncSender<WorkerUpdate>,
+}
+
+fn run_worker(
+    store: &ChatStore,
+    start: &Start,
+    cancel: &Cancellation,
+    worker: WorkerContext,
 ) -> Result<Versioned<Run>, ActionError> {
+    let WorkerContext {
+        home,
+        registry,
+        credentials,
+        context,
+        tools,
+        progress,
+        updates,
+    } = worker;
     let mut run = start.run.clone();
     run.value.status = RunStatus::Running;
     run = store.save_run(&start.id, Some(&run.revision), &run.value)?;

@@ -526,11 +526,11 @@ pub(super) fn panel(
         if submit_model.borrow().session_id() != session {
             return;
         }
-        if !submit_model
+        if submit_model
             .borrow()
             .global
             .as_ref()
-            .is_some_and(|g| g.borrow().ai().connection.is_some())
+            .is_none_or(|g| g.borrow().ai().connection.is_none())
         {
             settings.section.set(SettingsSection::Ai);
             settings.open.set(true);

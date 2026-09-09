@@ -232,7 +232,7 @@ pub(super) fn page_at(
                 move || {
                     provider
                         .get()
-                        .map_or_else(|| tr!(AiJournalAllProviders), |p| p.name().into())
+                        .map_or_else(|| tr!(AiJournalAllProviders), |p| p.name())
                 },
                 IconButtonTone::Secondary,
                 palette,
@@ -321,7 +321,7 @@ pub(super) fn page_at(
                             timestamp,
                             row.provider
                                 .as_ref()
-                                .map_or_else(|| tr!(AiJournalCorrupt), |p| p.name().into()),
+                                .map_or_else(|| tr!(AiJournalCorrupt), |p| p.name()),
                             status_name(row.status)
                         )
                     })
