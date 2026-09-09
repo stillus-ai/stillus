@@ -926,10 +926,14 @@ pub fn editor_view(
     let doc = ed.doc;
     let style = ed.style;
     let lines = ed.screen_lines;
+    let parent_size = ed.parent_size;
     create_effect(move |_| {
         doc.track();
         style.track();
         lines.track();
+        // Resizing can leave the same visible lines. Reconcile intrinsic size
+        // even then, so wrapped form editors shed their previous scroll width.
+        parent_size.track();
         id.request_layout();
     });
 

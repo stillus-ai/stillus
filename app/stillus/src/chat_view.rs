@@ -127,6 +127,7 @@ pub(super) fn panel(
                 draft.set(String::new());
                 composer_epoch.update(|v| *v += 1);
                 sending.set(false);
+                anchor.set(None);
                 follow.set(true);
             } else if sending.get_untracked() && !model.chat_running(&read_id) {
                 sending.set(false);
@@ -179,6 +180,7 @@ pub(super) fn panel(
             .font_family(crate::ui::HEADING_FONT_FAMILY.to_owned())
             .font_weight(floem::text::Weight::SEMIBOLD)
             .min_width(0.0)
+            .flex_shrink(1.0)
             .flex_grow(1.0)
             .text_ellipsis()
             .color(palette.ink)
@@ -490,13 +492,17 @@ pub(super) fn panel(
         h_stack((journal_button, earlier, newest, toolbar))
             .style(|s| s.flex_shrink(0.0).items_center().gap(TOOLBAR_ACTION_GAP_PX)),
     ))
-    .style(|s| {
+    .style(move |s| {
         s.width_full()
             .min_width(0.0)
+            .height(EDITOR_HEADER_HEIGHT_PX)
             .flex_shrink(0.0)
             .items_center()
-            .flex_wrap(floem::style::FlexWrap::Wrap)
+            .padding_horiz(20.0)
             .gap(12.0)
+            .background(palette.paper)
+            .border_bottom(1.0)
+            .border_color(palette.divider)
     });
     let empty_state = model.clone();
     let empty_hint = label(|| tr!(ChatEmpty)).style(move |s| {
@@ -521,7 +527,10 @@ pub(super) fn panel(
             // Reconcile against the new height, not the preceding page's height.
             let at_bottom =
                 scroll_y.get_untracked() + viewport_height.get_untracked() >= r.height() - 40.0;
-            if follow.get_untracked() || at_bottom {
+            // Paging owns the viewport until explicit pointer navigation or Newest.
+            // A transient clamp during relayout must not re-enable following and
+            // overwrite the saved visible-message anchor.
+            if anchor.get_untracked().is_none() && (follow.get_untracked() || at_bottom) {
                 follow.set(true);
                 scroll_to.set(Some(Point::new(
                     0.0,
@@ -529,6 +538,9 @@ pub(super) fn panel(
                 )));
             }
         });
+    let history_scrollbar_visible = create_rw_signal(false);
+    let history_scrollbar_generation = create_rw_signal(0_u64);
+    let history_scroll_origin = create_rw_signal(None::<Point>);
     let history = scroll(history_content)
         .on_resize(move |rect| {
             // Leave the history scrollbar beside text, including long links.
@@ -538,11 +550,33 @@ pub(super) fn panel(
         .on_event_cont(EventListener::PointerWheel, move |_| anchor.set(None))
         .on_event_cont(EventListener::PointerDown, move |_| anchor.set(None))
         .on_scroll(move |viewport| {
+            let origin = viewport.origin();
+            if history_scroll_origin
+                .get_untracked()
+                .is_some_and(|previous| previous != origin)
+            {
+                show_scrollbar_temporarily(history_scrollbar_visible, history_scrollbar_generation);
+            }
+            history_scroll_origin.set(Some(origin));
             scroll_y.set(viewport.y0);
             viewport_height.set(viewport.height());
-            follow.set(viewport.y1 >= content_height.get_untracked() - 40.0);
+            follow.set(
+                anchor.get_untracked().is_none()
+                    && viewport.y1 >= content_height.get_untracked() - 40.0,
+            );
         })
         .scroll_to(move || scroll_to.get())
+        .scroll_style(move |s| {
+            s.handle_thickness(8.0)
+                .vertical_track_inset(2.0)
+                .handle_background(Color::rgba8(
+                    palette.muted.r,
+                    palette.muted.g,
+                    palette.muted.b,
+                    128,
+                ))
+                .hide_bars(!history_scrollbar_visible.get())
+        })
         .style(|s| {
             s.width_full()
                 .min_width(0.0)
@@ -593,7 +627,7 @@ pub(super) fn panel(
             .into_any()
         },
     )
-    .style(|s| s.width(240.0));
+    .style(|s| s.width(240.0).min_width(0.0).flex_shrink(1.0));
     let alias = h_stack((
         label(|| format!("{}:", tr!(AiModelLabel))).style(move |s| {
             s.font_size(crate::ui::FONT_BODY as f32)
@@ -602,7 +636,7 @@ pub(super) fn panel(
         }),
         alias,
     ))
-    .style(|s| s.items_center().gap(8.0).flex_shrink(0.0));
+    .style(|s| s.items_center().gap(8.0).min_width(0.0).flex_shrink(1.0));
     let submit_model = model.clone();
     let submit_id = id.clone();
     let submit: Rc<dyn Fn()> = Rc::new(move || {
@@ -802,9 +836,8 @@ pub(super) fn panel(
     let controls = h_stack((
         alias,
         empty().style(|s| s.flex_grow(1.0)),
-        continue_button,
-        stop,
-        send,
+        h_stack((continue_button, stop, send))
+            .style(|s| s.flex_shrink(0.0).items_center().gap(8.0)),
     ))
     .style(move |s| {
         s.width_full()
@@ -862,7 +895,6 @@ pub(super) fn panel(
             .flex_shrink(0.0)
     });
     let body = v_stack((
-        header,
         rename_bar,
         categories_bar,
         history,
@@ -877,9 +909,17 @@ pub(super) fn panel(
             .min_width(0.0)
             .height_full()
             .min_height(0.0)
+            .flex_basis(0.0)
+            .flex_grow(1.0)
             .padding(20.0)
             .gap(12.0)
             .background(palette.paper)
+    });
+    let body = v_stack((header, body)).style(move |s| {
+        s.width_full()
+            .height_full()
+            .min_width(0.0)
+            .min_height(0.0)
             .apply_if(journal_open.get(), |s| s.hide())
     });
     let journal = model
@@ -1110,6 +1150,9 @@ fn markdown_blocks(source: &str, width: floem::reactive::Memo<f64>, palette: Pal
                     blocks.push(markdown_prose(&source[cursor..start], width, palette));
                 }
                 let content = code.clone();
+                let scrollbar_visible = create_rw_signal(false);
+                let scrollbar_generation = create_rw_signal(0_u64);
+                let scroll_origin = create_rw_signal(None::<Point>);
                 let copy = action_button(
                     ButtonAction::Copy,
                     || tr!(Copy),
@@ -1125,11 +1168,32 @@ fn markdown_blocks(source: &str, width: floem::reactive::Memo<f64>, palette: Pal
                         h_stack((empty().style(|s| s.flex_grow(1.0)), copy)),
                         scroll(text(code.clone()).style(move |s| {
                             s.text_clip()
-                                .padding_bottom(8.0)
+                                // The 8px handle occupies its own strip after an 8px gap.
+                                .padding_bottom(16.0)
                                 .font_family(crate::ui::MONO_FONT_FAMILY.to_owned())
                                 .font_size(crate::ui::FONT_BODY as f32)
                                 .color(palette.ink)
                         }))
+                        .on_scroll(move |viewport| {
+                            let origin = viewport.origin();
+                            if scroll_origin
+                                .get_untracked()
+                                .is_some_and(|previous| previous != origin)
+                            {
+                                show_scrollbar_temporarily(scrollbar_visible, scrollbar_generation);
+                            }
+                            scroll_origin.set(Some(origin));
+                        })
+                        .scroll_style(move |s| {
+                            s.handle_thickness(8.0)
+                                .handle_background(Color::rgba8(
+                                    palette.muted.r,
+                                    palette.muted.g,
+                                    palette.muted.b,
+                                    128,
+                                ))
+                                .hide_bars(!scrollbar_visible.get())
+                        })
                         .style(move |s| s.width((width.get() - 24.0).max(1.0)).min_width(0.0)),
                     ))
                     .style(move |s| {
@@ -1157,6 +1221,7 @@ fn markdown_prose(source: &str, width: floem::reactive::Memo<f64>, palette: Pale
     let layout = rss_card::markdown(source).layout(palette.ink);
     floem::views::rich_text(move || {
         let mut layout = layout.clone();
+        layout.set_wrap(floem::text::Wrap::WordOrGlyph);
         layout.set_size(width.get().max(1.0) as f32, f32::MAX);
         layout
     })
@@ -1170,22 +1235,25 @@ fn wrapped_text(
     color: Color,
     size: f32,
 ) -> AnyView {
-    floem::views::rich_text(move || {
-        let mut layout = floem::text::TextLayout::new();
-        let family = [floem::text::FamilyOwned::Name(
-            crate::ui::UI_FONT_FAMILY.to_owned(),
-        )];
-        let attrs = floem::text::Attrs::new()
-            .family(&family)
-            .font_size(size)
-            .color(color)
-            .line_height(floem::text::LineHeightValue::Normal(1.45));
-        layout.set_text(&text, floem::text::AttrsList::new(attrs));
-        layout.set_size(width().max(1.0) as f32, f32::MAX);
-        layout
-    })
-    .style(move |s| s.width(width()).min_width(0.0))
-    .into_any()
+    floem::views::rich_text(move || wrapped_text_layout(&text, width(), color, size))
+        .style(move |s| s.width(width()).min_width(0.0))
+        .into_any()
+}
+
+fn wrapped_text_layout(text: &str, width: f64, color: Color, size: f32) -> floem::text::TextLayout {
+    let mut layout = floem::text::TextLayout::new();
+    let family = [floem::text::FamilyOwned::Name(
+        crate::ui::UI_FONT_FAMILY.to_owned(),
+    )];
+    let attrs = floem::text::Attrs::new()
+        .family(&family)
+        .font_size(size)
+        .color(color)
+        .line_height(floem::text::LineHeightValue::Normal(1.45));
+    layout.set_text(text, floem::text::AttrsList::new(attrs));
+    layout.set_wrap(floem::text::Wrap::WordOrGlyph);
+    layout.set_size(width.max(1.0) as f32, f32::MAX);
+    layout
 }
 
 fn load_history(
@@ -1265,6 +1333,16 @@ mod tests {
                 },
             }),
             diagnostic: None,
+        }
+    }
+
+    #[test]
+    fn long_links_wrap_inside_the_available_message_width() {
+        let link = format!("https://example.test/{}", "longsegment".repeat(30));
+        for width in [180.0, 360.0, 720.0] {
+            let layout = wrapped_text_layout(&link, width, Color::BLACK, 14.0);
+            assert!(layout.layout_runs().count() > 1);
+            assert!(layout.size().width <= width + 1.0);
         }
     }
 
