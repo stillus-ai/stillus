@@ -442,6 +442,10 @@ test-rss:
 test-chat:
 	$(RUN) cargo test -p stillus-chat
 
+.PHONY: test-chat-view
+test-chat-view:
+	$(RUN) cargo test -p stillus-app --features test-utils chat_view::tests
+
 .PHONY: ui-click-chat
 ui-click-chat: ui-build-test-utils
 	$(RUN) python3 -B tools/ui_acceptance.py chat

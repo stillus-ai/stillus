@@ -378,7 +378,7 @@ pub(super) fn panel(
             message_view(entry, row_model.clone(), revision, history_width, palette).on_resize(
                 move |rect| {
                     bounds.borrow_mut().insert(id.clone(), rect);
-                    if let Some((target, offset)) = anchor.get_untracked() {
+                    if let Some((target, offset)) = anchor.try_get_untracked().flatten() {
                         if target == id {
                             scroll_to.set(Some(Point::new(0.0, (rect.y0 + offset).max(0.0))));
                         }
@@ -885,6 +885,11 @@ fn message_view(
     history_width: RwSignal<f64>,
     palette: Palette,
 ) -> AnyView {
+    // Floem may drain a queued DynStack update after its chat panel scope has
+    // been disposed. Do not construct rich text or effects for that old panel.
+    if history_width.try_get_untracked().is_none() {
+        return empty().into_any();
+    }
     let version = entry
         .message
         .as_ref()
@@ -1199,4 +1204,74 @@ fn poll_history(
             revision.update(|r| *r += 1);
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use floem::reactive::{Scope, as_child_of_current_scope, with_scope};
+    use stillus_chat::{HistoryEntry, Message, ToolCall, Versioned};
+
+    fn entry(role: Role) -> HistoryEntry {
+        HistoryEntry {
+            id: "message/1".to_owned(),
+            message: Some(Versioned {
+                revision: "revision/1".to_owned(),
+                value: Message {
+                    id: "message/1".to_owned(),
+                    run: "run/1".to_owned(),
+                    role,
+                    text: "**Reply**\n\n```rust\nlet n = 1;\n```\n\n[Link](https://example.com)"
+                        .to_owned(),
+                    delivery: Delivery::Partial,
+                    created_ms: 0,
+                    tool: None,
+                    provider_state: None,
+                    request_id: None,
+                },
+            }),
+            diagnostic: None,
+        }
+    }
+
+    #[test]
+    fn queued_messages_are_ignored_after_chat_panel_disposal() {
+        let root = Scope::new();
+        let revision = root.create_rw_signal(0_u64);
+        let model = Rc::new(RefCell::new(AppModel::unloaded()));
+        let mut tool = entry(Role::Assistant);
+        tool.message.as_mut().unwrap().value.tool = Some(ToolCall {
+            id: "tool/1".to_owned(),
+            name: "read_note".to_owned(),
+            arguments: serde_json::json!({}),
+            state: ToolState::Completed,
+            result: Some(serde_json::json!({"text": "result"})),
+        });
+        for entry in [entry(Role::User), entry(Role::Assistant), tool] {
+            let panel_scope = root.create_child();
+            let width = panel_scope.create_rw_signal(640.0);
+            let row_model = model.clone();
+            // DynStack captures the panel scope and calls this factory later,
+            // while draining queued view updates.
+            let build = with_scope(panel_scope, || {
+                as_child_of_current_scope(move |entry| {
+                    message_view(entry, row_model.clone(), revision, width, Palette::new())
+                })
+            });
+            let (mounted, _) = build(entry.clone());
+            assert!(!mounted.id().children().is_empty());
+            width.set(320.0);
+            panel_scope.dispose();
+            assert!(width.try_get_untracked().is_none());
+            assert_eq!(revision.get_untracked(), 0);
+
+            let (late, late_scope) = build(entry);
+            assert_eq!(
+                floem::View::debug_name(late.as_ref()),
+                std::any::type_name::<floem::views::Empty>()
+            );
+            late_scope.dispose();
+        }
+        root.dispose();
+    }
 }
