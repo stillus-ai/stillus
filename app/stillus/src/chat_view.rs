@@ -188,14 +188,12 @@ pub(super) fn panel(
         value: create_rw_signal(String::new()),
         label: i18n::Key::NewTitle,
         placeholder: i18n::Key::ChatNew,
-        field_width: RSS_RENAME_FIELD_WIDTH_PX,
     };
     let categories = ToolbarEditBar {
         open: create_rw_signal(false),
         value: create_rw_signal(String::new()),
         label: i18n::Key::CategoriesPlaceholder,
         placeholder: i18n::Key::CategoriesExample,
-        field_width: RSS_CATEGORIES_FIELD_WIDTH_PX,
     };
     let toolbar_model = model.clone();
     let toolbar_state = model.clone();

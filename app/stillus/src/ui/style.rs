@@ -229,7 +229,7 @@ pub(crate) fn rtl_column(style: Style) -> Style {
 
 pub(crate) const FORM_FIELD_HEIGHT_PX: f64 = 32.0;
 pub(crate) const SETTINGS_CARD_MAX_WIDTH_PX: f64 = 720.0;
-pub(crate) const SETTINGS_CARD_PADDING_PX: f64 = 22.0;
+pub(crate) const SETTINGS_CARD_PADDING_PX: f64 = 24.0;
 pub(crate) const SETTINGS_FIELD_HEIGHT_PX: f64 = 40.0;
 pub(crate) const UI_FONT_FAMILY: &str = "Noto Sans";
 

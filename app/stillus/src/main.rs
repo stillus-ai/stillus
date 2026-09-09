@@ -54,7 +54,6 @@ use floem::file::{FileDialogOptions, FileSpec};
 use floem::file_action::open_file;
 use floem::keyboard::{Key, KeyCode, Modifiers, NamedKey, PhysicalKey};
 use floem::kurbo::{Point, Size};
-use floem::menu::Menu;
 use floem::pointer::PointerInputEvent;
 use floem::prelude::*;
 use floem::reactive::create_effect;
@@ -150,17 +149,14 @@ const PROTECTION_POPOVER_WIDTH_PX: f64 = 220.0;
 /// The creation popover shares the sort popover width: the RSS form inside it
 /// has to fit a full feed URL on one line.
 const CREATE_POPOVER_WIDTH_PX: f64 = 248.0;
-const CREATE_POPOVER_PADDING_PX: f64 = 6.0;
 /// The RSS form is a form, not a menu: it keeps a roomier card padding than
 /// the choice rows, which carry their own horizontal padding.
-const RSS_FORM_PADDING_PX: f64 = 12.0;
+const RSS_FORM_PADDING_PX: f64 = 16.0;
 const RSS_FORM_GAP_PX: f64 = 8.0;
 /// Gap between toolbar controls, shared by the document header and the feed
 /// toolbar so both read as one row of controls.
 const TOOLBAR_ACTION_GAP_PX: f64 = 6.0;
-const RSS_RENAME_FIELD_WIDTH_PX: f64 = 340.0;
-const RSS_CATEGORIES_FIELD_WIDTH_PX: f64 = 420.0;
-const RSS_FORM_BUTTON_HEIGHT_PX: f64 = 30.0;
+const RSS_FORM_BUTTON_HEIGHT_PX: f64 = 32.0;
 /// Reserved for the hint line so a one-line error does not move the buttons.
 const RSS_FORM_STATUS_HEIGHT_PX: f64 = 16.0;
 /// Pressed-in shade of `Palette::accent` for the primary form button hover.
@@ -2266,9 +2262,11 @@ fn app_view(
         sidebar_panel(
             model.clone(),
             revision,
-            sidebar_width,
-            sidebar_state,
-            window_size,
+            SidebarLayoutSignals {
+                sidebar_width,
+                sidebar_state,
+                window_size,
+            },
             SearchPanelSignals {
                 open: search_open,
                 query: search_query,
@@ -2354,6 +2352,7 @@ fn app_view(
             apply_workspace,
             close_settings: close_settings.clone(),
             updates: updates.clone(),
+            window_size,
         },
         palette,
     );
@@ -2522,6 +2521,7 @@ struct SettingsPageContext {
     apply_workspace: Rc<dyn Fn(PathBuf)>,
     close_settings: Rc<dyn Fn()>,
     updates: update::Updates,
+    window_size: RwSignal<Size>,
 }
 
 fn settings_page_view(
@@ -2536,6 +2536,7 @@ fn settings_page_view(
         apply_workspace,
         close_settings,
         updates,
+        window_size,
     } = context;
     let locale_projection = global_settings_store.clone();
     create_effect(move |_| {
@@ -2563,33 +2564,28 @@ fn settings_page_view(
         },
         palette,
     );
-    let language_card = v_stack((
-        text(msg!(Language)).style(move |style| {
-            style
-                .font_size(crate::ui::FONT_SECTION as f32)
-                .font_family(crate::ui::HEADING_FONT_FAMILY.to_owned())
-                .font_weight(floem::text::Weight::SEMIBOLD)
-                .color(palette.ink)
-        }),
-        text(msg!(LanguageDescription)).style(move |style| {
-            style
-                .font_size(crate::ui::FONT_CAPTION as f32)
-                .color(palette.muted)
-        }),
-        language_picker,
-        label(move || {
-            language_feedback
-                .get()
-                .map(|message| message.render())
-                .unwrap_or_default()
-        })
-        .style(move |style| {
-            style
-                .font_size(crate::ui::FONT_CAPTION as f32)
-                .color(palette.danger)
-        }),
-    ))
-    .style(move |style| settings_card_style(style, palette).gap(10.0));
+    let language_card = settings_card(
+        i18n::Key::Language,
+        None,
+        Some(i18n::Key::LanguageDescription),
+        v_stack((
+            language_picker,
+            label(move || {
+                language_feedback
+                    .get()
+                    .map(|message| message.render())
+                    .unwrap_or_default()
+            })
+            .style(move |style| {
+                style
+                    .font_size(crate::ui::FONT_CAPTION as f32)
+                    .color(palette.danger)
+                    .apply_if(language_feedback.get().is_none(), |style| style.hide())
+            }),
+        ))
+        .style(|style| style.width_full().gap(8.0)),
+        palette,
+    );
     let close_action = close_settings.clone();
     let general_navigation_model = model.clone();
     let encryption_navigation_model = model.clone();
@@ -2813,38 +2809,19 @@ fn settings_page_view(
         },
     );
 
-    let workspace_card = v_stack((
-        h_stack((
-            svg(ICON_FOLDER).style(move |style| style.size(20.0, 20.0).color(palette.accent)),
-            v_stack((
-                label(move || tr!(Workspace)).style(move |style| {
-                    style
-                        .font_size(crate::ui::FONT_SECTION as f32)
-                        .font_family(crate::ui::HEADING_FONT_FAMILY.to_owned())
-                        .font_weight(floem::text::Weight::SEMIBOLD)
-                        .color(palette.ink)
-                        .selectable(false)
-                }),
-                label(move || tr!(WorkspaceDescription)).style(move |style| {
-                    style
-                        .font_size(crate::ui::FONT_CAPTION as f32)
-                        .color(palette.muted)
-                        .selectable(false)
-                }),
-            ))
-            .style(|style| rtl_column(style).gap(3.0)),
+    let workspace_card = settings_card(
+        i18n::Key::Workspace,
+        Some(ICON_FOLDER),
+        Some(i18n::Key::WorkspaceDescription),
+        v_stack((
+            settings_field_label(i18n::Key::Path, palette),
+            path_input,
+            controls,
+            feedback,
         ))
-        .style(|style| rtl_row(style).items_start().gap(12.0)),
-        empty().style(|style| style.height(20.0)),
-        settings_field_label(i18n::Key::Path, palette),
-        empty().style(|style| style.height(7.0)),
-        path_input,
-        empty().style(|style| style.height(10.0)),
-        controls,
-        empty().style(|style| style.height(12.0)),
-        feedback,
-    ))
-    .style(move |style| settings_card_style(style, palette));
+        .style(|style| style.width_full().gap(8.0)),
+        palette,
+    );
 
     let general_content = scroll(
         v_stack((
@@ -2871,7 +2848,7 @@ fn settings_page_view(
         .style(|style| {
             rtl_column(style)
                 .width_full()
-                .padding_horiz(44.0)
+                .padding_horiz(SETTINGS_PAGE_INSET_PX)
                 .padding_vert(38.0)
         }),
     )
@@ -2926,9 +2903,10 @@ fn settings_page_view(
     });
 
     h_stack((navigation, content)).style(move |style| {
+        let size = window_size.get();
         let style = rtl_row(style)
             .absolute()
-            .size_full()
+            .size(size.width, size.height)
             .min_size(settings::MIN_WINDOW_WIDTH, settings::MIN_WINDOW_HEIGHT)
             .background(palette.canvas)
             .font_family(UI_FONT_FAMILY.to_owned());
@@ -3432,20 +3410,32 @@ fn encryption_settings_view(
                 .encryption_feedback
                 .get()
                 .is_some_and(|feedback| feedback.is_error);
-        style.min_height(18.0).font_size(crate::ui::FONT_CAPTION as f32).color(if is_error {
+        let model = model.borrow();
+        let visible = model.password_change_error.is_some() || model.secure_progress.is_some()
+            || model.password_change_result.is_some() || model.pending_password_change.is_some()
+            || matches!(model.secure_ui_operation, Some(SecureUiOperation::ChangeMasterPassword))
+            || signals.encryption_feedback.get().is_some();
+        style.apply_if(!visible, |style| style.hide()).font_size(crate::ui::FONT_CAPTION as f32).color(if is_error {
             palette.danger
         } else {
             palette.accent
         })
     });
 
-    let card = v_stack((
-        protected_count,
-        v_stack((current, new_password, confirmation)).style(|style| style.width_full().gap(9.0)),
-        submit,
-        status,
-    ))
-    .style(move |style| settings_card_style(style, palette).gap(14.0));
+    let card = settings_card(
+        i18n::Key::ChangeMasterPassword,
+        Some(ICON_LOCK),
+        None,
+        v_stack((
+            protected_count,
+            v_stack((current, new_password, confirmation))
+                .style(|style| style.width_full().gap(8.0)),
+            actions((submit,)),
+            status,
+        ))
+        .style(|style| style.width_full().gap(16.0)),
+        palette,
+    );
 
     scroll(
         v_stack((
@@ -3468,7 +3458,7 @@ fn encryption_settings_view(
         .style(|style| {
             rtl_column(style)
                 .width_full()
-                .padding_horiz(44.0)
+                .padding_horiz(SETTINGS_PAGE_INSET_PX)
                 .padding_vert(38.0)
         }),
     )
@@ -6006,16 +5996,15 @@ fn creation_popover(
     .style(move |style| {
         style
             .width(CREATE_POPOVER_WIDTH_PX)
-            .padding(if rss_mode.get() {
-                RSS_FORM_PADDING_PX
-            } else {
-                CREATE_POPOVER_PADDING_PX
+            .apply_if(rss_mode.get(), |style| {
+                style
+                    .padding(RSS_FORM_PADDING_PX)
+                    .background(palette.paper)
+                    .color(palette.ink)
+                    .border(1.0)
+                    .border_color(palette.divider)
+                    .border_radius(8.0)
             })
-            .background(palette.paper)
-            .color(palette.ink)
-            .border(1.0)
-            .border_color(palette.divider)
-            .border_radius(7.0)
     })
 }
 
@@ -6035,69 +6024,92 @@ fn creation_choices(
     let chat_model = model.clone();
     let file_model = model;
     let file_enabled = file_spec.is_some();
-    v_stack((
-        menu_item(ICON_NOTE, msg!(Note), true, palette, move || {
-            open.set(false);
-            let active = sidebar_state.get_untracked().creation_group;
-            note_model.borrow_mut().request_note_creation(active);
-            revision.update(|value| *value += 1);
-            schedule_autosave(note_model.clone(), revision);
-        }),
-        menu_item(ICON_FILE, msg!(File), file_enabled, palette, move || {
-            open.set(false);
-            let Some(mut file_spec) = file_spec else {
-                return;
-            };
-            if picker_active.get_untracked() {
-                return;
-            }
-            picker_active.set(true);
-            file_spec.name = i18n::static_filter_name();
-            let options = FileDialogOptions::new()
-                .title(tr!(ChooseExternal))
-                .multi_selection()
-                .allowed_types(vec![file_spec]);
-            let selected_model = file_model.clone();
-            open_file(options, move |selection| {
-                picker_active.set(false);
-                let Some(paths) = selection.map(|file| file.path) else {
-                    return;
-                };
-                selected_model.borrow_mut().accept_external_paths(&paths);
-                revision.update(|value| *value += 1);
-                schedule_autosave(selected_model.clone(), revision);
-            });
-        }),
-        menu_item(ICON_RSS, msg!(RssFeed), true, palette, move || {
-            rss_error.set(None);
-            rss_mode.set(true);
-        }),
-        menu_item(ICON_CHAT, msg!(ChatMenu), true, palette, move || {
-            open.set(false);
-            let group = sidebar_state.get_untracked().creation_group;
-            let categories = if let SidebarFilter::Tag(category) = &group {
-                vec![category.clone()]
-            } else {
-                Vec::new()
-            };
-            let result = chat_model.borrow_mut().dispatch(
-                application::api::Caller::Ui,
-                application::api::Command::Chat(application::chat::Command::Create {
-                    title: tr!(ChatNew),
-                    categories,
-                    favorited: matches!(group, SidebarFilter::Favorites),
-                    open: true,
-                }),
-            );
-            if let Err(error) = result {
-                chat_model.borrow_mut().error = Some(UiText::Failure {
-                    details: format!("{error:?}"),
-                });
-            }
-            revision.update(|v| *v += 1);
-        }),
-    ))
-    .style(|style| style.width_full().gap(2.0))
+    menu(
+        vec![
+            MenuEntry::action(
+                ICON_NOTE,
+                || tr!(Note),
+                || true,
+                move || {
+                    open.set(false);
+                    let active = sidebar_state.get_untracked().creation_group;
+                    note_model.borrow_mut().request_note_creation(active);
+                    revision.update(|value| *value += 1);
+                    schedule_autosave(note_model.clone(), revision);
+                },
+            ),
+            MenuEntry::action(
+                ICON_FILE,
+                || tr!(File),
+                move || file_enabled,
+                move || {
+                    open.set(false);
+                    let Some(mut file_spec) = file_spec else {
+                        return;
+                    };
+                    if picker_active.get_untracked() {
+                        return;
+                    }
+                    picker_active.set(true);
+                    file_spec.name = i18n::static_filter_name();
+                    let options = FileDialogOptions::new()
+                        .title(tr!(ChooseExternal))
+                        .multi_selection()
+                        .allowed_types(vec![file_spec]);
+                    let selected_model = file_model.clone();
+                    open_file(options, move |selection| {
+                        picker_active.set(false);
+                        let Some(paths) = selection.map(|file| file.path) else {
+                            return;
+                        };
+                        selected_model.borrow_mut().accept_external_paths(&paths);
+                        revision.update(|value| *value += 1);
+                        schedule_autosave(selected_model.clone(), revision);
+                    });
+                },
+            ),
+            MenuEntry::action(
+                ICON_RSS,
+                || tr!(RssFeed),
+                || true,
+                move || {
+                    rss_error.set(None);
+                    rss_mode.set(true);
+                },
+            )
+            .keep_open(),
+            MenuEntry::action(
+                ICON_CHAT,
+                || tr!(ChatMenu),
+                || true,
+                move || {
+                    open.set(false);
+                    let group = sidebar_state.get_untracked().creation_group;
+                    let categories = if let SidebarFilter::Tag(category) = &group {
+                        vec![category.clone()]
+                    } else {
+                        Vec::new()
+                    };
+                    let result = chat_model.borrow_mut().dispatch(
+                        application::api::Caller::Ui,
+                        application::api::Command::Chat(application::chat::Command::Create {
+                            title: tr!(ChatNew),
+                            categories,
+                            favorited: matches!(group, SidebarFilter::Favorites),
+                            open: true,
+                        }),
+                    );
+                    if let Err(error) = result {
+                        chat_model.borrow_mut().error = Some(UiText::Failure {
+                            details: format!("{error:?}"),
+                        });
+                    }
+                    revision.update(|v| *v += 1);
+                },
+            ),
+        ],
+        palette,
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -6269,7 +6281,7 @@ fn rss_creation_form(
                 })
         }),
     ))
-    .style(|style| style.width_full().items_center());
+    .style(|style| style.width_full().items_center().margin_top(8.0));
     v_stack((header, input, status, footer)).style(|style| style.width_full().gap(RSS_FORM_GAP_PX))
 }
 
@@ -6281,31 +6293,34 @@ fn protection_popover(
 ) -> impl IntoView {
     let lock_model = model.clone();
     let disable_model = model;
-    v_stack((
-        menu_action_row(msg!(LockNote), false, palette, move || {
-            open.set(false);
-            lock_model.borrow_mut().lock_selected();
-            revision.update(|value| *value += 1);
-            schedule_autosave(lock_model.clone(), revision);
-        }),
-        menu_action_row(msg!(RemoveEncryption), true, palette, move || {
-            open.set(false);
-            disable_model.borrow_mut().disable_protection_selected();
-            revision.update(|value| *value += 1);
-            schedule_autosave(disable_model.clone(), revision);
-        }),
-    ))
-    .style(move |style| {
-        style
-            .width(PROTECTION_POPOVER_WIDTH_PX)
-            .gap(2.0)
-            .padding(6.0)
-            .background(palette.paper)
-            .color(palette.ink)
-            .border(1.0)
-            .border_color(palette.divider)
-            .border_radius(7.0)
-    })
+    menu(
+        vec![
+            MenuEntry::action(
+                ICON_LOCK,
+                || tr!(LockNote),
+                || true,
+                move || {
+                    open.set(false);
+                    lock_model.borrow_mut().lock_selected();
+                    revision.update(|value| *value += 1);
+                    schedule_autosave(lock_model.clone(), revision);
+                },
+            ),
+            MenuEntry::action(
+                ICON_UNLOCK,
+                || tr!(RemoveEncryption),
+                || true,
+                move || {
+                    open.set(false);
+                    disable_model.borrow_mut().disable_protection_selected();
+                    revision.update(|value| *value += 1);
+                    schedule_autosave(disable_model.clone(), revision);
+                },
+            )
+            .danger(true),
+        ],
+        palette,
+    )
 }
 
 fn sidebar_sort_popover(
@@ -6321,103 +6336,81 @@ fn sidebar_sort_popover(
         field,
         direction,
     } = signals;
-    let name_field = field;
-    let created_field = field;
-    let modified_field = field;
-    let ascending_direction = direction;
-    let descending_direction = direction;
     let apply_scope = scope;
     let apply_model = model;
-    v_stack((
-        label(move || tr!(SortNotes)).style(move |style| {
-            style
-                .font_size(crate::ui::FONT_BODY as f32)
-                .color(palette.ink)
-                .selectable(false)
-        }),
-        v_stack((
-            choice_row(
-                msg!(ByName),
-                move || name_field.get() == NoteSortField::Name,
+    menu(
+        vec![
+            MenuEntry::action(
+                ICON_SORT,
+                || tr!(ByName),
+                || true,
                 move || field.set(NoteSortField::Name),
-                palette,
-            ),
-            choice_row(
-                msg!(ByCreated),
-                move || created_field.get() == NoteSortField::Created,
+            )
+            .selected(move || field.get() == NoteSortField::Name)
+            .keep_open(),
+            MenuEntry::action(
+                ICON_SORT,
+                || tr!(ByCreated),
+                || true,
                 move || field.set(NoteSortField::Created),
-                palette,
-            ),
-            choice_row(
-                msg!(ByUpdated),
-                move || modified_field.get() == NoteSortField::Modified,
+            )
+            .selected(move || field.get() == NoteSortField::Created)
+            .keep_open(),
+            MenuEntry::action(
+                ICON_SORT,
+                || tr!(ByUpdated),
+                || true,
                 move || field.set(NoteSortField::Modified),
-                palette,
-            ),
-        ))
-        .style(|style| style.width_full().gap(2.0)),
-        empty().style(move |style| {
-            style
-                .width_full()
-                .height(1.0)
-                .margin_vert(4.0)
-                .background(palette.divider)
-        }),
-        v_stack((
-            choice_row(
-                msg!(Ascending),
-                move || ascending_direction.get() == SortDirection::Ascending,
+            )
+            .selected(move || field.get() == NoteSortField::Modified)
+            .keep_open(),
+            MenuEntry::action(
+                ICON_SORT,
+                || tr!(Ascending),
+                || true,
                 move || direction.set(SortDirection::Ascending),
-                palette,
-            ),
-            choice_row(
-                msg!(Descending),
-                move || descending_direction.get() == SortDirection::Descending,
+            )
+            .selected(move || direction.get() == SortDirection::Ascending)
+            .keep_open(),
+            MenuEntry::action(
+                ICON_SORT,
+                || tr!(Descending),
+                || true,
                 move || direction.set(SortDirection::Descending),
-                palette,
-            ),
-        ))
-        .style(|style| style.width_full().gap(2.0)),
-        dialog_button(
-            ButtonAction::Custom(ButtonAction::Save.icon()),
-            msg!(Apply),
-            IconButtonTone::Primary,
-            palette,
-            move || {
-                let cleared = apply_model
-                    .borrow_mut()
-                    .clear_sidebar_note_order(&apply_scope);
-                if cleared.is_none() {
+            )
+            .selected(move || direction.get() == SortDirection::Descending)
+            .keep_open(),
+            MenuEntry::action(
+                ButtonAction::Save.icon(),
+                || tr!(Apply),
+                || true,
+                move || {
+                    let cleared = apply_model
+                        .borrow_mut()
+                        .clear_sidebar_note_order(&apply_scope);
+                    if cleared.is_none() {
+                        revision.update(|value| *value = value.saturating_add(1));
+                        return;
+                    }
+                    if let Some(order_key) = sidebar_note_order_key(&apply_scope) {
+                        sidebar_state.update(|state| {
+                            state.set_note_sort(
+                                order_key.to_owned(),
+                                NoteSort {
+                                    field: field.get_untracked(),
+                                    direction: direction.get_untracked(),
+                                },
+                            );
+                        });
+                    }
+                    open.set(false);
                     revision.update(|value| *value = value.saturating_add(1));
-                    return;
-                }
-                if let Some(order_key) = sidebar_note_order_key(&apply_scope) {
-                    sidebar_state.update(|state| {
-                        state.set_note_sort(
-                            order_key.to_owned(),
-                            NoteSort {
-                                field: field.get_untracked(),
-                                direction: direction.get_untracked(),
-                            },
-                        );
-                    });
-                }
-                open.set(false);
-                revision.update(|value| *value = value.saturating_add(1));
-            },
-        ),
-    ))
-    .style(move |style| {
-        style
-            .width(SORT_POPOVER_WIDTH_PX)
-            .gap(8.0)
-            .padding(10.0)
-            .background(palette.paper)
-            .color(palette.ink)
-            .border(1.0)
-            .border_color(palette.divider)
-            .border_radius(7.0)
-    })
+                },
+            )
+            .keep_open(),
+        ],
+        palette,
+    )
 }
 
 fn sidebar_group_row(
@@ -7490,16 +7483,25 @@ impl View for SidebarResizeView {
     }
 }
 
-fn sidebar_panel(
-    model: Rc<RefCell<AppModel>>,
-    revision: RwSignal<u64>,
+struct SidebarLayoutSignals {
     sidebar_width: RwSignal<f64>,
     sidebar_state: RwSignal<SidebarState>,
     window_size: RwSignal<Size>,
+}
+
+fn sidebar_panel(
+    model: Rc<RefCell<AppModel>>,
+    revision: RwSignal<u64>,
+    layout: SidebarLayoutSignals,
     search: SearchPanelSignals,
     open_settings: Rc<dyn Fn()>,
     palette: Palette,
 ) -> impl IntoView {
+    let SidebarLayoutSignals {
+        sidebar_width,
+        sidebar_state,
+        window_size,
+    } = layout;
     let SearchPanelSignals {
         open: search_open,
         query: search_query,
@@ -8505,14 +8507,12 @@ fn rss_panel(
             value: create_rw_signal(String::new()),
             label: i18n::Key::NewTitle,
             placeholder: i18n::Key::FeedTitle,
-            field_width: RSS_RENAME_FIELD_WIDTH_PX,
         },
         categories: ToolbarEditBar {
             open: create_rw_signal(false),
             value: create_rw_signal(String::new()),
             label: i18n::Key::CategoriesPlaceholder,
             placeholder: i18n::Key::CategoriesExample,
-            field_width: RSS_CATEGORIES_FIELD_WIDTH_PX,
         },
     };
 
@@ -9827,10 +9827,11 @@ fn editor_panel(
             blur_visible.set(false);
             blur_generation.update(|generation| *generation = generation.saturating_add(1));
             revision.update(|value| *value += 1);
-        })
-        .context_menu(move || {
-            editor_context_menu(editor_menu_model.clone(), revision, editor_focus_id)
         });
+    let editor_surface = context_menu_view(editor_surface, palette, move || {
+        editor_context_menu(editor_menu_model.clone(), revision, editor_focus_id)
+    })
+    .style(|style| style.size_full());
     let editor_scrollbar_model = model.clone();
     let editor_scrollbar = empty().pointer_events(|| false).style(move |style| {
         revision.get();
@@ -10284,7 +10285,7 @@ fn editor_panel(
                     let model = status_tooltip_model.borrow();
                     let mut status = editor_status(&model);
                     if let Some(details) = model.error.as_ref().and_then(i18n::safe_error_details) {
-                        status.push_str("\n");
+                        status.push('\n');
                         status.push_str(&details);
                     }
                     status
@@ -10511,31 +10512,44 @@ fn editor_context_menu(
     model: Rc<RefCell<AppModel>>,
     revision: RwSignal<u64>,
     editor_focus_id: ViewId,
-) -> Menu {
+) -> Vec<MenuEntry> {
     let has_clipboard_text = Clipboard::get_contents().is_ok_and(|contents| !contents.is_empty());
     let state = editor_menu_state(&model.borrow(), has_clipboard_text);
 
     let cut_model = model.clone();
     let copy_model = model.clone();
     let paste_model = model;
-    native_edit_menu(
-        state.can_cut_or_copy,
-        state.can_paste,
-        move || {
-            execute_editor_command(&cut_model, revision, EditorCommand::Cut);
-            editor_focus_id.request_focus();
-        },
-        move || {
-            execute_editor_command(&copy_model, revision, EditorCommand::Copy);
-            editor_focus_id.request_focus();
-        },
-        move || {
-            if let Ok(contents) = Clipboard::get_contents() {
-                execute_editor_command(&paste_model, revision, EditorCommand::Paste(contents));
-            }
-            editor_focus_id.request_focus();
-        },
-    )
+    vec![
+        MenuEntry::action(
+            ButtonAction::Cut.icon(),
+            || tr!(Cut),
+            move || state.can_cut_or_copy,
+            move || {
+                execute_editor_command(&cut_model, revision, EditorCommand::Cut);
+                editor_focus_id.request_focus();
+            },
+        ),
+        MenuEntry::action(
+            ButtonAction::Copy.icon(),
+            || tr!(Copy),
+            move || state.can_cut_or_copy,
+            move || {
+                execute_editor_command(&copy_model, revision, EditorCommand::Copy);
+                editor_focus_id.request_focus();
+            },
+        ),
+        MenuEntry::action(
+            ButtonAction::Paste.icon(),
+            || tr!(Paste),
+            move || state.can_paste,
+            move || {
+                if let Ok(contents) = Clipboard::get_contents() {
+                    execute_editor_command(&paste_model, revision, EditorCommand::Paste(contents));
+                }
+                editor_focus_id.request_focus();
+            },
+        ),
+    ]
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -13394,7 +13408,6 @@ mod tests {
                 value: panel_scope.create_rw_signal(String::new()),
                 label: Key::NewTitle,
                 placeholder: Key::NewTitle,
-                field_width: 100.0,
             };
             let signals = super::RssToolbarSignals {
                 filters_open: super::create_rw_signal(false),

@@ -20,6 +20,8 @@ def violations(path: Path, source: str) -> list[str]:
             "native text field outside ui": r"\bTextInput::new\b|\btext_input\s*\(",
             "native multiline editor outside ui": r"\btext_editor(?:_keys)?\s*\(|\bTextDocument::new\b|\beditor_container_view\s*\(",
             "native select outside ui": r"\bDropdown::(?:new|custom)\b",
+            "native menu outside ui": r"\b(?:Menu|MenuItem)::new\b|\.context_menu\s*\(",
+            "native tooltip outside ui": r"\.tooltip\s*\(",
             "native button outside ui": r"\b(?:button|reliable_button)\s*\(",
             "local button implementation": r"\bfn\s+\w*(?:icon_button|text_button|action_button|dialog_button)\s*\(",
             "untitled icon surface": r"\bselectable_row\s*\(\s*svg\s*\(",

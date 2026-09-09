@@ -7,8 +7,13 @@ use floem::kurbo::{Rect, Size};
 use floem::text::{Attrs, AttrsList, FamilyOwned, TextLayout};
 use std::cell::Cell;
 
+type TooltipRegistration = (
+    std::rc::Weak<RefCell<Option<ViewId>>>,
+    std::rc::Weak<Cell<u64>>,
+);
+
 thread_local! {
-    static TOOLTIPS: RefCell<Vec<(std::rc::Weak<RefCell<Option<ViewId>>>, std::rc::Weak<Cell<u64>>)>> = const { RefCell::new(Vec::new()) };
+    static TOOLTIPS: RefCell<Vec<TooltipRegistration>> = const { RefCell::new(Vec::new()) };
 }
 
 pub(crate) fn close_button_tooltips() {

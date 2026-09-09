@@ -13,6 +13,8 @@ class BoundaryTests(unittest.TestCase):
                        "text_editor_keys(value)", "TextDocument::new(scope, text)",
                        "button(label)", "floem::views::button(label)",
                        "reliable_button(label, action)", "selectable_row(svg(icon), action)",
+                       "Menu::new(title)", "MenuItem::new(title)", "row.context_menu(menu)",
+                       "label(title).tooltip(content)",
                        "fn chat_icon_button() {}"):
             with self.subTest(source=source):
                 self.assertTrue(violations(Path("chat_view.rs"), source))
@@ -25,6 +27,12 @@ class BoundaryTests(unittest.TestCase):
     def test_screen_can_compose_components_and_specialized_editor(self):
         self.assertFalse(violations(Path("main.rs"),
                                     "TextArea::new(value, palette); action_button(kind, title); render_editor(model);"))
+
+    def test_screen_can_compose_shared_menus_and_forms(self):
+        self.assertFalse(violations(Path("main.rs"),
+            "menu(entries, palette); context_menu_view(row, palette, entries); "
+            "anchored_popover(trigger, open, width, gap, true, content); "
+            "toolbar_edit_bar(bar, palette, save); settings_card(title, icon, description, content, palette);"))
 
 
 if __name__ == "__main__":

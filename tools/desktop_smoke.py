@@ -76,7 +76,11 @@ def persistence_smoke(root, env, scenario):
             else:
                 external = (workspace / "notes/Reading List.md").read_bytes()
                 project.write_bytes(external)
-                assert process.wait(timeout=15) == 0
+                # The timed QuitApp is a close request and must be rejected
+                # while the conflicting document still needs resolution.
+                time.sleep(3.0)
+                assert process.poll() is None
+                assert windows(env, "^Stillus$")
                 assert project.read_bytes() == external
                 assert any(recovery.glob("*.nrrec"))
         elif scenario == "autosave":

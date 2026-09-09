@@ -306,7 +306,7 @@ TAG_POPOVER_CROP = (TAG_POPOVER_LEFT - 6, 44, 292, 390)
 # the offsets inside one card are fixed here.
 AI_SIDEBAR_ITEM = (90, 203)
 AI_CONTENT_LEFT = 232 + 44
-AI_CARD_PADDING = 22
+AI_CARD_PADDING = 24
 AI_CARD_CONTENT_LEFT = AI_CONTENT_LEFT + 1 + AI_CARD_PADDING
 # A column inside a filled primary button that its centred label never covers.
 AI_PRIMARY_PROBE_X = AI_CARD_CONTENT_LEFT + 3
@@ -381,10 +381,10 @@ def tag_remove_center(index: int) -> tuple[int, int]:
 # app/stillus/src/main.rs. The card is wider than the gap between the sidebar
 # edge and its trigger, so it sits at the clamped x=8 under the header; the
 # RSS form is its tallest state.
-CREATE_POPOVER_CROP = (8, 40, 248, 146)
+CREATE_POPOVER_CROP = (8, 40, 248, 184)
 # Interior of the primary RSS button: accent fill once the field holds an
 # address, divider fill while the disabled button is waiting for one.
-RSS_SUBMIT_CROP = (170, 150, 60, 20)
+RSS_SUBMIT_CROP = (170, 168, 60, 20)
 RSS_SUBMIT_ACCENT = (54, 94, 130)
 
 
@@ -401,16 +401,16 @@ CONTROLS = {
     "create_note": (116, 63),
     "open_file": (116, 97),
     "create_rss": (116, 131),
-    "rss_back": (54, 161),
-    "settings_path": (610, 418),
-    "settings_apply": (475, 464),
+    "rss_back": (54, 179),
+    "settings_path": (610, 447),
+    "settings_apply": (508, 491),
     "settings_back": (36, 42),
     "settings_encryption": (100, 163),
     "startup_primary": (785, 495),
-    "encryption_current": (520, 201),
-    "encryption_new": (520, 250),
-    "encryption_confirmation": (520, 299),
-    "encryption_submit": (375, 349),
+    "encryption_current": (520, 243),
+    "encryption_new": (520, 291),
+    "encryption_confirmation": (520, 339),
+    "encryption_submit": (375, 391),
     # The transparent hit area occupies the final 8px inside the sidebar so
     # the adjacent editor cannot win hit testing at the shared boundary.
     "sidebar_resize_default": (254, 400),
@@ -3005,6 +3005,7 @@ def lifecycle_scenario(driver: WindowDriver, workspace: Path) -> None:
     driver.key("Return")
     wait_until("retained tag addition", lambda: "  - 'Keep'" in read_text(accepted_note))
 
+    driver.key("Escape")  # Close the tag layer before invoking another action.
     driver.click("pin")
     wait_until("pinned metadata", lambda: "pinned: true" in read_text(accepted_note))
     driver.click("pin")
@@ -3927,10 +3928,11 @@ def categories_scenario(driver: WindowDriver, workspace: Path) -> None:
         crop=(8, work_top + GROUP_ROW_HEIGHT, 248, 270),
         minimum_pixels=500,
     )
-    popover_top = work_top + GROUP_ROW_HEIGHT + 4
-    driver.click_point(100, popover_top + 80)
-    driver.click_point(100, popover_top + 190)
-    driver.click_point(100, popover_top + 242)
+    popover_top = work_top + GROUP_ROW_HEIGHT + 8
+    # Shared menu: 8px inset plus border, six 32px rows.
+    driver.click_point(100, popover_top + 9 + 32 + 16)
+    driver.click_point(100, popover_top + 9 + 4 * 32 + 16)
+    driver.click_point(100, popover_top + 9 + 5 * 32 + 16)
 
     wait_until(
         "automatic sort removes manual order",
@@ -7076,12 +7078,13 @@ def creation_scenario(driver: WindowDriver, workspace: Path) -> None:
             f"empty RSS form offers an enabled submit button ({idle_submit} accent pixels)"
         )
     driver.type_text("https://example.com/feed.xml")
-    typed = driver.wait_for_visual_change(
+    wait_until(
         "feed address enables the submit button",
-        form,
-        crop=RSS_SUBMIT_CROP,
-        minimum_pixels=200,
+        lambda: driver.window_color_pixel_count(
+            RSS_SUBMIT_ACCENT, crop=RSS_SUBMIT_CROP,
+        ) >= 400,
     )
+    typed = driver.capture("rss-submit-enabled")
     filled_submit = near_color_pixel_count(typed, RSS_SUBMIT_ACCENT, crop=RSS_SUBMIT_CROP)
     if filled_submit < 400:
         raise AcceptanceFailure(
@@ -7297,7 +7300,9 @@ def rss_filters_scenario(driver: WindowDriver, workspace: Path) -> None:
     driver.click_note(1, expanded_groups=("all",), categories=(), counts={"all": 2, "favorites": 0, "trash": 0})
     blacklist = "promotion\nsponsored"
     whitelist = "rust\nuseful"
-    black_y, white_y, footer_y = 225, 365, 510
+    # The shared form removes the empty 36px status and its 8px gap, uses
+    # 16px padding (formerly 18px), and adds an 8px footer margin.
+    black_y, white_y, footer_y = 225, 365, 472
 
     def preferences() -> dict:
         return json.loads(config_path.read_text())["subscriptions"][0]["preferences"]
@@ -7474,9 +7479,14 @@ def rss_cards_scenario(driver: WindowDriver, workspace: Path) -> None:
 
 def localization_scenario(driver: WindowDriver, workspace: Path) -> None:
     def open_language_picker(rtl: bool) -> int:
+        # Wait for the resized settings surface, not only the X window bounds.
+        width, _ = driver.window_size()
+        sidebar_x = width - 232 + 5 if rtl else 5
+        wait_until("settings sidebar matches window geometry", lambda:
+            driver.window_color_pixel_count((36, 42, 51), crop=(sidebar_x, 90, 5, 5)) == 25)
         # Locate the dropdown arrow independently of each script's line metrics.
         frame = driver.capture("language-control")
-        arrow_x = 371 if rtl else 577
+        arrow_x = 81 if rtl else 577
         pixels = run_command(["convert", str(frame), "-crop", f"12x120+{arrow_x}+180",
                               "+repage", "-depth", "8", "txt:-"]).stdout
         rows = []
@@ -7486,7 +7496,7 @@ def localization_scenario(driver: WindowDriver, workspace: Path) -> None:
                 rows.append(int(match[1]) + 180)
         if not rows:
             raise AcceptanceFailure("language dropdown arrow is not visible")
-        driver.click_point(511 if rtl else 448, max(rows))
+        driver.click_point(220 if rtl else 448, max(rows))
         return max(rows)
 
     languages = ("en", "es", "ru", "zh/hans", "zh/hant", "pt/br", "pt/pt", "hi",
@@ -7526,7 +7536,7 @@ def localization_scenario(driver: WindowDriver, workspace: Path) -> None:
         failed = driver.wait_for_stable_frame("rejected language retains English", stable_for=0.3)
         if near_color_pixel_count(failed, (164, 69, 69), crop=(298, 220, 495, 100)) < 20:
             raise AcceptanceFailure("language write failure did not show an error")
-        if image_difference(baseline, failed, crop=(310, control_y - 12, 180, 23)) != 0:
+        if image_difference(baseline, failed, crop=(314, control_y - 9, 160, 17)) != 0:
             raise AcceptanceFailure("failed language save changed the displayed selection")
         if not config.is_dir() or preserved_config.read_bytes() != original_config:
             raise AcceptanceFailure("failed language save changed the previous configuration")
@@ -8836,6 +8846,49 @@ def components_scenario(driver: WindowDriver, workspace: Path) -> None:
     russian_tip = driver.wait_for_visual_change("translated tooltip appears", no_tip, crop=(20, 55, 400, 65), minimum_pixels=50, timeout=3)
     if image_difference(english_tip, russian_tip, crop=(45, 55, 180, 32)) < 20:
         raise AcceptanceFailure("tooltip did not follow the locale")
+    driver.xdotool("mousemove", "--window", driver.window_id, "900", "500")
+    menu_crop = (20, 460, 260, 280)
+    counter_crop = (24, 384, 950, 24)
+    menu_closed = driver.wait_for_stable_frame("shared menu fixture before opening", crop=menu_crop)
+    counters = driver.capture("before-menu-action")
+    driver.click_point(50, 440)
+    menu_opened = driver.wait_for_visual_change("shared menu with nine entries", menu_closed,
+                                               crop=menu_crop, minimum_pixels=200)
+    driver.click_point(50, 516)  # The second entry is unavailable.
+    unavailable = driver.wait_for_stable_frame("unavailable menu action stays open", crop=menu_crop)
+    if image_difference(counters, unavailable, crop=counter_crop):
+        raise AcceptanceFailure("unavailable menu entry invoked its action")
+    if image_difference(menu_closed, unavailable, crop=menu_crop) < 200:
+        raise AcceptanceFailure("unavailable menu entry dismissed the menu")
+    driver.key("Home")
+    driver.key("Down")
+    driver.key("Return")
+    driver.wait_for_visual_change("menu arrows skip disabled entries and Enter invokes", counters,
+                                 crop=counter_crop, minimum_pixels=3)
+    driver.wait_for_visual_change("menu action dismisses the overlay", menu_opened,
+                                 crop=menu_crop, minimum_pixels=200)
+    driver.click_point(50, 440)
+    before_end = driver.wait_for_stable_frame("menu reopened for scrolling", crop=menu_crop)
+    driver.key("End")
+    driver.wait_for_visual_change("End reveals the ninth menu entry", before_end,
+                                 crop=menu_crop, minimum_pixels=30)
+    driver.key("Escape")
+    driver.key("Tab")  # The adjacent context-menu target receives focus.
+    before_context = driver.capture("before-context-menu-shortcut")
+    driver.key("shift+F10")
+    driver.wait_for_visual_change("Shift F10 opens the shared context menu", before_context,
+                                 crop=(190, 430, 320, 180), minimum_pixels=200)
+    before_pin = driver.capture("before-context-menu-pin")
+    driver.key("End")  # Skip the unavailable final Delete entry.
+    driver.key("Return")
+    driver.wait_for_visual_change("context action updates its selected state", before_pin,
+                                 crop=(104, 24, 32, 32), minimum_pixels=20)
+    before_inline = driver.capture("before-inline-edit")
+    driver.click_point(590, 440)
+    driver.type_text("inline edit")
+    driver.key("Return")
+    driver.wait_for_visual_change("inline edit submits through the shared field", before_inline,
+                                 crop=counter_crop, minimum_pixels=3)
     driver.resize_window(860, 560)
     driver.xdotool("mousemove", "--window", driver.window_id, "700", "500")
     driver.wait_for_stable_frame("components in a narrow window", stable_for=0.3)

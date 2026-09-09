@@ -212,6 +212,7 @@ pub(crate) fn select<T: Clone + 'static>(
                     .border_radius(6.0)
             })
     })
+    .style(|style| style.width_full().min_width(0.0))
 }
 
 pub(crate) fn language_select(

@@ -1024,9 +1024,16 @@ mod tests {
     fn selected_character_count_handles_unicode_and_rope_chunks() {
         let body = format!("{}Ж🦀e\u{301}\nend", "я".repeat(10_000));
         let mut editor = Editor::new(&body);
-        editor.set_selection(Selection::new(ByteOffset::new(body.len()), ByteOffset::new(2))).unwrap();
+        editor
+            .set_selection(Selection::new(
+                ByteOffset::new(body.len()),
+                ByteOffset::new(2),
+            ))
+            .unwrap();
         assert_eq!(editor.selection_character_count(), body.chars().count() - 1);
-        editor.set_selection(Selection::caret(ByteOffset::new(2))).unwrap();
+        editor
+            .set_selection(Selection::caret(ByteOffset::new(2)))
+            .unwrap();
         assert_eq!(editor.selection_character_count(), 0);
     }
 

@@ -114,6 +114,7 @@ pub(crate) struct AnchoredPopover {
     width: f64,
     gap: f64,
     align_start: bool,
+    point: Option<(RwSignal<Point>, RwSignal<f64>)>,
     window_origin: Option<Point>,
 }
 
@@ -123,6 +124,49 @@ pub(crate) fn anchored_popover<V, C, CV>(
     width: f64,
     gap: f64,
     align_start: bool,
+    content: C,
+) -> impl IntoView
+where
+    V: IntoView + 'static,
+    C: Fn() -> CV + 'static,
+    CV: IntoView + 'static,
+{
+    popover(trigger, open, width, gap, align_start, None, content)
+}
+
+/// A cursor-positioned menu uses the same dismissal and owner contract as an
+/// anchored popover. The point is relative to the trigger's window origin.
+pub(crate) fn point_popover<V, C, CV>(
+    trigger: V,
+    open: RwSignal<bool>,
+    point: RwSignal<Point>,
+    width: f64,
+    height: RwSignal<f64>,
+    content: C,
+) -> impl IntoView
+where
+    V: IntoView + 'static,
+    C: Fn() -> CV + 'static,
+    CV: IntoView + 'static,
+{
+    popover(
+        trigger,
+        open,
+        width,
+        8.0,
+        true,
+        Some((point, height)),
+        content,
+    )
+}
+
+fn popover<V, C, CV>(
+    trigger: V,
+    open: RwSignal<bool>,
+    width: f64,
+    gap: f64,
+    align_start: bool,
+    point: Option<(RwSignal<Point>, RwSignal<f64>)>,
     content: C,
 ) -> impl IntoView
 where
@@ -148,6 +192,7 @@ where
         width,
         gap,
         align_start,
+        point,
         window_origin: None,
     }
     .on_cleanup(move || {
@@ -172,6 +217,19 @@ pub(crate) fn popover_left(
     left.clamp(8.0, (window - width - 8.0).max(8.0))
 }
 
+pub(crate) fn menu_position(
+    point: Point,
+    width: f64,
+    height: f64,
+    window_width: f64,
+    window_height: f64,
+) -> Point {
+    Point::new(
+        point.x.clamp(8.0, (window_width - width - 8.0).max(8.0)),
+        point.y.clamp(8.0, (window_height - height - 8.0).max(8.0)),
+    )
+}
+
 /// The backdrop keeps pointer capture through the release even though the card
 /// disappears on press. Neither half of an outside click reaches the editor.
 struct DismissLayer {
@@ -179,6 +237,32 @@ struct DismissLayer {
     overlay: ViewId,
     layer: OpenLayer,
     pressed: bool,
+}
+
+/// Limit both drawing and pointer routing to the card's allocated rectangle.
+/// Floem containers otherwise allow a tall child to paint beyond max_height.
+struct PopoverClip {
+    id: ViewId,
+}
+
+impl View for PopoverClip {
+    fn id(&self) -> ViewId {
+        self.id
+    }
+
+    fn paint(&mut self, cx: &mut floem::context::PaintCx) {
+        let layout = self.id.get_layout().unwrap_or_default();
+        let rect = floem::kurbo::Rect::new(
+            0.0,
+            0.0,
+            f64::from(layout.size.width),
+            f64::from(layout.size.height),
+        );
+        cx.save();
+        cx.clip(&rect);
+        cx.paint_children(self.id);
+        cx.restore();
+    }
 }
 
 impl View for DismissLayer {
@@ -256,7 +340,7 @@ impl View for AnchoredPopover {
                     f64::from(layout.size.width)
                 }
                 .min((window_width - 16.0).max(1.0));
-                let left = popover_left(
+                let mut left = popover_left(
                     origin.x,
                     f64::from(layout.size.width),
                     width,
@@ -264,7 +348,19 @@ impl View for AnchoredPopover {
                     self.align_start,
                     i18n::current().is_rtl(),
                 );
-                let top = origin.y + f64::from(layout.size.height) + self.gap.max(8.0);
+                let mut top = origin.y + f64::from(layout.size.height) + self.gap.max(8.0);
+                if let Some((point, height)) = self.point {
+                    let point = origin + point.get_untracked().to_vec2();
+                    let position = menu_position(
+                        point,
+                        width,
+                        height.get_untracked(),
+                        window_width,
+                        window_height,
+                    );
+                    left = position.x;
+                    top = position.y;
+                }
                 let height = (window_height - top - 8.0).max(1.0);
                 let content = self.content.clone();
                 let layer = OpenLayer {
@@ -284,7 +380,11 @@ impl View for AnchoredPopover {
                     .style(move |s| s.width(window_width).height(window_height))
                 });
                 let card = add_overlay(Point::new(left, top), move |_| {
-                    content()
+                    let id = ViewId::new();
+                    id.set_children(vec![
+                        content().style(move |s| s.width(width).max_height(height)),
+                    ]);
+                    PopoverClip { id }
                         .style(move |s| s.width(width).max_height(height))
                         .on_event(EventListener::KeyDown, |event| {
                             if popover_handle_escape(event) {
@@ -319,6 +419,18 @@ impl View for AnchoredPopover {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn context_menu_position_keeps_layout_and_hit_test_inside_window() {
+        assert_eq!(
+            menu_position(Point::new(950.0, 590.0), 248.0, 242.0, 960.0, 600.0),
+            Point::new(704.0, 350.0)
+        );
+        assert_eq!(
+            menu_position(Point::new(40.0, 70.0), 248.0, 114.0, 960.0, 600.0),
+            Point::new(40.0, 70.0)
+        );
+    }
 
     fn layer(scope: floem::reactive::Scope) -> OpenLayer {
         OpenLayer {

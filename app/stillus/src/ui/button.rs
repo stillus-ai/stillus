@@ -138,15 +138,13 @@ impl ButtonAction {
         }
     }
     pub(super) fn show_label(self, context: ButtonContext) -> bool {
-        matches!(context, ButtonContext::Dialog | ButtonContext::Menu)
-            || matches!(self, Self::Custom(_))
+        matches!(context, ButtonContext::Dialog) || matches!(self, Self::Custom(_))
     }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ButtonContext {
     Control,
     Dialog,
-    Menu,
 }
 
 // Icon-only buttons retain a title even when unavailable.
@@ -670,59 +668,15 @@ pub(crate) fn compact_icon_button(
     )
 }
 
-pub(super) fn menu_button(
-    icon: &'static str,
-    title: impl Fn() -> String + 'static,
-    palette: Palette,
-    enabled: impl Fn() -> bool + 'static,
-    action: impl Fn() + 'static,
-) -> impl IntoView {
-    let labeled = ButtonAction::Custom(icon).show_label(ButtonContext::Menu);
-    let title: Rc<dyn Fn() -> String> = Rc::new(title);
-    let caption = title.clone();
-    let enabled = Rc::new(enabled);
-    let can_press = enabled.clone();
-    reliable_button(
-        h_stack((
-            svg(icon).style(|s| s.size(15.0, 15.0)),
-            label(move || caption()).style(move |s| {
-                s.font_size(crate::ui::FONT_BODY as f32)
-                    .selectable(false)
-                    .apply_if(!labeled, |s| s.hide())
-            }),
-        ))
-        .style(|s| rtl_row(s).width_full().items_center().gap(8.0)),
-        move || {
-            if can_press() {
-                action();
-            }
-        },
-    )
-    .style(move |s| {
-        s.width_full()
-            .height(32.0)
-            .padding_horiz(8.0)
-            .items_center()
-            .border_radius(5.0)
-            .color(if enabled() {
-                palette.ink
-            } else {
-                palette.muted
-            })
-            .hover(|s| s.background(palette.canvas))
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     #[test]
-    fn standard_actions_have_icons_and_labels_only_in_menus_and_dialogs() {
+    fn standard_actions_have_icons_and_labels_only_in_dialogs() {
         for &action in STANDARD_ACTIONS {
             assert!(action.icon().contains("<svg"));
             assert!(!action.show_label(ButtonContext::Control));
             assert!(action.show_label(ButtonContext::Dialog));
-            assert!(action.show_label(ButtonContext::Menu));
         }
         assert!(ButtonAction::Custom(ICON_LOCK).show_label(ButtonContext::Control));
     }

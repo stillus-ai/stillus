@@ -318,7 +318,7 @@ pub(super) fn page(
         .style(|style| {
             rtl_column(style)
                 .width_full()
-                .padding_horiz(44.0)
+                .padding_horiz(SETTINGS_PAGE_INSET_PX)
                 .padding_vert(38.0)
         }),
     )

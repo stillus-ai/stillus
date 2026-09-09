@@ -13,7 +13,6 @@ pub(crate) struct ToolbarEditBar {
     pub(crate) value: RwSignal<String>,
     pub(crate) label: i18n::Key,
     pub(crate) placeholder: i18n::Key,
-    pub(crate) field_width: f64,
 }
 
 pub(crate) fn toolbar_edit_bar(
@@ -36,7 +35,12 @@ pub(crate) fn toolbar_edit_bar(
                 EventPropagation::Continue
             }
         })
-        .style(move |style| form_field_style(style, palette, false).width(bar.field_width));
+        .style(move |style| {
+            form_field_style(style, palette, false)
+                .min_width(0.0)
+                .flex_grow(1.0)
+                .flex_shrink(1.0)
+        });
     // Opening the bar hands the field the caret, so the control that opened it
     // does not have to be followed by a click into the field.
     let input_id = input.id();
@@ -63,6 +67,8 @@ pub(crate) fn toolbar_edit_bar(
                 .font_size(crate::ui::FONT_CAPTION as f32)
                 .color(palette.muted)
                 .selectable(false)
+                .width(120.0)
+                .flex_shrink(0.0)
         }),
         input,
         action_button(
@@ -74,15 +80,16 @@ pub(crate) fn toolbar_edit_bar(
             move || {
                 submit();
             },
-        ),
+        )
+        .style(|s| s.width(36.0).height(36.0).flex_shrink(0.0)),
     ))
     .style(move |style| {
         let style = style
             .width_full()
             .height(TOOLBAR_EDIT_BAR_HEIGHT_PX)
-            .padding_horiz(20.0)
+            .padding_horiz(24.0)
             .items_center()
-            .gap(10.0)
+            .gap(8.0)
             .background(palette.canvas)
             .border_bottom(1.0)
             .border_color(palette.divider);
@@ -138,4 +145,37 @@ pub(crate) fn actions(children: impl ViewTuple + 'static) -> impl IntoView {
             .items_center()
             .flex_wrap(floem::taffy::FlexWrap::Wrap)
     })
+}
+
+/// A settings section with the same heading, surface and inset on every page.
+pub(crate) fn settings_card(
+    title: i18n::Key,
+    icon: Option<&'static str>,
+    description: Option<i18n::Key>,
+    content: impl IntoView + 'static,
+    palette: Palette,
+) -> impl IntoView {
+    let icon = icon.map_or_else(
+        || empty().style(|s| s.hide()).into_any(),
+        |icon| {
+            svg(icon)
+                .style(|s| s.size(20.0, 20.0).flex_shrink(0.0))
+                .into_any()
+        },
+    );
+    let description = description.map_or_else(
+        || empty().style(|s| s.hide()).into_any(),
+        |key| {
+            page_description(key, palette)
+                .style(|s| s.width_full().min_width(0.0))
+                .into_any()
+        },
+    );
+    v_stack((
+        h_stack((icon, section_title(title, palette)))
+            .style(|s| rtl_row(s).width_full().items_center().gap(8.0)),
+        description,
+        container(content).style(|s| s.width_full().min_width(0.0).items_start()),
+    ))
+    .style(move |s| settings_card_style(s, palette).gap(16.0).items_start())
 }

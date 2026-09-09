@@ -47,7 +47,7 @@ fn validation_message(error: stillus_core::RssFilterError) -> String {
     }
 }
 
-fn form(
+pub(crate) fn form(
     model: Rc<RefCell<AppModel>>,
     id: ItemId,
     revision: RwSignal<u64>,
@@ -108,7 +108,10 @@ fn form(
         s.font_size(crate::ui::FONT_CAPTION as f32)
             .color(palette.muted)
             .width_full()
-            .height(36.0)
+            .apply_if(
+                validation.get().is_none() && !error.get() && pending.get().is_none(),
+                |s| s.hide(),
+            )
     });
     let save_button = |apply: bool| {
         let model = model.clone();
@@ -192,17 +195,17 @@ fn form(
             save_button(false),
             save_button(true),
         ))
-        .style(|s| s.width_full().items_center().gap(8.0)),
+        .style(|s| s.width_full().items_center().gap(8.0).margin_top(8.0)),
     ))
     .style(move |s| {
         s.width(480.0)
-            .padding(18.0)
+            .padding(16.0)
             .gap(8.0)
             .background(palette.paper)
             .color(palette.ink)
             .border(1.0)
             .border_color(palette.divider)
-            .border_radius(7.0)
+            .border_radius(8.0)
     })
     .on_event(EventListener::KeyDown, move |event| {
         if matches!(event, Event::KeyDown(e) if e.key.logical_key == Key::Named(NamedKey::Escape)) {
