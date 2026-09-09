@@ -124,7 +124,6 @@ const EDITOR_SCROLLBAR_MIN_HEIGHT_PX: f64 = 24.0;
 const SIDEBAR_MIN_WIDTH_PX: f64 = 180.0;
 const SIDEBAR_MAX_WIDTH_PX: f64 = 480.0;
 const SCROLLBAR_HIDE_MS: u64 = 1000;
-const EDITOR_HEADER_HEIGHT_PX: f64 = 56.0;
 const TAG_POPOVER_WIDTH_PX: f64 = 280.0;
 const TAG_POPOVER_GAP_PX: f64 = 6.0;
 const TAG_POPOVER_PADDING_PX: f64 = 10.0;
@@ -1154,13 +1153,7 @@ impl AppModel {
             }
             first_line
         };
-        // A viewport that does not start at the document start spends one row on
-        // the leading ellipsis marker, so it gets one row less for content.
-        if fits_within(rows) == 0 {
-            0
-        } else {
-            fits_within(rows.saturating_sub(1).max(1))
-        }
+        fits_within(rows)
     }
     fn set_editor_font(&mut self, font: EditorFont) {
         self.editor_font_family = font.family;
@@ -6826,6 +6819,7 @@ fn sidebar_note_row(
     let action_path = note.path.clone();
     let action_parent = parent.clone();
     let selected_path = note.path.clone();
+    let full_title = note.title.clone();
     let is_ready = note.availability.is_ready();
     let protected = note.protection == NoteProtection::Protected;
     let pinned = note.pinned;
@@ -6841,7 +6835,12 @@ fn sidebar_note_row(
         // Navigation labels never own text selection: a selectable label
         // keeps a pending selection when a modal steals its pointer-up and
         // then captures the next click anywhere in the window.
-        text(note_caption(&note)).style(move |style| {
+        ui::anchored_tooltip(
+            text(note_caption(&note)),
+            Rc::new(move || full_title.clone()),
+            palette,
+        )
+        .style(move |style| {
             style
                 .font_size(crate::ui::FONT_BODY as f32)
                 .color(if is_ready {
@@ -7023,6 +7022,7 @@ fn engine_sidebar_row(
     let activate_id = item_id.clone();
     let activate_parent = parent.clone();
     let title = summary.metadata.title;
+    let full_title = title.clone();
     let unread = summary.badge.unwrap_or(0);
     let badge_model = model.clone();
     let badge_id = item_id.clone();
@@ -7044,15 +7044,17 @@ fn engine_sidebar_row(
                 Color::rgb8(224, 160, 140)
             })
         }),
-        text(title).style(move |style| {
-            style
-                .font_size(crate::ui::FONT_BODY as f32)
-                .color(palette.sidebar_ink)
-                .min_width(0.0)
-                .flex_shrink(1.0)
-                .text_ellipsis()
-                .selectable(false)
-        }),
+        ui::anchored_tooltip(text(title), Rc::new(move || full_title.clone()), palette).style(
+            move |style| {
+                style
+                    .font_size(crate::ui::FONT_BODY as f32)
+                    .color(palette.sidebar_ink)
+                    .min_width(0.0)
+                    .flex_shrink(1.0)
+                    .text_ellipsis()
+                    .selectable(false)
+            },
+        ),
         empty().style(|style| style.flex_grow(1.0)),
         label(move || {
             revision.get();
@@ -8518,24 +8520,8 @@ fn rss_panel(
 
     let title_model = model.clone();
     let title_id = item_id.clone();
-    let title = label(move || {
-        revision.get();
-        rss_subscription_summary(&title_model, &title_id)
-            .map(|summary| summary.display_title)
-            .unwrap_or_else(|| tr!(RssFeed))
-    })
-    .style(move |style| {
-        style
-            .min_width(0.0)
-            .flex_shrink(1.0)
-            .text_ellipsis()
-            .font_size(crate::ui::FONT_SECTION as f32)
-            .font_family(crate::ui::HEADING_FONT_FAMILY.to_owned())
-            .font_weight(floem::text::Weight::SEMIBOLD)
-            .color(palette.ink)
-            .selectable(false)
-    });
-
+    let title_click_model = model.clone();
+    let title_click_id = item_id.clone();
     // The engine declares which controls its items support; the toolbar only
     // decides which of the delete and restore pair matches the current state.
     let declared_actions = model
@@ -8568,24 +8554,22 @@ fn rss_panel(
         },
     );
 
-    let toolbar = h_stack((
-        title,
-        empty().style(|style| style.flex_grow(1.0)),
-        actions.style(|style| style.flex_shrink(0.0)),
-    ))
-    .style(move |style| {
-        style
-            .width_full()
-            .min_width(0.0)
-            .height(EDITOR_HEADER_HEIGHT_PX)
-            .flex_shrink(0.0)
-            .padding_horiz(20.0)
-            .items_center()
-            .gap(TOOLBAR_ACTION_GAP_PX)
-            .border_bottom(1.0)
-            .border_color(palette.divider)
-            .background(palette.paper)
-    });
+    let toolbar = ui::content_header(
+        ICON_RSS,
+        move || {
+            revision.get();
+            rss_subscription_summary(&title_model, &title_id)
+                .map(|summary| summary.display_title).unwrap_or_else(|| tr!(RssFeed))
+        },
+        actions,
+        Some(Rc::new(move || {
+            signals.rename.value.set(rss_subscription_summary(&title_click_model, &title_click_id)
+                .map(|summary| summary.display_title).unwrap_or_default());
+            signals.categories.open.set(false);
+            signals.rename.open.set(true);
+        })),
+        palette,
+    );
 
     let rename_model = model.clone();
     let rename_form = toolbar_edit_bar(signals.rename, palette, move || {
@@ -10061,8 +10045,14 @@ fn editor_panel(
     ))
     .style(move |style| {
         let style = style
-            .width(300.0)
-            .min_width(180.0)
+            .width_full()
+            .min_width(0.0)
+            .height(48.0)
+            .flex_shrink(0.0)
+            .padding_horiz(20.0)
+            .background(palette.paper)
+            .border_bottom(1.0)
+            .border_color(palette.divider)
             .items_center()
             .gap(4.0)
             .flex_shrink(1.0);
@@ -10153,6 +10143,41 @@ fn editor_panel(
         },
     );
     let metadata_visibility_model = model.clone();
+    let title_model = model.clone();
+    let title_click_model = model.clone();
+    let title_save_model = model.clone();
+    let title_target_model = model.clone();
+    let title_edit = ToolbarEditBar {
+        open: create_rw_signal(false),
+        value: create_rw_signal(String::new()),
+        label: i18n::Key::NewTitle,
+        placeholder: i18n::Key::NewTitle,
+    };
+    create_effect(move |previous: Option<Option<DocumentTarget>>| {
+        revision.get();
+        let target = title_target_model
+            .borrow()
+            .workspace
+            .as_ref()
+            .and_then(WorkspaceSession::selected_target);
+        if previous.is_some_and(|previous| previous != target) {
+            title_edit.open.set(false);
+        }
+        target
+    });
+    let rename_form = toolbar_edit_bar(title_edit, palette, move || {
+        let accepted = {
+            let mut model = title_save_model.borrow_mut();
+            model.edit_note_title(&title_edit.value.get_untracked())
+                || model.title_edit_pending(&title_edit.value.get_untracked())
+        };
+        if accepted {
+            title_edit.open.set(false);
+            editor_focus_request.update(|value| *value += 1);
+        }
+        revision.update(|value| *value += 1);
+        schedule_autosave(title_save_model.clone(), revision);
+    });
     let dismiss_error_model = model.clone();
     let error_visibility_model = model.clone();
     let error_icon_model = model.clone();
@@ -10160,7 +10185,27 @@ fn editor_panel(
     let pin_busy_model = model.clone();
     let favorite_busy_model = model.clone();
     v_stack((
-        h_stack((
+        ui::content_header(
+            ICON_NOTE,
+            move || {
+                revision.get();
+                let model = title_model.borrow();
+                model
+                    .workspace
+                    .as_ref()
+                    .and_then(|workspace| {
+                        workspace
+                            .document()
+                            .map(|document| document.title().to_owned())
+                            .or_else(|| {
+                                workspace
+                                    .selected_note()
+                                    .and_then(|index| workspace.notes().get(index))
+                                    .map(|note| note.title.clone())
+                            })
+                    })
+                    .unwrap_or_else(|| "Stillus".to_owned())
+            },
             h_stack((
                 find_action,
                 h_stack((
@@ -10259,20 +10304,24 @@ fn editor_panel(
                     .gap(TOOLBAR_ACTION_GAP_PX)
                     .flex_shrink(0.0)
             }),
-            find_bar,
-            empty().style(|style| style.flex_grow(1.0)),
-        ))
-        .style(move |style| {
-            style
-                .height(EDITOR_HEADER_HEIGHT_PX)
-                .width_full()
-                .items_center()
-                .gap(6.0)
-                .padding_horiz(20.0)
-                .background(palette.paper)
-                .border_bottom(1.0)
-                .border_color(palette.divider)
-        }),
+            Some(Rc::new(move || {
+                let title = title_click_model
+                    .borrow()
+                    .workspace
+                    .as_ref()
+                    .and_then(WorkspaceSession::document)
+                    .filter(|document| !document.is_external())
+                    .map(|document| document.title().to_owned());
+                if let Some(title) = title {
+                    title_edit.value.set(title);
+                    close_note_find(note_find);
+                    title_edit.open.set(true);
+                }
+            })),
+            palette,
+        ),
+        rename_form,
+        find_bar,
         editor_body,
         h_stack((
             anchored_tooltip(
@@ -10359,6 +10408,9 @@ fn editor_panel(
         .style(move |style| {
             style
                 .height(32.0)
+                .min_height(32.0)
+                .max_height(32.0)
+                .flex_shrink(0.0)
                 .width_full()
                 .items_center()
                 .gap(8.0)
@@ -10652,7 +10704,7 @@ fn build_editor_geometry(
     model: &AppModel,
     snapshot: &stillus_core::ViewportSnapshot,
     max_rows: usize,
-    reserve_truncation_row: bool,
+    apply_viewport_skip: bool,
 ) -> Option<EditorTextGeometry> {
     let (origin_x, content_width, _) = editor_horizontal_metrics(model);
     let lines = snapshot
@@ -10676,11 +10728,8 @@ fn build_editor_geometry(
             tab_width: 4,
             origin_x,
             origin_y: EDITOR_PADDING_Y_PX,
-            top_reserved_rows: usize::from(
-                reserve_truncation_row
-                    && (snapshot.truncated_before || model.viewport_first_visual_row > 0),
-            ),
-            first_line_skip_rows: if reserve_truncation_row {
+            top_reserved_rows: 0,
+            first_line_skip_rows: if apply_viewport_skip {
                 model.viewport_first_visual_row
             } else {
                 0
@@ -11114,18 +11163,12 @@ fn render_editor(model: &AppModel) -> String {
         return tr!(ViewportFailed);
     };
     let mut rendered = String::with_capacity(layout.snapshot.rendered_bytes.min(300_000));
-    if layout.snapshot.truncated_before || model.viewport_first_visual_row > 0 {
-        rendered.push_str("⋯\n");
-    }
     for (row_index, row) in layout.geometry.rows().iter().enumerate() {
         rendered.push_str(layout.row_text(row_index).unwrap_or_default());
         if row.last_in_line && layout.snapshot.lines[row.line_slot].truncated {
             rendered.push_str("  …");
         }
         rendered.push('\n');
-    }
-    if layout.snapshot.truncated_after || layout.geometry.truncated_after() {
-        rendered.push('⋯');
     }
     rendered
 }
@@ -11136,9 +11179,6 @@ fn render_editor_line_numbers(model: &AppModel) -> String {
     };
     let digits = decimal_digits(layout.snapshot.total_lines.max(1));
     let mut rendered = String::with_capacity((layout.geometry.rows().len() + 2) * (digits + 1));
-    if layout.snapshot.truncated_before || model.viewport_first_visual_row > 0 {
-        rendered.push_str(&format!("{:>digits$}\n", "⋯"));
-    }
     for row in layout.geometry.rows() {
         if row.layout_row == 0 {
             rendered.push_str(&format!("{:>digits$}", row.line_index + 1));
@@ -11146,9 +11186,6 @@ fn render_editor_line_numbers(model: &AppModel) -> String {
             rendered.push_str(&" ".repeat(digits));
         }
         rendered.push('\n');
-    }
-    if layout.snapshot.truncated_after || layout.geometry.truncated_after() {
-        rendered.push_str(&format!("{:>digits$}", "⋯"));
     }
     rendered
 }
@@ -14712,6 +14749,45 @@ mod tests {
     }
 
     #[test]
+    fn pointer_hit_testing_uses_the_first_scrolled_row_without_a_marker_reserve() {
+        let root = test_workspace("stillus-app-pointer-header");
+        fs::create_dir_all(root.join("notes")).expect("create pointer workspace");
+        let body = (0..30)
+            .map(|line| format!("line {line}\n"))
+            .collect::<String>();
+        fs::write(root.join("notes/Rows.md"), &body).expect("write pointer note");
+        let mut model = AppModel::load(&root);
+        let origin_x = editor_horizontal_metrics(&model).0;
+        model.update_editor_metrics(
+            origin_x + EDITOR_PADDING_X_PX + 10.0 * EDITOR_CHARACTER_WIDTH_PX + 1.0,
+            2.0 * EDITOR_PADDING_Y_PX + 8.0 * EDITOR_LINE_HEIGHT_PX + 1.0,
+        );
+        model.viewport_first_line = 5;
+        let offset = body.find("line 5").expect("sixth line");
+        let layout = editor_layout(&model).expect("scrolled layout");
+        assert_eq!(layout.geometry.rows().len(), 8);
+        assert_eq!(
+            layout.geometry.caret(5, offset).expect("first caret").row,
+            0
+        );
+        assert_eq!(
+            editor_command_for_point(
+                &model,
+                origin_x,
+                EDITOR_PADDING_Y_PX + EDITOR_LINE_HEIGHT_PX / 2.0,
+                false
+            ),
+            Some(EditorCommand::SetCaret {
+                offset,
+                extend: false
+            })
+        );
+        model.shutdown_search_worker();
+        drop(model);
+        fs::remove_dir_all(root).expect("remove pointer workspace");
+    }
+
+    #[test]
     fn line_numbers_label_only_the_first_visual_row_of_a_wrapped_line() {
         let root = test_workspace("stillus-app-line-numbers");
         let notes = root.join("notes");
@@ -14733,11 +14809,16 @@ mod tests {
         assert_eq!(rows[0], " 1");
         assert_eq!(rows[1], "  ");
         assert_eq!(rows[2], " 2");
-        assert_eq!(rows.last().copied(), Some(" ⋯"));
+        assert!(!rendered.contains('⋯'));
+        assert!(
+            rows.last()
+                .is_some_and(|row| row.trim().parse::<usize>().is_ok())
+        );
 
         model.viewport_first_line = 5;
         let scrolled = render_editor_line_numbers(&model);
-        assert_eq!(scrolled.lines().next(), Some(" ⋯"));
+        assert_eq!(scrolled.lines().next(), Some(" 6"));
+        assert!(!super::render_editor(&model).contains('⋯'));
 
         model.shutdown_search_worker();
         drop(model);

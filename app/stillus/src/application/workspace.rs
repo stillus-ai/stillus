@@ -752,6 +752,20 @@ impl Workspace {
         self.core.document_mut()
     }
 
+    pub fn edit_selected_title(
+        &mut self,
+        title: &str,
+        now_ms: u64,
+    ) -> Result<CommandOutcome, CoreError> {
+        if self.operations.writing() {
+            return Err(CoreError::UnsavedChanges);
+        }
+        let old = self.selected_path();
+        let result = self.core.edit_selected_title(title, now_ms);
+        self.track_rename(old);
+        result
+    }
+
     pub fn apply_selected_at(
         &mut self,
         command: EditorCommand,

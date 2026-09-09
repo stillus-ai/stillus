@@ -274,6 +274,55 @@ mod deferred_note_tests {
     }
 
     #[test]
+    fn title_edit_does_not_claim_another_pending_action() {
+        let mut fixture = Fixture::new();
+        fixture.edit();
+        assert!(!fixture.app.toggle_pinned_selected());
+        assert!(!fixture.app.edit_note_title("Other title"));
+        assert!(!fixture.app.title_edit_pending("Other title"));
+        fixture.pump_until(|app| !app.deferred_note_action_pending());
+        let note = &fixture.app.workspace.as_ref().unwrap().notes()[0];
+        assert!(note.pinned);
+        assert_eq!(note.title, "Original");
+    }
+
+    #[test]
+    fn title_edit_waits_for_active_save_and_preserves_newer_body_edits() {
+        let mut fixture = Fixture::new();
+        fixture.edit();
+        let now = fixture.app.now_ms();
+        let workspace = fixture.app.workspace.as_mut().unwrap();
+        workspace.retry_autosave(now);
+        let job = workspace
+            .begin_autosave(now, "2026-09-09T00:00:00Z".into())
+            .unwrap()
+            .map(PersistenceJob::Save)
+            .expect("canonical save starts");
+        fixture.app.save_worker_active = true;
+        fixture
+            .app
+            .apply(EditorCommand::Insert("newer body\n".into()));
+        assert!(!fixture.app.edit_note_title("New Title"));
+        fixture.app.save_sender.send(job.execute()).unwrap();
+        fixture.pump_until(|app| {
+            !app.deferred_note_action_pending()
+                && app
+                    .workspace
+                    .as_ref()
+                    .unwrap()
+                    .document()
+                    .is_some_and(|doc| matches!(doc.save_status(), SaveStatus::Clean { .. }))
+        });
+        let workspace = fixture.app.workspace.as_ref().unwrap();
+        let note = &workspace.notes()[workspace.selected_note().unwrap()];
+        assert_eq!(note.title, "New Title");
+        assert_eq!(note.path.file_name().unwrap(), "New Title.md");
+        let saved = fs::read_to_string(&note.path).unwrap();
+        assert!(saved.contains("unsaved body"));
+        assert!(saved.contains("newer body"));
+    }
+
+    #[test]
     fn native_close_waits_for_dirty_persistence_and_can_be_cancelled() {
         let mut fixture = Fixture::new();
         fixture.edit();
@@ -426,6 +475,7 @@ enum DeferredNoteAction {
     AddTag(String),
     RemoveTag(String),
     Rename(String),
+    TitleEdit(String),
 }
 
 struct PendingNoteAction {
@@ -2333,6 +2383,7 @@ impl Application {
             DeferredNoteAction::AddTag(tag) => self.add_tag_selected(tag),
             DeferredNoteAction::RemoveTag(tag) => self.remove_tag_selected(tag),
             DeferredNoteAction::Rename(title) => self.rename_selected(title),
+            DeferredNoteAction::TitleEdit(title) => self.edit_note_title(title),
         };
         if self.error.is_some() {
             pending.failed = true;
@@ -3173,6 +3224,40 @@ impl Application {
                 None
             }
         }
+    }
+    pub(crate) fn edit_note_title(&mut self, title: &str) -> bool {
+        if self.pending_note_action.is_some() && !self.title_edit_pending(title) {
+            self.error = Some(msg!(ResolveSaveFirst).into());
+            return false;
+        }
+        if self.defer_note_action(DeferredNoteAction::TitleEdit(title.to_owned())) {
+            return false;
+        }
+        let now = self.now_ms();
+        let result = self
+            .workspace
+            .as_mut()
+            .ok_or_else(|| CoreError::NoteUnavailable("workspace is unavailable".into()))
+            .and_then(|workspace| workspace.edit_selected_title(title, now));
+        self.state_dirty = true;
+        match result {
+            Ok(_) => {
+                self.error = None;
+                self.accelerate_dirty_save();
+                true
+            }
+            Err(error) => {
+                self.error = Some(UiText::Failure {
+                    details: error.to_string(),
+                });
+                false
+            }
+        }
+    }
+    pub(crate) fn title_edit_pending(&self, title: &str) -> bool {
+        self.pending_note_action.as_ref().is_some_and(|pending| {
+            matches!(&pending.action, DeferredNoteAction::TitleEdit(queued) if queued == title)
+        })
     }
     fn reset_editor(&mut self) {
         self.emit(ApplicationEvent::ResetEditor);

@@ -156,35 +156,10 @@ pub(super) fn panel(
             }
         }
     });
-    let state_model = model.clone();
-    let state_id = id.clone();
     let title_model = model.clone();
     let title_id = id.clone();
-    let title = anchored_tooltip(
-        label(move || {
-            revision.get();
-            item(&state_model, &state_id)
-                .map(|i| i.metadata.title)
-                .unwrap_or_else(|| tr!(ChatNew))
-        }),
-        Rc::new(move || {
-            revision.get();
-            item(&title_model, &title_id)
-                .map(|i| i.metadata.title)
-                .unwrap_or_else(|| tr!(ChatNew))
-        }),
-        palette,
-    )
-    .style(move |s| {
-        s.font_size(crate::ui::FONT_SECTION as f32)
-            .font_family(crate::ui::HEADING_FONT_FAMILY.to_owned())
-            .font_weight(floem::text::Weight::SEMIBOLD)
-            .min_width(0.0)
-            .flex_shrink(1.0)
-            .flex_grow(1.0)
-            .text_ellipsis()
-            .color(palette.ink)
-    });
+    let title_click_model = model.clone();
+    let title_click_id = id.clone();
     let rename = ToolbarEditBar {
         open: create_rw_signal(false),
         value: create_rw_signal(String::new()),
@@ -476,34 +451,25 @@ pub(super) fn panel(
             );
         },
     );
-    let header = h_stack((
-        h_stack((
-            svg(ICON_CHAT)
-                .style(move |s| s.size(20.0, 20.0).flex_shrink(0.0).color(palette.accent)),
-            title,
-        ))
-        .style(|s| {
-            s.min_width(0.0)
-                .flex_basis(140.0)
-                .flex_grow(1.0)
-                .items_center()
-                .gap(12.0)
-        }),
+    let header = ui::content_header(
+        ICON_CHAT,
+        move || {
+            revision.get();
+            item(&title_model, &title_id)
+                .map(|item| item.metadata.title)
+                .unwrap_or_else(|| tr!(ChatNew))
+        },
         h_stack((journal_button, earlier, newest, toolbar))
-            .style(|s| s.flex_shrink(0.0).items_center().gap(TOOLBAR_ACTION_GAP_PX)),
-    ))
-    .style(move |s| {
-        s.width_full()
-            .min_width(0.0)
-            .height(EDITOR_HEADER_HEIGHT_PX)
-            .flex_shrink(0.0)
-            .items_center()
-            .padding_horiz(20.0)
-            .gap(12.0)
-            .background(palette.paper)
-            .border_bottom(1.0)
-            .border_color(palette.divider)
-    });
+            .style(|style| style.items_center().gap(TOOLBAR_ACTION_GAP_PX)),
+        Some(Rc::new(move || {
+            if let Some(item) = item(&title_click_model, &title_click_id) {
+                rename.value.set(item.metadata.title);
+                categories.open.set(false);
+                rename.open.set(true);
+            }
+        })),
+        palette,
+    );
     let empty_state = model.clone();
     let empty_hint = label(|| tr!(ChatEmpty)).style(move |s| {
         revision.get();

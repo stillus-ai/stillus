@@ -48,3 +48,6 @@ pub(crate) use form::*;
 
 mod tooltip;
 pub(crate) use tooltip::{anchored_tooltip, close_button_tooltips};
+
+mod header;
+pub(crate) use header::*;

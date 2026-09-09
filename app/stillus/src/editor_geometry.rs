@@ -130,6 +130,7 @@ pub struct EditorTextGeometry {
     config: GeometryConfig,
     lines: Vec<ShapedLine>,
     rows: Vec<GeometryRow>,
+    #[cfg(test)]
     truncated_after: bool,
 }
 
@@ -156,7 +157,10 @@ impl EditorTextGeometry {
         for (input_slot, line) in lines.iter().enumerate() {
             validate_line(line)?;
             if rows.len() == config.max_rows {
-                truncated_after = true;
+                #[cfg(test)]
+                {
+                    truncated_after = true;
+                }
                 break;
             }
 
@@ -236,7 +240,10 @@ impl EditorTextGeometry {
                 layout,
             });
             if truncated_after || input_slot + 1 < lines.len() && rows.len() == config.max_rows {
-                truncated_after = true;
+                #[cfg(test)]
+                {
+                    truncated_after = true;
+                }
                 break;
             }
         }
@@ -245,6 +252,7 @@ impl EditorTextGeometry {
             config,
             lines: shaped_lines,
             rows,
+            #[cfg(test)]
             truncated_after,
         })
     }
@@ -260,6 +268,7 @@ impl EditorTextGeometry {
         text.get(row.start..row.end)
     }
 
+    #[cfg(test)]
     pub fn truncated_after(&self) -> bool {
         self.truncated_after
     }

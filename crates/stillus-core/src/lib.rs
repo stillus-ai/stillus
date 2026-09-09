@@ -7,6 +7,7 @@
 
 mod addressed;
 mod delete_diagnostics;
+mod document_title;
 pub use addressed::{
     AddressedEdit, MAX_ACTION_TEXT, NoteEdit, NoteEditJob, NoteMetadataEdit, NoteRead,
     NoteRestoreJob, NoteVersion,

@@ -255,18 +255,19 @@ def chevron_crop(top: int, *, depth: int = 0) -> tuple[int, int, int, int]:
 
 NOTE_TITLE_CROPS = tuple(note_title_crop(index) for index in range(3))
 
-# Editor actions occupy the left edge of the editor header in their production
+# Editor actions align to the right edge of the fixed header in their production
 # order: find, tags, protection, pin, favorite and trash.
 EDITOR_HEADER_PADDING = 20
 EDITOR_ACTION_SIZE = 32
 EDITOR_ACTION_GAP = 6
-EDITOR_ACTION_GROUP_LEFT = SIDEBAR_WIDTH + EDITOR_HEADER_PADDING
 EDITOR_ACTION_GROUP_WIDTH = 6 * EDITOR_ACTION_SIZE + 5 * EDITOR_ACTION_GAP
+EDITOR_ACTION_GROUP_LEFT = SCREEN_WIDTH - EDITOR_HEADER_PADDING - EDITOR_ACTION_GROUP_WIDTH
 
 
-def editor_action_center(index: int) -> tuple[int, int]:
+def editor_action_center(index: int, *, count: int = 6) -> tuple[int, int]:
+    left = SCREEN_WIDTH - EDITOR_HEADER_PADDING - (count * EDITOR_ACTION_SIZE + (count - 1) * EDITOR_ACTION_GAP)
     return (
-        EDITOR_ACTION_GROUP_LEFT
+        left
         + EDITOR_ACTION_SIZE // 2
         + index * (EDITOR_ACTION_SIZE + EDITOR_ACTION_GAP),
         28,
@@ -278,9 +279,9 @@ def editor_action_center(index: int) -> tuple[int, int]:
 # padding, every divider keeps 8px on both sides, and an overflowing list
 # paints its scrollbar inside the right padding instead of over the rows.
 TAG_POPOVER_WIDTH = 280
-TAG_POPOVER_LEFT = editor_action_center(1)[0] - EDITOR_ACTION_SIZE // 2
+TAG_POPOVER_LEFT = min(editor_action_center(1)[0] - EDITOR_ACTION_SIZE // 2, SCREEN_WIDTH - 8 - TAG_POPOVER_WIDTH)
 TAG_POPOVER_RIGHT = TAG_POPOVER_LEFT + TAG_POPOVER_WIDTH
-TAG_POPOVER_TOP = 50
+TAG_POPOVER_TOP = 52
 TAG_POPOVER_PADDING = 10
 TAG_POPOVER_CONTENT_LEFT = TAG_POPOVER_LEFT + 1 + TAG_POPOVER_PADDING
 TAG_POPOVER_CONTENT_RIGHT = TAG_POPOVER_RIGHT - 1 - TAG_POPOVER_PADDING
@@ -298,7 +299,7 @@ TAG_POPOVER_FOOTER_X = TAG_POPOVER_LEFT + 212
 # Grey level that still counts the anti-aliased card border and dividers as a
 # line while leaving the input surface (luminance 247) out.
 TAG_POPOVER_LINE_LUMINANCE = 244.0
-TAG_POPOVER_CROP = (TAG_POPOVER_LEFT - 6, 44, 292, 390)
+TAG_POPOVER_CROP = (TAG_POPOVER_LEFT - 6, TAG_POPOVER_TOP - 6, 292, 390)
 
 # AI settings geometry. Every section of the page is a settings card at the
 # page content edge (settings sidebar 232 plus the 44px page padding), so the
@@ -449,8 +450,8 @@ CONTROLS = {
     "favorite": editor_action_center(4),
     "trash": editor_action_center(5),
     "protection": editor_action_center(2),
-    "protection_lock": (440, 70),
-    "protection_disable": (440, 104),
+    "protection_lock": (1110, 77),
+    "protection_disable": (1110, 109),
     # The fixed 390px password card is centered in the 1240x800 client. Setup
     # includes warning/confirmation content and therefore places its primary
     # field lower than the compact unlock card.
@@ -4601,7 +4602,42 @@ def caret_scenario(driver: WindowDriver, workspace: Path) -> None:
     assert_no_temporary_files(caret_workspace)
 
 
+def note_header_scenario(driver: WindowDriver) -> None:
+    """Rename the authoritative title from the fixed header, including Undo."""
+    workspace = create_workspace(driver.temporary_root, "header-workspace")
+    notes = workspace / "notes"
+    title = ("Длинное название заметки " * 5)[:90]
+    tail = "\nbody-header-marker\n"
+    source = notes / "Header.md"
+    source.write_text(f"---\nfuture: retained\n---\n# {title}{tail}", encoding="utf-8")
+    driver.start_app(workspace, "header")
+    initial = driver.wait_for_stable_frame("long note header", crop=(256, 0, 984, 56), stable_for=0.3)
+    if dark_pixel_count(initial, crop=(300, 10, 600, 38)) < 300:
+        raise AcceptanceFailure("note header does not show its title")
+    driver.xdotool("mousemove", "--window", driver.window_id, "430", "28")
+    driver.wait_for_visual_change("full title tooltip in the note header", initial,
+        crop=(300, 48, 700, 170), minimum_pixels=50, timeout=3)
+    driver.click_point(430, 28)
+    driver.key("ctrl+a")
+    set_clipboard_text(driver.environment, "Переименованная заметка")
+    driver.key("ctrl+v")
+    driver.key("Return")
+    renamed = notes / "Переименованная заметка.md"
+    wait_until("header rename persisted through the body editor", lambda: renamed.exists()
+        and renamed.read_text().endswith("# Переименованная заметка" + tail), timeout=10)
+    if "future: retained" not in renamed.read_text():
+        raise AcceptanceFailure("header rename lost unknown front matter")
+    saved = driver.wait_for_stable_frame("renamed note header", crop=(256, 0, 984, 56), stable_for=0.3)
+    if image_difference(initial, saved, crop=(256, 55, 984, 1)) != 0:
+        raise AcceptanceFailure("renaming changed the fixed header divider")
+    driver.key("ctrl+z")
+    wait_until("header rename is undoable", lambda: any(
+        path.read_text().endswith("# " + title + tail) for path in notes.glob("*.md")), timeout=10)
+    driver.close_app()
+
+
 def editor_scenario(driver: WindowDriver, workspace: Path) -> None:
+    note_header_scenario(driver)
     del workspace
     editor_workspace = create_workspace(driver.temporary_root, "editor-workspace")
     note = editor_workspace / "notes" / "A Editor.md"
@@ -6713,13 +6749,13 @@ def find_scenario(driver: WindowDriver, workspace: Path) -> None:
 
     driver.start_app(workspace, "find")
     driver.click("note_find")
-    # The find input opens immediately after the left-aligned action group.
+    # Find has a separate row below the fixed header; title/actions stay at y=28.
     assert_focused_input_caret(
         driver,
         "find input",
         (
-            EDITOR_ACTION_GROUP_LEFT + EDITOR_ACTION_GROUP_WIDTH + EDITOR_ACTION_GAP,
-            4,
+            SIDEBAR_WIDTH + EDITOR_HEADER_PADDING,
+            64,
             156,
             32,
         ),
@@ -6819,13 +6855,13 @@ def find_scenario(driver: WindowDriver, workspace: Path) -> None:
     )
 
     driver.start_app(workspace, "find-external")
-    driver.click("note_find")
+    driver.click_point(*editor_action_center(0, count=1))
     assert_focused_input_caret(
         driver,
         "external file find input opened by icon",
         (
-            EDITOR_ACTION_GROUP_LEFT + EDITOR_ACTION_SIZE + EDITOR_ACTION_GAP,
-            4,
+            SIDEBAR_WIDTH + EDITOR_HEADER_PADDING,
+            64,
             156,
             32,
         ),
