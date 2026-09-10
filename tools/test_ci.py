@@ -30,6 +30,29 @@ SHA = "1234567890abcdef1234567890abcdef12345678"
 
 
 class CITests(unittest.TestCase):
+    def test_frame_rounding_allows_one_channel_level_without_hiding_other_changes(self):
+        original = bytes((230, 232, 236, 252, 252, 252))
+        cases = (
+            (original, True),
+            (bytes((229, 232, 236, 252, 252, 253)), True),
+            (bytes((228, 232, 236, 252, 252, 252)), False),
+            (bytes((230, 234, 236, 252, 252, 252)), False),
+            (bytes((230, 232, 238, 252, 252, 252)), False),
+            (original[3:] + original[:3], False),
+            (bytes((35, 42, 51, 252, 252, 252)), False),
+        )
+        for changed, expected in cases:
+            with self.subTest(changed=changed), patch.object(
+                ui_acceptance.subprocess, "run",
+                side_effect=[Mock(stdout=original), Mock(stdout=changed)],
+            ):
+                self.assertEqual(ui_acceptance.frames_equal_with_channel_rounding(
+                    Path("before.png"), Path("after.png"), (10, 20, 2, 1)), expected)
+        with patch.object(ui_acceptance.subprocess, "run", return_value=Mock(stdout=b"")):
+            with self.assertRaises(ui_acceptance.AcceptanceFailure):
+                ui_acceptance.frames_equal_with_channel_rounding(
+                    Path("before.png"), Path("after.png"), (10, 20, 2, 1))
+
     def test_native_panic_keeps_dependency_source_without_machine_paths_or_payloads(self):
         expected = "Rust dependency location: floem-0.2.0/src/renderer.rs:42:7"
         for line in (

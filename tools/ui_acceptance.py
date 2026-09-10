@@ -666,6 +666,22 @@ def image_difference(
         raise AcceptanceFailure(f"unexpected ImageMagick metric: {metric}") from error
 
 
+def frames_equal_with_channel_rounding(first: Path, second: Path,
+                                       crop: tuple[int, int, int, int]) -> bool:
+    """Allow only one 8-bit level per channel at the same pixel coordinates."""
+    x, y, width, height = crop
+    pixels = []
+    for source in (first, second):
+        data = subprocess.run(
+            ["convert", str(source), "-crop", f"{width}x{height}+{x}+{y}",
+             "+repage", "-depth", "8", "rgb:-"], check=True, capture_output=True,
+        ).stdout
+        if len(data) != width * height * 3:
+            raise AcceptanceFailure("unexpected RGB frame size")
+        pixels.append(data)
+    return all(abs(a - b) <= 1 for a, b in zip(*pixels, strict=True))
+
+
 def dark_pixel_count(
     image: Path, *, crop: tuple[int, int, int, int] | None = None
 ) -> int:
@@ -7836,13 +7852,16 @@ def localization_scenario(driver: WindowDriver, workspace: Path) -> None:
     driver.wait_for_stable_frame("language popover dismissal and focus restoration",
                                  crop=language_list_crop, stable_for=0.3)
     driver.xdotool("mousemove", "--window", driver.window_id, "800", "550")
+    # Repainting the card borders after focus restoration can round individual
+    # RGB channels by one level. Keep every pixel in place; do not allow a
+    # changed-pixel budget that could conceal remaining rows or shifted text.
     wait_until("language list restores its original background", lambda:
-        image_difference(baseline, driver.capture("language-list-dismissed"),
-                         crop=language_list_crop) == 0)
+        frames_equal_with_channel_rounding(baseline, driver.capture("language-list-dismissed"),
+                                           language_list_crop))
     dismissed = driver.wait_for_stable_frame("settings remain after language Escape", stable_for=0.3)
     if image_difference(baseline, dismissed, crop=(0, 0, 230, 180)) != 0:
         raise AcceptanceFailure("language Escape also closed settings")
-    if image_difference(baseline, dismissed, crop=language_list_crop) != 0:
+    if not frames_equal_with_channel_rounding(baseline, dismissed, language_list_crop):
         raise AcceptanceFailure("language list remained after Escape")
     baseline = dismissed
     config = driver.home / ".stillus.cfg"
@@ -9655,7 +9674,8 @@ def components_scenario(driver: WindowDriver, workspace: Path) -> None:
         driver.xdotool("mousemove", "--window", driver.window_id, "900", "500")
         baseline = driver.wait_for_stable_frame("no tooltip", crop=(20, 20, 400, 120), stable_for=0.2)
         driver.xdotool("mousemove", "--window", driver.window_id, str(x), "40")
-        tip = driver.wait_for_visual_change("icon hover tooltip", baseline, crop=(20, 55, 400, 65), minimum_pixels=50, timeout=3)
+        tip = driver.wait_for_visual_change("icon hover tooltip", baseline,
+                                            crop=(20, 55, 400, 65), minimum_pixels=50)
         anchor_bottom = 51 if x == 155 else 56
         if image_difference(baseline, tip, crop=(x - 15, anchor_bottom + 1, 240, 4)):
             raise AcceptanceFailure("tooltip overlaps its anchor or the six-pixel gap")
@@ -9749,8 +9769,8 @@ def components_scenario(driver: WindowDriver, workspace: Path) -> None:
     menu_closed = driver.wait_for_stable_frame("shared menu fixture before opening", crop=menu_crop)
     counters = driver.capture("before-menu-action")
     driver.click_point(50, 440)
-    menu_opened = driver.wait_for_visual_change("shared menu with nine entries", menu_closed,
-                                               crop=menu_crop, minimum_pixels=200)
+    driver.wait_for_visual_change("shared menu with nine entries", menu_closed,
+                                 crop=menu_crop, minimum_pixels=200)
     driver.click_point(50, 516)  # The second entry is unavailable.
     unavailable = driver.wait_for_stable_frame("unavailable menu action stays open", crop=menu_crop)
     if image_difference(counters, unavailable, crop=counter_crop):
@@ -9765,10 +9785,12 @@ def components_scenario(driver: WindowDriver, workspace: Path) -> None:
     wait_until("menu Down highlights the third entry past the disabled second", lambda:
         near_color_pixel_count(driver.capture("menu-down"), (229, 238, 246),
                                crop=(35, 542, 5, 10), tolerance=2) == 50)
+    menu_before_action = driver.wait_for_stable_frame("highlighted menu before activation",
+                                                      crop=menu_crop, stable_for=0.2)
     driver.key("Return")
     driver.wait_for_visual_change("menu arrows skip disabled entries and Enter invokes", counters,
                                  crop=counter_crop, minimum_pixels=3)
-    driver.wait_for_visual_change("menu action dismisses the overlay", menu_opened,
+    driver.wait_for_visual_change("menu action dismisses the overlay", menu_before_action,
                                  crop=menu_crop, minimum_pixels=200)
     closed_after_action = driver.wait_for_stable_frame("menu fully dismissed after action",
         crop=menu_crop, stable_for=0.2)

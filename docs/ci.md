@@ -253,7 +253,12 @@ probe sends one Copy and waits for its result, so a queued extra Copy cannot
 replace the next Paste source. The title probe first waits for its focused border and completed opening, then
 synchronizes the XTEST Control state before sending the shortcut.
 Localization waits for the popover's focus restoration before moving the pointer
-away and comparing the original background. Stable-frame waits use the common
+away and comparing the original background. This comparison permits only one
+8-bit level per RGB channel at each unchanged pixel coordinate: repainting the
+card borders can round their antialiasing by that amount. Larger channel changes,
+remaining menu rows and shifted text still fail. Menu dismissal uses the fully
+painted open menu as its reference, after checking its highlighted enabled entry.
+Stable-frame waits use the common
 six-second bound while retaining their required unchanged interval. Chat refresh
 checks keep probing the message Copy at the current composer position until the
 new disk content is returned.
