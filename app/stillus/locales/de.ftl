@@ -442,3 +442,7 @@ DeletePermanentlyHint = Diese Notiz wird endgültig gelöscht. Dies kann nicht r
 
 AiJournalDetails = Technische Details
 AiJournalSummary = Vorgang: { $operation } · { $status } · { $duration } ms · Modell: { $model }
+
+ChatInputKeys = Enter — senden · Shift+Enter — neue Zeile
+ChatNeedsConnection = Verbinde einen KI-Anbieter in den Einstellungen, um Nachrichten zu senden.
+SelectSearch = Optionen suchen…

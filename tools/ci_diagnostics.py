@@ -10,6 +10,7 @@ import sys
 
 
 UI_SCENARIOS = frozenset({
+    "review",
     "components", "ai", "ai_journal", "chat", "localization", "rss_cards", "rss_keyboard", "rss_filters", "creation", "workspace",
     "compatibility", "categories", "interaction", "lifecycle", "tags", "caret",
     "editor", "context_menu", "sidebar_context", "selection", "persistence", "recovery", "conflict",

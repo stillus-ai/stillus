@@ -33,7 +33,7 @@ pub(crate) fn content_header(
         title_label,
     ))
     .style(|style| {
-        style
+        rtl_row(style)
             .min_width(0.0)
             .flex_shrink(1.0)
             .flex_grow(1.0)
@@ -61,7 +61,7 @@ pub(crate) fn content_header(
         actions.into_view().style(|style| style.flex_shrink(0.0)),
     ))
     .style(move |style| {
-        style
+        rtl_row(style)
             .width_full()
             .min_width(0.0)
             .height(CONTENT_HEADER_HEIGHT_PX)

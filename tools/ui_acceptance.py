@@ -457,7 +457,7 @@ CONTROLS = {
     # includes warning/confirmation content and therefore places its primary
     # field lower than the compact unlock card.
     "password_setup_primary": (760, 411),
-    "password_unlock_primary": (760, 405),
+    "password_unlock_primary": (760, 392),
     "password_confirmation": (760, 457),
     "password_unlock_cancel": (620, 474),
     "password_unlock_submit": (735, 474),
@@ -2016,10 +2016,16 @@ def assert_password_button_hover_geometry(driver: WindowDriver) -> None:
             (44, 82, 117),
         ),
     )
+    driver.wait_for_password_dialog()
     for control, crop, hover_color in cases:
-        button_left = crop[0]
-        button_right = crop[0] + crop[2] - 1
-        scan_crop = (crop[0] - 4, crop[1] - 4, crop[2] + 8, crop[3] + 8)
+        scan_crop = (crop[0] - 6, crop[1] - 4, crop[2] + 12, crop[3] + 8)
+        baseline = driver.capture(f"{control}-before-hover")
+        border_color = (54, 94, 130) if control.endswith("submit") else (226, 229, 233)
+        baseline_columns = near_color_columns(baseline, border_color, crop=scan_crop, tolerance=2)
+        if not baseline_columns:
+            raise AcceptanceFailure("password action has no visible bounded surface")
+        button_left, button_right = min(baseline_columns), max(baseline_columns)
+        button_width = button_right - button_left + 1
         driver.hover(control)
         hovered = driver.capture(f"{control}-hover")
         columns: set[int] = set()
@@ -2031,7 +2037,7 @@ def assert_password_button_hover_geometry(driver: WindowDriver) -> None:
             columns = near_color_columns(
                 hovered, hover_color, crop=scan_crop, tolerance=8
             )
-            return len(columns) >= crop[2] - 4
+            return len(columns) >= button_width - 4
 
         wait_until(
             f"{control} hover paint",
@@ -2045,7 +2051,7 @@ def assert_password_button_hover_geometry(driver: WindowDriver) -> None:
         if (
             left not in (button_left, button_left + 1)
             or right not in (button_right - 1, button_right)
-            or right - left + 1 < crop[2] - 2
+            or right - left + 1 < button_width - 2
         ):
             bounds = "none" if not columns else f"{min(columns)}..{max(columns)}"
             raise AcceptanceFailure(
@@ -2483,6 +2489,11 @@ def protect_selected_note(
     driver.key("BackSpace")
     driver.key("Tab")
     driver.wait_for_password_field_focus("password_confirmation")
+    driver.key("Tab")  # Cancel
+    driver.key("Tab")  # Create
+    driver.key("Tab")  # Wrap to Primary
+    driver.wait_for_password_field_focus("password_setup_primary")
+    driver.key("shift+Tab")  # Create, with reverse traversal
     driver.key("Return")
 
     protected: list[Path] = []
@@ -7505,7 +7516,7 @@ def rss_filters_scenario(driver: WindowDriver, workspace: Path) -> None:
         "schedule": {"next_check": 9999999999999}}))
     # A real local regexp filter must work without credentials, aliases, or an AI stub.
     (driver.home / ".stillus.cfg").write_text(json.dumps({"version": 1, "locale": "en"}))
-    driver.start_app(workspace, "filters")
+    driver.start_app(workspace, "filters", environment_overrides={"STILLUS_TEST_RSS_SAVE_DELAY": "1"})
     driver.click_note(1, expanded_groups=("all",), categories=(), counts={"all": 2, "favorites": 0, "trash": 0})
     blacklist = "promotion\nsponsored"
     whitelist = "rust\nuseful"
@@ -7556,7 +7567,20 @@ def rss_filters_scenario(driver: WindowDriver, workspace: Path) -> None:
         raise AcceptanceFailure("Cancel saved the regexp draft")
     edit_preferences()
     decisions_before = state().get("entries", {})
+    driver.wait_for_stable_frame("RSS form ready to save", crop=(660, 450, 360, 40), stable_for=0.2)
     driver.click_point(816, footer_y)  # Save
+    def fields_disabled() -> bool:
+        busy = driver.capture("rss-fields-disabled-during-save")
+        return all(near_color_pixel_count(busy, (246, 247, 248),
+            crop=(600, top, 300, 50), tolerance=1) >= 10000
+            for top in (black_y - 15, white_y - 15))
+    wait_until("both RSS fields disabled during save", fields_disabled, timeout=1.8)
+    # The asynchronous save owns a snapshot. Typing into either field while it
+    # is pending must be blocked, rather than silently lost when the form closes.
+    driver.click_point(640, black_y)
+    driver.type_text("mustnotenter")
+    driver.click_point(640, white_y)
+    driver.type_text("mustnotenter")
     wait_until("regexp rules saved", lambda: preferences()["blacklist"] == blacklist
                and preferences()["whitelist"] == whitelist)
     if any(entry.get("decision") == "hide" for entry in state().get("entries", {}).values()):
@@ -8830,7 +8854,7 @@ def journal_page_states_scenario(driver: WindowDriver) -> None:
         wait_for_ai_controls(driver)
         driver.click_point(*AI_SIDEBAR_ITEM)
         wait_for_ai_controls(driver)
-        driver.click_point(1140, 54)
+        driver.click_point(925, 54)
         page = driver.wait_for_stable_frame(f"journal page with {count} records", crop=(300, 200, 850, 150), stable_for=0.3)
         pagination = dark_pixel_count(page, crop=(300, 374, 450, 36))
         if count <= 40 and pagination > 15:
@@ -8877,7 +8901,7 @@ def ai_journal_scenario(driver: WindowDriver, workspace: Path) -> None:
     driver.click_point(*AI_SIDEBAR_ITEM)
     wait_for_ai_controls(driver)
     settings = driver.capture("journal-settings")
-    driver.click_point(1140, 54)
+    driver.click_point(925, 54)
     driver.wait_for_visual_change("journal without a connection", settings, crop=(260, 30, 720, 500), timeout=10)
     empty = driver.capture("journal-empty")
     directory = driver.home / ".stillus" / "ai" / "journal"
@@ -8921,7 +8945,7 @@ def ai_journal_scenario(driver: WindowDriver, workspace: Path) -> None:
     wait_for_ai_controls(driver)
     driver.click_point(*AI_SIDEBAR_ITEM)
     wait_for_ai_controls(driver)
-    driver.click_point(1140, 54)
+    driver.click_point(925, 54)
     if list(directory.glob("*.json")):
         raise AcceptanceFailure("cleared journal returned after restart")
     driver.close_app()
@@ -8967,6 +8991,62 @@ def wait_for_chat_reading_position(driver: WindowDriver, *, timeout: float = 10)
     return previous
 
 
+def chat_composer_rect(driver: WindowDriver) -> tuple[int, int, int, int]:
+    """Find an enabled textarea without waiting for the streamed history to stop."""
+    width, height = driver.window_size()
+    result = None
+    previous = None
+
+    def ready() -> bool:
+        nonlocal result, previous
+        frame = driver.capture("chat-composer-layout")
+        left = sidebar_boundary_x(frame, y=height - 30) + 20
+        right = width - 21
+        pixels = subprocess.run(["convert", str(frame), "-crop", f"{width}x{height}+0+0",
+            "+repage", "-depth", "8", "rgb:-"], check=True, capture_output=True).stdout
+
+        def pixel(x: int, y: int) -> bytes:
+            return pixels[(y * width + x) * 3:(y * width + x) * 3 + 3]
+
+        def border(x: int, y: int) -> bool:
+            actual = pixel(x, y)
+            # Subpixel layout blends the one-pixel stroke with white. Recognize
+            # its color and coverage without confusing the disabled canvas with it.
+            for color in ((226, 229, 233), (54, 94, 130)):
+                coverage = (255 - actual[0]) / (255 - color[0])
+                if 0.38 <= coverage <= 1.02 and all(
+                        abs(a - (255 + (b - 255) * coverage)) <= 3
+                        for a, b in zip(actual, color)):
+                    return True
+            return False
+
+        rows = [y for y in range(180, height - 20)
+                if all(border(x, y) for x in range(left + 14, right - 12, 40))]
+        for top, bottom in reversed(list(zip(rows, rows[1:]))):
+            if 58 <= bottom - top <= 260 and all(border(left, y) and border(right, y)
+                    for y in range(top + 10, bottom - 9, 8)):
+                # A pending send briefly disables the editor; wait before typing.
+                if min(pixel(right - 12, bottom - 12)) < 250:
+                    continue
+                bounds = left, top, right - left + 1, bottom - top + 1
+                if bounds == previous:
+                    result = bounds
+                    return True
+                previous = bounds
+                return False
+        previous = None
+        return False
+
+    wait_until("chat composer is bounded and enabled", ready)
+    assert result is not None
+    return result
+
+
+def click_chat_composer(driver: WindowDriver) -> None:
+    x, y, width, height = chat_composer_rect(driver)
+    driver.click_point(x + min(200, width // 2), y + min(30, height // 2))
+
+
 def chat_scenario(driver: WindowDriver, workspace: Path) -> None:
     """Native chat creation, composer persistence and provider streaming without network."""
     original = {path: path.read_bytes() for path in (workspace / "notes").glob("*.md")}
@@ -8983,15 +9063,17 @@ def chat_scenario(driver: WindowDriver, workspace: Path) -> None:
     if dark_pixel_count(driver.capture("chat-no-paging-arrows"), crop=(960, 12, 32, 32)):
         raise AcceptanceFailure("chat toolbar retains a paging arrow")
     export_screenshot(driver.capture("chat-empty"), Path("/workspace/dist/chat-empty.png"))
-    composer_crop = (280, 620, 900, 105)
+    composer_x, composer_y, composer_width, composer_height = chat_composer_rect(driver)
+    composer_crop = (composer_x + 4, composer_y + 4, composer_width - 8, composer_height - 8)
+    caret_crop = (composer_x + 7, composer_y + 5, 5, 40)
     unfocused = driver.wait_for_stable_frame("unfocused placeholder has no blinking caret",
                                              crop=composer_crop, stable_for=1.2)
-    driver.click_point(480, 670)
+    click_chat_composer(driver)
     focused = driver.wait_for_visual_change("empty composer caret starts before placeholder",
-                                            unfocused, crop=(283, 625, 5, 40),
+                                            unfocused, crop=caret_crop,
                                             minimum_pixels=10, timeout=2)
     driver.wait_for_visual_change("focused composer caret blinks", focused,
-                                  crop=(283, 625, 5, 40), minimum_pixels=10, timeout=2)
+                                  crop=caret_crop, minimum_pixels=10, timeout=2)
     driver.xdotool("windowfocus", "0")
     inactive = driver.wait_for_stable_frame("inactive window hides composer caret",
                                            crop=composer_crop, stable_for=1.2)
@@ -9004,7 +9086,7 @@ def chat_scenario(driver: WindowDriver, workspace: Path) -> None:
     driver.wait_for_stable_frame("composer loses focus to rename input",
                                  crop=composer_crop, stable_for=1.2)
     driver.click_point(1052, 28)
-    driver.click_point(480, 670)
+    click_chat_composer(driver)
     driver.type_text("First line")
     driver.key("shift+Return")
     driver.type_text("second line")
@@ -9050,7 +9132,7 @@ def chat_scenario(driver: WindowDriver, workspace: Path) -> None:
         raise AcceptanceFailure("AI settings input reached the hidden chat composer")
     driver.click("settings_back")
     driver.wait_for_stable_frame("chat after connecting", crop=(260, 540, 960, 60), stable_for=0.2)
-    driver.click_point(480, 670)
+    click_chat_composer(driver)
     driver.key("Return")
     wait_until("chat generation completed", lambda: (chat / "run.json").exists() and json.loads((chat / "run.json").read_text())["data"]["status"] == "completed", timeout=15)
     driver.wait_for_stable_frame("native streamed reply", crop=(260, 70, 960, 460), stable_for=0.2)
@@ -9079,7 +9161,7 @@ def chat_scenario(driver: WindowDriver, workspace: Path) -> None:
     driver.click_point(*AI_SIDEBAR_ITEM)
     wait_for_ai_controls(driver)
     before_journal = driver.capture("chat-ai-settings")
-    driver.click_point(1140, 54)
+    driver.click_point(925, 54)
     driver.wait_for_visual_change("request journal opens from AI settings", before_journal,
                                   crop=(260, 30, 720, 500), timeout=10)
     driver.wait_for_stable_frame("chat request journal", crop=(280, 100, 850, 300), stable_for=0.2)
@@ -9091,15 +9173,28 @@ def chat_scenario(driver: WindowDriver, workspace: Path) -> None:
 
     def create_and_send(text: str) -> Path:
         before = set(root.glob("*/metadata.json"))
+        previous_header = driver.capture("chat-before-create")
         driver.click("create_menu")
         driver.click_point(116, 165)
         wait_until("another chat created", lambda: len(set(root.glob("*/metadata.json")) - before) == 1)
         target = next(iter(set(root.glob("*/metadata.json")) - before)).parent
-        driver.wait_for_stable_frame("new chat header", crop=(276, 24, 530, 28), stable_for=0.2)
-        driver.click_point(480, 670)
+        driver.wait_for_visual_change("new chat header replaces the previous conversation",
+            previous_header, crop=(276, 24, 530, 28), minimum_pixels=30)
+        empty_header = driver.wait_for_stable_frame("new chat header", crop=(276, 24, 530, 28), stable_for=0.2)
+        click_chat_composer(driver)
         driver.type_text(text)
-        driver.key("Return")
+        wait_until("draft ready for Send", lambda:
+            json.loads((target / "draft.json").read_text())["data"]["text"] == text)
+        if text == "slow double click":
+            driver.xdotool("mousemove", "--window", driver.window_id, "1180", "760",
+                           "click", "--repeat", "2", "--delay", "200", "1")
+        else:
+            driver.key("Return")
         wait_until("chat task started", lambda: (target / "run.json").exists() and json.loads((target / "run.json").read_text())["data"]["status"] == "running", timeout=10)
+        wait_until("submitted draft acknowledged", lambda:
+            json.loads((target / "draft.json").read_text())["data"]["text"] == "")
+        driver.wait_for_visual_change("first message title is painted", empty_header,
+            crop=(276, 24, 530, 28), minimum_pixels=30)
         return target
 
     first = create_and_send("slow first")
@@ -9113,6 +9208,14 @@ def chat_scenario(driver: WindowDriver, workspace: Path) -> None:
             raise AcceptanceFailure("a hidden chat response was incorrectly marked read")
     driver.click("settings_back")
     wait_until("visible response marked read", lambda: not json.loads((second / "run.json").read_text())["data"]["unread"], timeout=10)
+    guarded = create_and_send("slow double click")
+    driver.wait_for_stable_frame("double-click Send leaves generation running",
+                                 crop=(1130, 735, 100, 45), stable_for=0.6)
+    if json.loads((guarded / "run.json").read_text())["data"]["status"] != "running":
+        raise AcceptanceFailure("double-click Send activated the replacement Stop action")
+    driver.click_point(1180, 760)
+    wait_until("Stop works after the double-click guard", lambda:
+        json.loads((guarded / "run.json").read_text())["data"]["status"] == "stopped")
     stopped = create_and_send("slow stopped")
     before_trash = driver.capture("chat-before-trash")
     driver.click_point(1204, 28)
@@ -9152,7 +9255,7 @@ def chat_scenario(driver: WindowDriver, workspace: Path) -> None:
         raise AcceptanceFailure("organizing a chat rewrote its conversation")
     export_screenshot(driver.capture("chat-background"), Path("/workspace/dist/chat-background.png"))
     layout = create_and_send("layout fixture")
-    driver.click_point(480, 670)
+    click_chat_composer(driver)
     driver.type_text("next draft")
     wait_until("draft input processed before testing streamed history",
                lambda: json.loads((layout / "draft.json").read_text())["data"]["text"] == "next draft")
@@ -9180,7 +9283,8 @@ def chat_scenario(driver: WindowDriver, workspace: Path) -> None:
     long_frame = driver.wait_for_stable_frame("bounded long streamed answer", crop=(276, 65, 940, 500), stable_for=0.2)
     if dark_pixel_count(long_frame, crop=(1192, 24, 24, 24)) < 10:
         raise AcceptanceFailure("long answer pushed the toolbar off screen")
-    if dark_pixel_count(long_frame, crop=(284, 618, 250, 35)) < 20:
+    x, y, _, _ = chat_composer_rect(driver)
+    if dark_pixel_count(long_frame, crop=(x + 8, y + 8, 250, 35)) < 20:
         raise AcceptanceFailure("long answer pushed the composer off screen")
     export_screenshot(long_frame, Path("/workspace/dist/chat-long.png"))
     driver.close_app()
@@ -9241,8 +9345,10 @@ def chat_paging_layout_scenario(driver: WindowDriver, workspace: Path, chat: Pat
         ((529, 104), (565, 104), first_text),
         ((299, 218), (351, 218), "Message 01: a distinct history anchor.\nSecond line 01."),
     ):
-        driver.move_to("sidebar_blank")
+        driver.click("sidebar_blank")
         icon_crop = (button[0] - 8, button[1] - 8, 16, 16)
+        wait_until("message Copy hides after leaving the author header", lambda:
+            dark_pixel_count(driver.capture("chat-copy-hidden"), crop=icon_crop) == 0)
         hidden = driver.wait_for_stable_frame("message Copy hidden", crop=history_crop, stable_for=0.3)
         if dark_pixel_count(hidden, crop=icon_crop):
             raise AcceptanceFailure("message Copy remains visible outside the author header")
@@ -9250,18 +9356,28 @@ def chat_paging_layout_scenario(driver: WindowDriver, workspace: Path, chat: Pat
         shown = driver.wait_for_visual_change("author hover reveals adjacent Copy", hidden,
                                               crop=icon_crop, minimum_pixels=5)
         if image_difference(hidden, shown, crop=(520, 129, 650, 42)):
+            export_screenshot(hidden, Path("/workspace/dist/review-chat-copy-before.png"))
+            export_screenshot(shown, Path("/workspace/dist/review-chat-copy-after.png"))
             raise AcceptanceFailure("revealing Copy moved the message text")
         driver.click_point(*button)
         wait_until("adjacent Copy copies the complete message", lambda:
                    clipboard_text(driver.environment) == expected)
-    driver.move_to("sidebar_blank")
+    driver.click("sidebar_blank")
+    wait_until("Copy actions hidden before history comparison", lambda: all(
+        dark_pixel_count(driver.capture("chat-copy-before-anchor"), crop=crop) == 0
+        for crop in ((557, 96, 16, 16), (343, 210, 16, 16))))
     oldest = driver.wait_for_stable_frame("oldest message stays anchored", crop=history_crop, stable_for=0.3)
     driver.xdotool("mousemove", "--window", driver.window_id, "700", "250",
                    "click", "--repeat", "4", "--delay", "30", "4")
     unchanged = driver.wait_for_stable_frame("scrolling past the oldest message is harmless", crop=history_crop, stable_for=0.3)
     if image_difference(oldest, unchanged, crop=history_crop):
+        export_screenshot(oldest, Path("/workspace/dist/review-chat-anchor-before.png"))
+        export_screenshot(unchanged, Path("/workspace/dist/review-chat-anchor-after.png"))
         raise AcceptanceFailure("oldest history moved or duplicated after another upward scroll")
 
+    # Establish the keyboard starting point after clearing focus for the
+    # visual comparisons: Copy is intentionally visible on keyboard focus.
+    driver.click_point(351, 218)
     driver.key("shift+Tab")
     wait_until("keyboard focus reveals message Copy", lambda:
         dark_pixel_count(driver.capture("chat-copy-keyboard"), crop=(557, 96, 16, 16)) >= 5)
@@ -9276,7 +9392,7 @@ def chat_paging_layout_scenario(driver: WindowDriver, workspace: Path, chat: Pat
     refreshed_text = "Message 158: refreshed from disk.\nSecond line 158."
     changed["data"]["text"] = refreshed_text
     changed_path.write_text(json.dumps(changed))
-    driver.click_point(480, 670)
+    click_chat_composer(driver)
     driver.key("ctrl+a")
     driver.type_text("refresh keeps this draft")
     driver.click_point(1014, 28)
@@ -9284,12 +9400,13 @@ def chat_paging_layout_scenario(driver: WindowDriver, workspace: Path, chat: Pat
     newest = driver.wait_for_visual_change("refresh returns to latest messages", oldest,
         crop=history_crop, minimum_pixels=200)
     driver.wait_for_stable_frame("refreshed latest page", crop=history_crop, stable_for=0.3)
-    driver.click_point(565, 439)
+    _, composer_top, _, _ = chat_composer_rect(driver)
+    driver.click_point(565, composer_top - 148)
     wait_until("refresh rereads messages from disk", lambda: clipboard_text(driver.environment) == refreshed_text)
     wait_until("refresh preserves the current draft", lambda:
         json.loads((chat / "draft.json").read_text())["data"]["text"] == "refresh keeps this draft")
     # The last card has just one compact header; clicking expands its bounded result.
-    driver.click_point(350, 552)
+    driver.click_point(350, composer_top - 32)
     driver.xdotool("mousemove", "--window", driver.window_id, "700", "250", "click", "--repeat", "10", "--delay", "30", "5")
     expanded = driver.wait_for_visual_change("tool card expands without a journal row", newest,
                                             crop=(300, 430, 750, 100), minimum_pixels=200)
@@ -9303,9 +9420,10 @@ def chat_paging_layout_scenario(driver: WindowDriver, workspace: Path, chat: Pat
         raise AcceptanceFailure("chat sidebar did not contract at the minimum size")
     if dark_pixel_count(narrow, crop=(908, 12, 32, 32)) < 10:
         raise AcceptanceFailure("chat toolbar extends beyond the minimum window")
-    if dark_pixel_count(narrow, crop=(225, 415, 250, 50)) < 20:
+    x, y, w, h = chat_composer_rect(driver)
+    if dark_pixel_count(narrow, crop=(x + 8, y + 8, 250, 30)) < 20:
         raise AcceptanceFailure("composer is outside the minimum window")
-    if dark_pixel_count(narrow, crop=(SIDEBAR_WIDTH + 24, 500, 630, 20)) != 0:
+    if dark_pixel_count(narrow, crop=(x + 8, y + h - 24, w - 16, 16)) != 0:
         raise AcceptanceFailure("short composer retains horizontal overflow after resize")
     # Header is fixed at 56 px and remains stationary during history scrolling.
     driver.xdotool("mousemove", "--window", driver.window_id, "600", "180", "click", "--repeat", "4", "--delay", "40", "4")
@@ -9317,8 +9435,8 @@ def chat_paging_layout_scenario(driver: WindowDriver, workspace: Path, chat: Pat
     # Refresh stays reachable at minimum width without disturbing the draft.
     driver.click_point(734, 28)
     returned = driver.wait_for_stable_frame("refresh preserves narrow composer",
-                                           crop=(220, 415, 710, 110), stable_for=0.3)
-    if image_difference(narrow, returned, crop=(220, 415, 710, 110)) != 0:
+                                           crop=(x + 3, y + 3, w - 6, h - 6), stable_for=0.3)
+    if image_difference(narrow, returned, crop=(x + 3, y + 3, w - 6, h - 6)) != 0:
         raise AcceptanceFailure("refresh changed the narrow chat composer")
     driver.close_app()
 
@@ -9349,7 +9467,8 @@ def chat_visual_content_scenario(driver: WindowDriver, workspace: Path, chat: Pa
     export_screenshot(narrow, Path("/workspace/dist/chat-content-narrow.png"))
     if abs(sidebar_boundary_x(narrow, y=570) - SIDEBAR_WIDTH) > 1:
         raise AcceptanceFailure("minimum chat sidebar lost its saved width")
-    if dark_pixel_count(narrow, crop=(225, 422, 680, 70)) < 250:
+    x, y, w, h = chat_composer_rect(driver)
+    if dark_pixel_count(narrow, crop=(x + 8, y + 8, w - 16, h - 16)) < 250:
         raise AcceptanceFailure("200-character composer is clipped or does not wrap")
     if dark_pixel_count(narrow, crop=(225, 540, 680, 36)) < 50:
         raise AcceptanceFailure("minimum chat footer controls are outside the window")
@@ -9570,7 +9689,89 @@ def components_scenario(driver: WindowDriver, workspace: Path) -> None:
     driver.close_app()
 
 
+
+def review_scenario(driver: WindowDriver, workspace: Path) -> None:
+    driver.start_app(workspace, "review", environment_overrides={
+        "STILLUS_TEST_COMPONENTS": "1", "STILLUS_TEST_REVIEW": "1"})
+
+    def summary() -> str | None:
+        driver.click_point(90, 90)
+        driver.key("ctrl+a")
+        driver.key("ctrl+c")
+        return clipboard_text(driver.environment)
+
+    driver.wait_for_stable_frame("review fixture ready", crop=(24, 24, 560, 80), stable_for=0.2)
+    wait_until("review fixture initial selection", lambda: summary() == "Selected 0 · Original title")
+    driver.click_point(300, 44)
+    driver.type_text("099")
+    driver.key("Return")
+    wait_until("filtered Enter selects original model identity", lambda:
+                  summary() == "Selected 99 · Original title")
+    driver.click_point(300, 44)
+    driver.type_text("no such option")
+    driver.key("Return")
+    empty = driver.wait_for_stable_frame("empty search retains the open dropdown", stable_for=0.2)
+    if dark_pixel_count(empty, crop=(35, 113, 300, 30)) < 20:
+        raise AcceptanceFailure("empty search has no visible explanation")
+    driver.key("Escape")
+    if summary() != "Selected 99 · Original title":
+        raise AcceptanceFailure("empty search or Escape changed the selected model")
+    driver.click_point(300, 44)
+    driver.key("Home")
+    driver.key("Down")
+    driver.key("Return")
+    wait_until("search resets and keyboard navigation selects model one", lambda:
+                  summary() == "Selected 1 · Original title")
+
+    driver.click_point(100, 140)
+    driver.type_text("short")
+    driver.click_point(800, 200)
+    short = driver.wait_for_stable_frame("two-line minimum textarea", stable_for=0.2)
+    driver.click_point(100, 140)
+    driver.key("ctrl+a")
+    set_clipboard_text(driver.environment, "\n".join(f"line {n}" for n in range(30)))
+    driver.key("ctrl+v")
+    driver.key("ctrl+a")
+    driver.key("ctrl+c")
+    if clipboard_text(driver.environment) != "\n".join(f"line {n}" for n in range(30)):
+        raise AcceptanceFailure("growing textarea changed the pasted draft")
+    driver.click_point(800, 200)
+    tall = driver.wait_for_stable_frame("textarea reaches bounded height", stable_for=0.2)
+    if image_difference(short, tall, crop=(24, 175, 560, 125)) < 100:
+        raise AcceptanceFailure("textarea did not grow with multiline content")
+    if dark_pixel_count(tall, crop=(24, 301, 560, 12)):
+        raise AcceptanceFailure("textarea painted outside its height limit")
+
+    driver.click_point(80, 332)
+    driver.type_text("unsaved")
+    driver.key("Tab")  # Visible Cancel follows the field.
+    driver.key("Return")
+    if summary() != "Selected 1 · Original title":
+        raise AcceptanceFailure("Cancel committed the inline draft")
+    driver.click_point(80, 332)
+    driver.key("ctrl+a")
+    driver.key("ctrl+c")
+    wait_until("Cancel restores original field value", lambda:
+                  clipboard_text(driver.environment) == "Original title")
+    driver.type_text("Updated title")
+    driver.key("Return")
+    if summary() != "Selected 1 · Updated title":
+        raise AcceptanceFailure("inline Enter did not save the new title")
+
+    # The language action stays in place; the form below changes its direction.
+    for locale in ("ru", "ar", "ur", "en"):
+        driver.click_point(245, 332)
+        driver.click_point(494 if locale in ("ar", "ur") else 80, 332)
+        frame = driver.wait_for_stable_frame(f"review form in {locale}", stable_for=0.2,
+                                             crop=(24, 364, 560, 180), ignore_control_caret=True)
+        export_screenshot(frame, Path(f"/workspace/dist/review-components-{locale}.png"))
+        driver.key("Escape")
+    driver.close_app()
+
+
+
 SCENARIOS: dict[str, Callable[[WindowDriver, Path], None]] = {
+    "review": review_scenario,
     "external_sidebar": external_sidebar_scenario,
     "components": components_scenario,
     "chat": chat_scenario,

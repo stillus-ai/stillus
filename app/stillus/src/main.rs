@@ -821,13 +821,6 @@ impl PasswordFieldIds {
             PasswordField::Confirmation => self.confirmation,
         }
     }
-
-    fn other(self, field: PasswordField) -> PasswordField {
-        match field {
-            PasswordField::Primary => PasswordField::Confirmation,
-            PasswordField::Confirmation => PasswordField::Primary,
-        }
-    }
 }
 
 #[derive(Clone, Copy)]
@@ -890,6 +883,7 @@ struct SecurityUi {
     entry: Rc<RefCell<PasswordEntry>>,
     entry_revision: RwSignal<u64>,
     feedback: RwSignal<Option<PasswordFeedback>>,
+    feedback_field: RwSignal<Option<PasswordField>>,
     busy: RwSignal<bool>,
 }
 
@@ -924,6 +918,7 @@ impl SecurityUi {
             entry: Rc::new(RefCell::new(PasswordEntry::default())),
             entry_revision: create_rw_signal(0),
             feedback: create_rw_signal(None),
+            feedback_field: create_rw_signal(None),
             busy: create_rw_signal(false),
         }
     }
@@ -931,6 +926,7 @@ impl SecurityUi {
     fn open(&self, kind: PasswordDialogKind) {
         self.entry.borrow_mut().clear();
         self.feedback.set(None);
+        self.feedback_field.set(None);
         self.busy.set(false);
         self.dialog.set(Some(kind));
         self.entry_revision.update(|value| *value += 1);
@@ -939,6 +935,7 @@ impl SecurityUi {
     fn close(&self) {
         self.entry.borrow_mut().clear();
         self.feedback.set(None);
+        self.feedback_field.set(None);
         self.busy.set(false);
         self.dialog.set(None);
         self.entry_revision.update(|value| *value += 1);
@@ -946,14 +943,22 @@ impl SecurityUi {
 
     fn clear_feedback(&self) {
         self.feedback.set(None);
+        self.feedback_field.set(None);
     }
 
     fn set_error(&self, message: impl Into<UiText>) {
+        self.feedback_field.set(None);
         self.feedback
             .set(Some(PasswordFeedback::Error(message.into())));
     }
 
+    fn set_field_error(&self, field: PasswordField, message: impl Into<UiText>) {
+        self.set_error(message);
+        self.feedback_field.set(Some(field));
+    }
+
     fn set_status(&self, message: impl Into<UiText>) {
+        self.feedback_field.set(None);
         self.feedback
             .set(Some(PasswordFeedback::Status(message.into())));
     }
@@ -3831,7 +3836,10 @@ fn password_dialog_card(
                 if accepted {
                     edit.clear_feedback();
                 } else {
-                    edit.set_error(msg!(PasswordTooLong, "maximum" => MAX_PASSWORD_BYTES));
+                    edit.set_field_error(
+                        field,
+                        msg!(PasswordTooLong, "maximum" => MAX_PASSWORD_BYTES),
+                    );
                 }
                 edit.entry_revision.update(|value| *value += 1);
                 accepted
@@ -3905,31 +3913,35 @@ fn password_dialog_card(
             }
         });
 
-    let feedback_security = security.clone();
-    let feedback_label = label(move || {
-        feedback_security
-            .feedback
-            .get()
-            .map(|feedback| feedback.message().to_owned())
-            .unwrap_or_default()
-    })
-    .style(move |style| {
-        let is_error = security
-            .feedback
-            .get()
-            .is_some_and(|feedback| feedback.is_error());
-        style
-            .width_full()
-            .height(16.0)
-            .font_size(crate::ui::FONT_CAPTION as f32)
-            .color(if is_error {
-                palette.danger
-            } else {
-                palette.ink
-            })
-            .selectable(false)
-    });
-
+    let feedback_view = |field: Option<PasswordField>| {
+        let read = security.clone();
+        let style_security = security.clone();
+        label(move || {
+            read.feedback
+                .get()
+                .map(|feedback| feedback.message())
+                .unwrap_or_default()
+        })
+        .style(move |style| {
+            let error = style_security
+                .feedback
+                .get()
+                .is_some_and(|feedback| feedback.is_error());
+            let visible = style_security.feedback_field.get() == field
+                && (field.is_none() || style_security.feedback.get().is_some());
+            style
+                .width_full()
+                .min_height(18.0)
+                .line_height(1.4)
+                .font_size(crate::ui::FONT_CAPTION as f32)
+                .color(if error { palette.danger } else { palette.ink })
+                .selectable(false)
+                .apply_if(!visible, |s| s.hide())
+        })
+    };
+    let primary_feedback = feedback_view(Some(PasswordField::Primary));
+    let confirmation_feedback = feedback_view(Some(PasswordField::Confirmation));
+    let feedback_label = feedback_view(None);
     let cancel_security = security.clone();
     let cancel_busy = security.busy;
     let submit_security = security.clone();
@@ -3946,6 +3958,37 @@ fn password_dialog_card(
             .line_height(1.35);
         if is_setup { style } else { style.hide() }
     });
+    let cancel_button = password_dialog_button(
+        ButtonAction::Cancel,
+        msg!(Cancel),
+        IconButtonTone::Secondary,
+        palette,
+        move || cancel_busy.get(),
+        move || cancel_security.close(),
+    );
+    let submit_button = password_dialog_button(
+        ButtonAction::Custom(ICON_UNLOCK),
+        confirm_label,
+        IconButtonTone::Primary,
+        palette,
+        move || submit_busy.get(),
+        move || {
+            if let Some(field) =
+                submit_password_dialog(kind, &submit_model, &submit_security, revision)
+            {
+                request_password_field_focus(field, field_ids_value, &submit_security);
+            }
+        },
+    );
+    let cancel_button = cancel_button.into_view();
+    let submit_button = submit_button.into_view();
+    let members = vec![
+        primary_id,
+        confirmation_id,
+        cancel_button.id(),
+        submit_button.id(),
+    ];
+    let available_height = create_rw_signal(568.0);
     let card = v_stack((
         v_stack((
             text(title).style(|style| {
@@ -3962,40 +4005,24 @@ fn password_dialog_card(
         ))
         .style(|style| style.width_full().gap(4.0)),
         warning,
-        v_stack((primary_field, confirmation_field)).style(|style| style.width_full().gap(8.0)),
-        feedback_label,
-        h_stack((
-            empty().style(|style| style.flex_grow(1.0)),
-            password_dialog_button(
-                ButtonAction::Cancel,
-                msg!(Cancel),
-                IconButtonTone::Secondary,
-                palette,
-                move || cancel_busy.get(),
-                move || cancel_security.close(),
-            ),
-            password_dialog_button(
-                ButtonAction::Custom(ICON_UNLOCK),
-                confirm_label,
-                IconButtonTone::Primary,
-                palette,
-                move || submit_busy.get(),
-                move || {
-                    if let Some(field) =
-                        submit_password_dialog(kind, &submit_model, &submit_security, revision)
-                    {
-                        request_password_field_focus(field, field_ids_value, &submit_security);
-                    }
-                },
-            ),
+        v_stack((
+            v_stack((primary_field, primary_feedback)).style(|s| s.width_full().gap(4.0)),
+            v_stack((confirmation_field, confirmation_feedback))
+                .style(move |s| s.width_full().gap(4.0).apply_if(!is_setup, |s| s.hide())),
         ))
-        .style(|style| style.width_full().items_center().gap(8.0)),
+        .style(|style| style.width_full().gap(8.0)),
+        feedback_label,
+        actions((cancel_button, submit_button)).style(|style| style.width_full().justify_end()),
     ))
     .style(move |style| dialog_card_style(style, palette, 390.0, 20.0).gap(14.0));
     exec_after(Duration::from_millis(10), move |_| {
         primary_id.request_focus()
     });
-    container(card).style(modal_backdrop)
+    let card = scroll(card).style(move |s| s.max_height(available_height.get()).min_height(0.0));
+    let card = form_focus_scope(card, members, || true, true);
+    container(card)
+        .style(modal_backdrop)
+        .on_resize(move |rect| available_height.set((rect.height() - 32.0).max(1.0)))
 }
 
 fn request_password_field_focus(
@@ -4039,9 +4066,6 @@ fn handle_password_key(
                 request_password_field_focus(target, field_ids, security);
             }
         }
-        Key::Named(NamedKey::Tab) if kind == PasswordDialogKind::SetupProtection => {
-            request_password_field_focus(field_ids.other(field), field_ids, security);
-        }
         // SecretInput forwards a paste shortcut only when reading the clipboard failed.
         Key::Character(value)
             if value.eq_ignore_ascii_case("v")
@@ -4066,7 +4090,7 @@ fn submit_password_dialog(
     {
         let entry = security.entry.borrow();
         if entry.primary.is_empty() {
-            security.set_error(msg!(EnterMasterPassword));
+            security.set_field_error(PasswordField::Primary, msg!(EnterMasterPassword));
             return Some(PasswordField::Primary);
         }
         if kind == PasswordDialogKind::SetupProtection
@@ -4077,7 +4101,7 @@ fn submit_password_dialog(
             entry.confirmation.zeroize();
             entry.active = PasswordField::Confirmation;
             drop(entry);
-            security.set_error(msg!(PasswordsMismatch));
+            security.set_field_error(PasswordField::Confirmation, msg!(PasswordsMismatch));
             security.entry_revision.update(|value| *value += 1);
             return Some(PasswordField::Confirmation);
         }
@@ -8991,21 +9015,9 @@ fn go_to_line_prompt(
     let input =
         localized_input::LocalizedInput::new(signals.query, i18n::Key::Line).style(move |style| {
             let has_error = signals.error.get().is_some();
-            text_input_affordance(style, palette.muted, palette.accent)
+            form_field_style(style, palette, has_error)
                 .width(112.0)
                 .height(36.0)
-                .items_center()
-                .padding_horiz(10.0)
-                .background(palette.canvas)
-                .color(palette.ink)
-                .border(1.0)
-                .border_color(if has_error {
-                    palette.danger
-                } else {
-                    palette.divider
-                })
-                .border_radius(5.0)
-                .font_size(crate::ui::FONT_BODY as f32)
         });
     let input_id = input.id();
     create_effect(move |_| {
@@ -9819,18 +9831,9 @@ fn editor_panel(
     );
     let find_input = localized_input::LocalizedInput::new(note_find.query, i18n::Key::FindDocument)
         .style(move |style| {
-            text_input_affordance(style, palette.muted, palette.accent)
+            form_field_style(style, palette, false)
                 .min_width(104.0)
-                .height(32.0)
-                .items_center()
                 .flex_grow(1.0)
-                .padding_horiz(10.0)
-                .background(palette.canvas)
-                .color(palette.ink)
-                .border(1.0)
-                .border_color(palette.divider)
-                .border_radius(5.0)
-                .font_size(crate::ui::FONT_BODY as f32)
         });
     let find_input_id = find_input.id();
     create_effect(move |_| {

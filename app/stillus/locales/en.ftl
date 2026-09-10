@@ -446,3 +446,7 @@ DeletePermanentlyHint = This note will be permanently deleted. This cannot be un
 
 AiJournalDetails = Technical details
 AiJournalSummary = Operation: { $operation } · { $status } · { $duration } ms · Model: { $model }
+
+ChatInputKeys = Enter — send · Shift+Enter — new line
+ChatNeedsConnection = Connect an AI provider in settings to send messages.
+SelectSearch = Search options…

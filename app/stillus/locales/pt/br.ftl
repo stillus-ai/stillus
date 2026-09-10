@@ -442,3 +442,7 @@ DeletePermanentlyHint = Esta nota será excluída permanentemente. Esta ação n
 
 AiJournalDetails = Detalhes técnicos
 AiJournalSummary = Operação: { $operation } · { $status } · { $duration } ms · Modelo: { $model }
+
+ChatInputKeys = Enter — enviar · Shift+Enter — nova linha
+ChatNeedsConnection = Conecte um provedor de IA nas configurações para enviar mensagens.
+SelectSearch = Buscar opções…

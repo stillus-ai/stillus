@@ -299,6 +299,10 @@ impl Coordinator {
                 })
             }
             Command::Preferences(_, token, expected, preferences, apply) => {
+                #[cfg(feature = "test-utils")]
+                if std::env::var_os("STILLUS_TEST_RSS_SAVE_DELAY").is_some() {
+                    std::thread::sleep(std::time::Duration::from_secs(2));
+                }
                 let result = engine.save_filter(&id, expected, preferences, apply);
                 self.saves
                     .insert(id.as_str().into(), (token, result.is_ok()));

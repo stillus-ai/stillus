@@ -38,7 +38,7 @@ pub(crate) use textarea::TextArea;
 mod selectable_text;
 pub(crate) use selectable_text::selectable_rich_text;
 mod select;
-pub(crate) use select::{language_select, select};
+pub(crate) use select::{language_select, searchable_select, select};
 mod menu;
 pub(crate) use menu::*;
 
@@ -47,6 +47,8 @@ pub(crate) mod gallery;
 
 mod form;
 pub(crate) use form::*;
+mod focus;
+pub(crate) use focus::form_focus_scope;
 
 mod tooltip;
 pub(crate) use tooltip::{anchored_tooltip, close_button_tooltips};

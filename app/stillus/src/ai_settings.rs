@@ -303,17 +303,32 @@ pub(super) fn page(
                     move || journal_open.set(true),
                 ),
             ))
-            .style(|s| rtl_row(s).items_center().justify_between().width_full()),
-            spacer(7.0),
+            .style(|s| {
+                rtl_row(s)
+                    .items_center()
+                    .justify_between()
+                    .width_full()
+                    .gap(12.0)
+                    .flex_wrap(floem::taffy::FlexWrap::Wrap)
+            }),
+            spacer(8.0),
             page_description(i18n::Key::AiDescription, palette),
-            spacer(28.0),
+            spacer(24.0),
             connection_section,
-            spacer(28.0),
+            spacer(24.0),
             models_section,
         ))
         .style(|style| {
             rtl_column(style)
                 .width_full()
+                .min_width(0.0)
+                .max_width(SETTINGS_CARD_MAX_WIDTH_PX)
+        })
+        .container()
+        .style(|style| {
+            rtl_column(style)
+                .width_full()
+                .min_width(0.0)
                 .padding_horiz(SETTINGS_PAGE_INSET_PX)
                 .padding_vert(38.0)
         }),
@@ -942,7 +957,7 @@ fn alias_form(controller: Controller, palette: Palette) -> impl IntoView {
             })
         },
         move |models| {
-            select(
+            searchable_select(
                 model,
                 models.iter().map(|m| m.id.clone()).collect(),
                 move |value| {

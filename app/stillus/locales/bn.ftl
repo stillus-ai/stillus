@@ -442,3 +442,7 @@ DeletePermanentlyHint = এই নোটটি স্থায়ীভাবে
 
 AiJournalDetails = প্রযুক্তিগত বিবরণ
 AiJournalSummary = কাজ: { $operation } · { $status } · { $duration } ms · মডেল: { $model }
+
+ChatInputKeys = Enter — পাঠান · Shift+Enter — নতুন লাইন
+ChatNeedsConnection = বার্তা পাঠাতে সেটিংসে AI প্রদানকারী সংযুক্ত করুন।
+SelectSearch = বিকল্প খুঁজুন…

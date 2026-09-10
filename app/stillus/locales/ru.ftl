@@ -448,3 +448,7 @@ DeletePermanentlyHint = Заметка будет удалена навсегд�
 
 AiJournalDetails = Технические подробности
 AiJournalSummary = Операция: { $operation } · { $status } · { $duration } ms · Модель: { $model }
+
+ChatInputKeys = Enter — отправить · Shift+Enter — новая строка
+ChatNeedsConnection = Для отправки сообщений подключите провайдера ИИ в настройках.
+SelectSearch = Поиск вариантов…

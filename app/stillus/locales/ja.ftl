@@ -441,3 +441,7 @@ DeletePermanentlyHint = このノートは完全に削除されます。この�
 
 AiJournalDetails = 技術的な詳細
 AiJournalSummary = 操作: { $operation } · { $status } · { $duration } ms · モデル: { $model }
+
+ChatInputKeys = Enter — 送信 · Shift+Enter — 改行
+ChatNeedsConnection = メッセージを送信するには、設定で AI プロバイダーを接続してください。
+SelectSearch = 選択肢を検索…

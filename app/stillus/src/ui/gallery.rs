@@ -5,6 +5,9 @@
 use super::*;
 
 pub(crate) fn view() -> AnyView {
+    if std::env::var_os("STILLUS_TEST_REVIEW").is_some() {
+        return review_fixture();
+    }
     if std::env::var_os("STILLUS_TEST_SECRET").as_deref() == Some(std::ffi::OsStr::new("1")) {
         return secret_fixture();
     }
@@ -229,6 +232,108 @@ pub(crate) fn view() -> AnyView {
         }),
     )
     .style(|s| s.size_full())
+    .into_any()
+}
+
+fn review_fixture() -> AnyView {
+    let palette = Palette::new();
+    let selected = create_rw_signal(Some(0_usize));
+    let draft = create_rw_signal(String::new());
+    let edit_open = create_rw_signal(false);
+    let edit_value = create_rw_signal("Original title".to_owned());
+    let title = create_rw_signal("Original title".to_owned());
+    let summary = selectable_rich_text(
+        move || {
+            let text = format!(
+                "Selected {} · {}",
+                selected.get().unwrap_or_default(),
+                title.get()
+            );
+            let mut layout = floem::text::TextLayout::new();
+            layout.set_text(
+                &text,
+                floem::text::AttrsList::new(floem::text::Attrs::new().font_size(14.0)),
+            );
+            (text, layout)
+        },
+        palette,
+        None,
+    );
+    v_stack((
+        searchable_select(
+            selected,
+            (0..100).collect(),
+            |value| {
+                format!(
+                    "Model {:03} — a long readable model name",
+                    value.unwrap_or_default()
+                )
+            },
+            move |value| selected.set(Some(value)),
+            || true,
+            palette,
+        )
+        .style(|s| s.width(560.0)),
+        summary.style(|s| s.height(24.0)),
+        // Reserve fixture geometry; the actual field inside must still grow.
+        container(
+            TextArea::new(draft, palette)
+                .auto_height(|| 180.0)
+                .build(|_| {}),
+        )
+        .style(|s| s.width(560.0).height(180.0).items_start()),
+        actions((
+            form_action_button(
+                ButtonAction::Edit,
+                || tr!(NewTitle),
+                IconButtonTone::Secondary,
+                palette,
+                || true,
+                move || {
+                    edit_value.set(title.get_untracked());
+                    edit_open.set(true);
+                },
+            )
+            .style(|s| s.width(180.0)),
+            form_action_button(
+                ButtonAction::Settings,
+                || tr!(Language),
+                IconButtonTone::Secondary,
+                palette,
+                || true,
+                || {
+                    i18n::set_current(match i18n::current() {
+                        i18n::Locale::English => i18n::Locale::Russian,
+                        i18n::Locale::Russian => i18n::Locale::Arabic,
+                        i18n::Locale::Arabic => i18n::Locale::Urdu,
+                        _ => i18n::Locale::English,
+                    })
+                },
+            )
+            .style(|s| s.width(160.0)),
+        ))
+        .style(|s| s.width(560.0)),
+        toolbar_edit_bar(
+            ToolbarEditBar {
+                open: edit_open,
+                value: edit_value,
+                label: i18n::Key::NewTitle,
+                placeholder: i18n::Key::NewTitle,
+            },
+            palette,
+            move || {
+                title.set(edit_value.get_untracked());
+                edit_open.set(false);
+            },
+        )
+        .style(|s| s.width(560.0)),
+    ))
+    .style(|s| {
+        s.size_full()
+            .padding(24.0)
+            .gap(16.0)
+            .background(Color::WHITE)
+    })
     .into_any()
 }
 

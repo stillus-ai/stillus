@@ -441,3 +441,7 @@ DeletePermanentlyHint = 此笔记将被永久删除。此操作无法撤销。
 
 AiJournalDetails = 技术详情
 AiJournalSummary = 操作: { $operation } · { $status } · { $duration } ms · 模型: { $model }
+
+ChatInputKeys = Enter — 发送 · Shift+Enter — 换行
+ChatNeedsConnection = 请在设置中连接 AI 服务提供商以发送消息。
+SelectSearch = 搜索选项…

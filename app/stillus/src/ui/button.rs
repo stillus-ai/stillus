@@ -600,112 +600,33 @@ pub(crate) fn password_dialog_button(
     disabled: impl Fn() -> bool + 'static,
     action: impl Fn() + 'static,
 ) -> impl IntoView {
-    let colors = button_colors(tone, palette);
-    let button_width = match tone {
+    let minimum = match tone {
         IconButtonTone::Primary => PASSWORD_DIALOG_PRIMARY_BUTTON_WIDTH_PX,
         _ => PASSWORD_DIALOG_SECONDARY_BUTTON_WIDTH_PX,
     };
-    let disabled: Rc<dyn Fn() -> bool> = Rc::new(disabled);
-    let action: Rc<dyn Fn()> = Rc::new(action);
-    let active_background = match tone {
-        IconButtonTone::Primary => Color::rgb8(35, 72, 105),
-        IconButtonTone::Danger => Color::rgb8(244, 220, 220),
-        IconButtonTone::Sidebar => Color::rgb8(82, 94, 110),
-        IconButtonTone::Secondary | IconButtonTone::Status => palette.divider,
-    };
-    let disabled_background = match tone {
-        IconButtonTone::Primary => Color::rgb8(166, 184, 200),
-        _ => palette.canvas,
-    };
-    let trigger_disabled = disabled.clone();
-    let trigger: Rc<dyn Fn()> = Rc::new(move || {
-        if trigger_disabled() {
-            return;
-        }
-        action();
-    });
-    let pointer_trigger = trigger.clone();
-    let keyboard_trigger = trigger;
-    let view_disabled = disabled;
-    let surface = PrimaryPointerView::new(empty(), move |_| pointer_trigger())
-        .capture_pointer()
-        .keyboard_navigable()
-        .on_event(EventListener::KeyDown, move |event| {
-            if is_keyboard_activation(event) {
-                keyboard_trigger();
-                EventPropagation::Stop
-            } else {
-                EventPropagation::Continue
-            }
-        })
-        .style(move |style| {
-            style
-                .size_full()
-                .items_center()
-                .justify_center()
-                .cursor(CursorStyle::Pointer)
-                .background(colors.background)
-                .border(1.0)
-                .border_color(colors.border)
-                .border_radius(5.0)
-                .hover(move |style| {
-                    if matches!(tone, IconButtonTone::Primary) {
-                        style.border_color(colors.hover)
-                    } else {
-                        style.background(colors.hover)
-                    }
-                })
-                .disabled(move |style| {
-                    style.background(disabled_background).border_color(
-                        if matches!(tone, IconButtonTone::Primary) {
-                            disabled_background
-                        } else {
-                            palette.divider
-                        },
-                    )
-                })
-                .active(move |style| {
-                    style
-                        .background(active_background)
-                        .border_color(active_background)
-                })
-        })
-        .disabled(move || view_disabled());
-    let label = text(label_text)
-        .pointer_events(|| false)
-        .style(move |style| {
-            style
-                .font_family(UI_FONT_FAMILY.to_owned())
-                .font_size(crate::ui::FONT_BODY as f32)
-                .color(colors.foreground)
-                .selectable(false)
-        });
-    let label = h_stack((
-        svg(kind.icon()).style(|s| s.size(16.0, 16.0).flex_shrink(0.0)),
-        label,
-    ))
-    .pointer_events(|| false)
-    .style(move |style| {
-        rtl_row(style)
-            .absolute()
-            .size_full()
-            .items_center()
-            .justify_center()
-            .gap(7.0)
+    let disabled = floem::reactive::create_memo(move |_| disabled());
+    let colors = button_colors(tone, palette);
+    form_action_button(
+        kind,
+        move || label_text.to_string(),
+        tone,
+        palette,
+        move || !disabled.get(),
+        action,
+    )
+    .style(move |s| {
+        s.min_width(minimum)
+            .padding_horiz(8.0)
             .color(colors.foreground)
-    });
-    stack((surface, label)).style(move |style| {
-        style
-            .font_family(UI_FONT_FAMILY.to_owned())
-            .font_size(crate::ui::FONT_BODY as f32)
-            .width(button_width)
-            .min_width(button_width)
-            .max_width(button_width)
-            .height(BUTTON_SIZE_PX)
-            .min_height(BUTTON_SIZE_PX)
-            .max_height(BUTTON_SIZE_PX)
-            .flex_shrink(0.0)
+            .apply_if(disabled.get(), |s| {
+                s.background(match tone {
+                    IconButtonTone::Primary => Color::rgb8(166, 184, 200),
+                    _ => palette.canvas,
+                })
+            })
+            .focus(|s| s.outline(1.0).outline_color(palette.accent))
     })
+    .disabled(move || disabled.get())
 }
 
 /// A custom action whose caption can wrap or include structured content.

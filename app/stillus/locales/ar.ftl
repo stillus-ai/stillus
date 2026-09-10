@@ -446,3 +446,7 @@ DeletePermanentlyHint = ستُحذف هذه الملاحظة نهائيًا. ل�
 
 AiJournalDetails = التفاصيل التقنية
 AiJournalSummary = العملية: { $operation } · { $status } · { $duration } ms · النموذج: { $model }
+
+ChatInputKeys = Enter — إرسال · Shift+Enter — سطر جديد
+ChatNeedsConnection = اربط مزود ذكاء اصطناعي في الإعدادات لإرسال الرسائل.
+SelectSearch = البحث في الخيارات…

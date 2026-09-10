@@ -49,12 +49,14 @@ fn multiline(
     value: RwSignal<String>,
     open: RwSignal<bool>,
     blacklist: bool,
+    pending: RwSignal<Option<u64>>,
     palette: Palette,
 ) -> AnyView {
     let error = floem::reactive::create_memo(move |_| field_error(&value.get(), blacklist));
     let line = create_rw_signal(None);
     v_stack((
         TextArea::new(value, palette)
+            .enabled(move || pending.get().is_none())
             .visible(move || open.get())
             .invalid(move || error.get().is_some())
             .focus_line(line)
@@ -231,9 +233,9 @@ pub(crate) fn form(
                 .color(palette.muted)
         }),
         label(move || tr!(RssFilterBlacklist)),
-        multiline(blacklist, open, true, palette),
+        multiline(blacklist, open, true, pending, palette),
         label(move || tr!(RssFilterWhitelist)),
-        multiline(whitelist, open, false, palette),
+        multiline(whitelist, open, false, pending, palette),
         status,
         actions((
             dialog_button(

@@ -29,6 +29,7 @@ pub(crate) struct TextArea {
     visible: Rc<dyn Fn() -> bool>,
     invalid: Rc<dyn Fn() -> bool>,
     height: f64,
+    auto_height: Option<Rc<dyn Fn() -> f64>>,
     submit: Option<Rc<dyn Fn()>>,
     escape: Option<Rc<dyn Fn()>>,
     focus_line: Option<RwSignal<Option<usize>>>,
@@ -43,6 +44,7 @@ impl TextArea {
             visible: Rc::new(|| true),
             invalid: Rc::new(|| false),
             height: 112.0,
+            auto_height: None,
             submit: None,
             escape: None,
             focus_line: None,
@@ -64,8 +66,9 @@ impl TextArea {
         self.invalid = Rc::new(invalid);
         self
     }
-    pub(crate) fn height(mut self, height: f64) -> Self {
-        self.height = height;
+    /// Grow by visual text lines, keeping the same editor, selection and undo history.
+    pub(crate) fn auto_height(mut self, maximum: impl Fn() -> f64 + 'static) -> Self {
+        self.auto_height = Some(Rc::new(maximum));
         self
     }
     /// A one-based line requested by a form validation message.
@@ -91,10 +94,17 @@ impl TextArea {
             visible,
             invalid,
             height,
+            auto_height,
             submit,
             escape,
             focus_line,
         } = self;
+        let width = create_rw_signal(600.0);
+        let field_height = floem::reactive::create_memo(move |_| {
+            auto_height.as_ref().map_or(height, |maximum| {
+                draft.with(|text| fitted_height(text, width.get(), maximum()))
+            })
+        });
         let enabled = floem::reactive::create_memo(move |_| enabled());
         let visible = floem::reactive::create_memo(move |_| visible());
         let scope = Scope::current().create_child();
@@ -233,6 +243,11 @@ impl TextArea {
         let inner =
             stack((content, placeholder)).style(|s| s.size_full().min_width(0.0).min_height(0.0));
         stack((inner,))
+            .on_resize(move |rect| {
+                if (width.get_untracked() - rect.width()).abs() > 0.5 {
+                    width.set(rect.width());
+                }
+            })
             .disabled(move || !enabled.get())
             .on_event_cont(EventListener::WindowGotFocus, move |_| {
                 window_active.set(true)
@@ -244,7 +259,7 @@ impl TextArea {
                 s.apply_if(!visible.get(), |s| s.hide())
                     .width_full()
                     .min_width(0.0)
-                    .height(height)
+                    .height(field_height.get())
                     .flex_shrink(0.0)
                     .padding(8.0)
                     .border(1.0)
@@ -255,6 +270,8 @@ impl TextArea {
                     } else {
                         palette.divider
                     })
+                    .outline(if invalid() && active.get() { 1.0 } else { 0.0 })
+                    .outline_color(palette.accent)
                     .border_radius(8.0)
                     .background(if enabled.get() {
                         palette.paper
@@ -284,11 +301,50 @@ impl TextArea {
     }
 }
 
+fn fitted_height(text: &str, width: f64, maximum: f64) -> f64 {
+    const MINIMUM: f64 = 60.0; // Two 21px lines and field insets.
+    let maximum = maximum.max(MINIMUM);
+    // Only measure enough text to fill a desktop composer. Large pastes retain
+    // bounded measurement cost; the native editor still owns the full draft.
+    if text.chars().take(8193).count() > 8192 {
+        return maximum;
+    }
+    let mut layout = floem::text::TextLayout::new();
+    let family = [floem::text::FamilyOwned::Name(UI_FONT_FAMILY.to_owned())];
+    let attrs = floem::text::Attrs::new()
+        .family(&family)
+        .font_size(FONT_BODY as f32)
+        .line_height(floem::text::LineHeightValue::Normal(1.5));
+    layout.set_text(text, floem::text::AttrsList::new(attrs));
+    layout.set_wrap(floem::text::Wrap::WordOrGlyph);
+    layout.set_size((width - 22.0).max(1.0) as f32, f32::MAX);
+    (layout.size().height.ceil() + 18.0).clamp(MINIMUM, maximum)
+}
+
 fn caret_active(focused: bool, window_active: bool, enabled: bool, visible: bool) -> bool {
     focused && window_active && enabled && visible
 }
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn composer_grows_for_lines_and_wrapping_but_stays_bounded() {
+        super::register_fonts();
+        assert_eq!(super::fitted_height("", 600.0, 180.0), 60.0);
+        assert_eq!(super::fitted_height("hello", 600.0, 180.0), 60.0);
+        assert!(super::fitted_height("a\nb\nc\nd\ne", 600.0, 180.0) > 100.0);
+        assert_eq!(
+            super::fitted_height(&"line\n".repeat(30), 600.0, 180.0),
+            180.0
+        );
+        let url = "https://example.invalid/".to_owned() + &"abcdef".repeat(40);
+        assert!(
+            super::fitted_height(&url, 200.0, 300.0) > super::fitted_height(&url, 700.0, 300.0)
+        );
+        assert_eq!(
+            super::fitted_height(&"字".repeat(9000), 200.0, 120.0),
+            120.0
+        );
+    }
     #[test]
     fn caret_requires_focus_active_window_enabled_and_visible_field() {
         for mask in 0..16 {

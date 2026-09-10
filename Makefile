@@ -467,3 +467,7 @@ ui-click-components: ui-build-test-utils
 audit-ui-components:
 	$(RUN) python3 -B tools/test_ui_components.py
 	$(RUN) python3 -B tools/audit_ui_components.py
+
+.PHONY: ui-click-review
+ui-click-review: ui-build-test-utils
+	$(RUN) python3 -B tools/ui_acceptance.py review

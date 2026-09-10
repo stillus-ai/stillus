@@ -572,6 +572,44 @@ pub(super) fn panel(
                 .flex_basis(0.0)
                 .flex_grow(1.0)
         });
+    let body_height = create_rw_signal(504.0);
+    let footer_height = create_rw_signal(48.0);
+    let run_model = model.clone();
+    let run_id = id.clone();
+    let run_status = floem::reactive::create_memo(move |_| {
+        revision.get();
+        run_model
+            .borrow()
+            .chat_items()
+            .iter()
+            .find(|i| i.item.item_id == run_id)
+            .and_then(|i| i.run.as_ref().map(|r| r.value.status.clone()))
+    });
+    let running_model = model.clone();
+    let running_id = id.clone();
+    let running = floem::reactive::create_memo(move |_| {
+        revision.get();
+        running_model.borrow().chat_running(&running_id)
+    });
+    // Send and Stop share the primary action area. Ignore the second click of
+    // a double-click while that area changes meaning after submission.
+    let stop_ready = create_rw_signal(false);
+    let stop_generation = create_rw_signal(0_u64);
+    create_effect(move |_| {
+        let active = running.get();
+        let generation = stop_generation.get_untracked().wrapping_add(1);
+        stop_generation.set(generation);
+        stop_ready.set(false);
+        if active {
+            exec_after(Duration::from_millis(500), move |_| {
+                if stop_generation.try_get_untracked() == Some(generation)
+                    && running.try_get_untracked() == Some(true)
+                {
+                    stop_ready.set(true);
+                }
+            });
+        }
+    });
     let alias_state = model.clone();
     let alias_model = model.clone();
     let alias_id = id.clone();
@@ -596,7 +634,7 @@ pub(super) fn panel(
             let selected = create_rw_signal(Some(value));
             let model = alias_model.clone();
             let id = alias_id.clone();
-            select(
+            searchable_select(
                 selected,
                 names,
                 |value| value.unwrap_or_default(),
@@ -624,7 +662,13 @@ pub(super) fn panel(
         }),
         alias,
     ))
-    .style(|s| s.items_center().gap(8.0).min_width(0.0).flex_shrink(1.0));
+    .style(|s| {
+        rtl_row(s)
+            .items_center()
+            .gap(8.0)
+            .min_width(0.0)
+            .flex_shrink(1.0)
+    });
     let submit_model = model.clone();
     let submit_id = id.clone();
     let submit: Rc<dyn Fn()> = Rc::new(move || {
@@ -683,7 +727,7 @@ pub(super) fn panel(
             let id = composer_id.clone();
             TextArea::new(draft, palette)
                 .placeholder(i18n::Key::ChatPlaceholder)
-                .height(116.0)
+                .auto_height(move || composer_height_limit(body_height.get(), footer_height.get()))
                 .enabled(move || !sending.get())
                 .visible(move || !settings.open.get())
                 .on_submit(move || submit())
@@ -723,6 +767,7 @@ pub(super) fn panel(
         },
         move || submit(),
     );
+    let send = send.style(move |s| s.apply_if(running.get(), |s| s.hide()));
     let stop_model = model.clone();
     let stop_id = id.clone();
     let stop_state = model.clone();
@@ -734,7 +779,7 @@ pub(super) fn panel(
         palette,
         move || {
             revision.get();
-            stop_state.borrow().chat_running(&stop_state_id)
+            stop_ready.get() && stop_state.borrow().chat_running(&stop_state_id)
         },
         move || {
             dispatch(
@@ -746,6 +791,7 @@ pub(super) fn panel(
             );
         },
     );
+    let stop = stop.style(move |s| s.apply_if(!running.get(), |s| s.hide()));
     let continue_model = model.clone();
     let continue_id = id.clone();
     let continue_state = model.clone();
@@ -775,6 +821,8 @@ pub(super) fn panel(
             );
         },
     );
+    let continue_button = continue_button
+        .style(move |s| s.apply_if(run_status.get() != Some(RunStatus::Paused), |s| s.hide()));
     let connect = form_action_button(
         ButtonAction::Custom(ButtonAction::Settings.icon()),
         || tr!(ChatConnect),
@@ -800,17 +848,16 @@ pub(super) fn panel(
     let unavailable = label(move || match readiness.get() {
         application::chat::GenerationReadiness::Unsupported => tr!(ChatUnsupported),
         application::chat::GenerationReadiness::Unavailable => tr!(AiUnavailable),
+        application::chat::GenerationReadiness::Disconnected => tr!(ChatNeedsConnection),
         _ => String::new(),
     })
     .style(move |s| {
-        s.color(palette.muted)
+        s.width_full()
+            .min_width(0.0)
+            .color(palette.muted)
             .font_size(crate::ui::FONT_CAPTION as f32)
             .apply_if(
-                matches!(
-                    readiness.get(),
-                    application::chat::GenerationReadiness::Ready
-                        | application::chat::GenerationReadiness::Disconnected
-                ),
+                readiness.get() == application::chat::GenerationReadiness::Ready,
                 |s| s.hide(),
             )
     });
@@ -820,7 +867,8 @@ pub(super) fn panel(
         actions((continue_button, stop, send)).style(|s| s.min_width(0.0)),
     ))
     .style(move |s| {
-        s.width_full()
+        rtl_row(s)
+            .width_full()
             .min_width(0.0)
             .flex_shrink(0.0)
             .flex_wrap(floem::style::FlexWrap::Wrap)
@@ -831,7 +879,7 @@ pub(super) fn panel(
     let connect = connect.style(move |s| s.apply_if(connected.get(), |s| s.hide()));
     let status_model = model.clone();
     let status_id = id.clone();
-    let status_label = label(move || {
+    let status_text = floem::reactive::create_memo(move |_| {
         revision.get();
         let mut m = status_model.borrow_mut();
         match m.query(
@@ -868,9 +916,16 @@ pub(super) fn panel(
                 }
             }
         }
-    })
-    .style(move |s| {
-        s.color(palette.muted)
+    });
+    let status_label = label(move || status_text.get()).style(move |s| {
+        s.width_full()
+            .min_width(0.0)
+            .apply_if(status_text.get().is_empty(), |s| s.hide())
+            .color(if run_status.get() == Some(RunStatus::Failed) {
+                palette.danger
+            } else {
+                palette.muted
+            })
             .font_size(crate::ui::FONT_CAPTION as f32)
             .flex_shrink(0.0)
     });
@@ -878,11 +933,20 @@ pub(super) fn panel(
         rename_bar,
         categories_bar,
         history,
-        status_label,
-        unavailable,
         composer,
-        controls,
-        connect,
+        v_stack((
+            status_label,
+            unavailable,
+            label(|| tr!(ChatInputKeys)).style(move |s| {
+                s.width_full()
+                    .font_size(crate::ui::FONT_CAPTION)
+                    .color(palette.muted)
+            }),
+            controls,
+            connect,
+        ))
+        .style(|s| s.width_full().min_width(0.0).gap(8.0).flex_shrink(0.0))
+        .on_resize(move |rect| footer_height.set(rect.height())),
     ))
     .style(move |s| {
         s.width_full()
@@ -895,6 +959,7 @@ pub(super) fn panel(
             .gap(12.0)
             .background(palette.paper)
     });
+    let body = body.on_resize(move |rect| body_height.set(rect.height()));
     load_history(
         model,
         id.to_string(),
@@ -906,6 +971,13 @@ pub(super) fn panel(
     v_stack((header, body))
         .style(|s| s.width_full().height_full().min_width(0.0).min_height(0.0))
         .into_any()
+}
+
+fn composer_height_limit(body_height: f64, footer_height: f64) -> f64 {
+    // Reserve the history, body insets and gaps as well as the wrapped footer.
+    (body_height * 0.30)
+        .min(body_height - footer_height - 160.0 - 64.0)
+        .max(60.0)
 }
 
 fn message_view(
@@ -1388,6 +1460,12 @@ fn poll_history(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn composer_reserves_history_when_footer_wraps() {
+        assert_eq!(super::composer_height_limit(544.0, 90.0), 163.2);
+        assert_eq!(super::composer_height_limit(544.0, 200.0), 120.0);
+        assert_eq!(super::composer_height_limit(300.0, 200.0), 60.0);
+    }
     use super::*;
     use floem::reactive::{Scope, as_child_of_current_scope, with_scope};
     use stillus_chat::{HistoryEntry, Message, ToolCall, Versioned};

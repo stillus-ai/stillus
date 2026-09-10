@@ -442,3 +442,7 @@ DeletePermanentlyHint = یہ نوٹ مستقل طور پر حذف ہو جائے 
 
 AiJournalDetails = تکنیکی تفصیلات
 AiJournalSummary = عمل: { $operation } · { $status } · { $duration } ms · ماڈل: { $model }
+
+ChatInputKeys = Enter — بھیجیں · Shift+Enter — نئی سطر
+ChatNeedsConnection = پیغامات بھیجنے کے لیے ترتیبات میں AI فراہم کنندہ سے جڑیں۔
+SelectSearch = اختیارات تلاش کریں…

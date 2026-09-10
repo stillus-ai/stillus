@@ -441,3 +441,7 @@ DeletePermanentlyHint = Catatan ini akan dihapus permanen. Tindakan ini tidak da
 
 AiJournalDetails = Detail teknis
 AiJournalSummary = Operasi: { $operation } · { $status } · { $duration } ms · Model: { $model }
+
+ChatInputKeys = Enter — kirim · Shift+Enter — baris baru
+ChatNeedsConnection = Hubungkan penyedia AI di pengaturan untuk mengirim pesan.
+SelectSearch = Cari pilihan…

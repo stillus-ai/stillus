@@ -109,11 +109,15 @@ pub(crate) fn form_field_style(style: Style, palette: Palette, invalid: bool) ->
         .border_radius(6.0)
         .font_size(FONT_BODY)
         .focus(move |style| {
-            if invalid {
-                style
-            } else {
-                style.background(palette.paper).border_color(palette.accent)
-            }
+            style
+                .background(palette.paper)
+                .outline(1.0)
+                .outline_color(palette.accent)
+                .border_color(if invalid {
+                    palette.danger
+                } else {
+                    palette.accent
+                })
         })
 }
 

@@ -17,6 +17,8 @@ use floem::{View, ViewId};
 use floem_renderer::Renderer;
 use std::any::Any;
 
+type InputKeyHandler = dyn Fn(&Event) -> EventPropagation;
+
 pub(crate) struct LocalizedInput {
     input: TextInput,
     buffer: RwSignal<String>,
@@ -24,6 +26,8 @@ pub(crate) struct LocalizedInput {
     attrs: AttrsList,
     layout: TextLayout,
     on_escape: Option<Box<dyn Fn()>>,
+    on_key: Option<Box<InputKeyHandler>>,
+    composing: bool,
 }
 
 enum InputHint {
@@ -53,6 +57,8 @@ impl LocalizedInput {
             attrs: AttrsList::new(Attrs::new()),
             layout: TextLayout::new(),
             on_escape: None,
+            on_key: None,
+            composing: false,
         }
     }
 
@@ -61,6 +67,12 @@ impl LocalizedInput {
         let mut input = Self::new(buffer, Key::SearchNotes);
         input.hint = InputHint::Literal(hint);
         input
+    }
+
+    /// Composite fields can route navigation before native input consumes it.
+    pub(crate) fn on_key(mut self, action: impl Fn(&Event) -> EventPropagation + 'static) -> Self {
+        self.on_key = Some(Box::new(action));
+        self
     }
 
     pub(crate) fn on_escape(mut self, action: impl Fn() + 'static) -> Self {
@@ -80,6 +92,11 @@ impl View for LocalizedInput {
         self.input.update(cx, state);
     }
     fn event_before_children(&mut self, cx: &mut EventCx, event: &Event) -> EventPropagation {
+        match event {
+            Event::ImePreedit { text, .. } => self.composing = !text.is_empty(),
+            Event::ImeCommit(_) => self.composing = false,
+            _ => {}
+        }
         if super::popover_handle_escape(event) {
             return EventPropagation::Stop;
         }
@@ -89,6 +106,13 @@ impl View for LocalizedInput {
             && let Some(action) = &self.on_escape
         {
             action();
+            return EventPropagation::Stop;
+        }
+        if !self.composing
+            && let Some(action) = &self.on_key
+            && matches!(event, Event::KeyDown(_))
+            && action(event).is_processed()
+        {
             return EventPropagation::Stop;
         }
         self.input.event_before_children(cx, event)

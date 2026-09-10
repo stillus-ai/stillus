@@ -441,3 +441,7 @@ DeletePermanentlyHint = Bu not kalıcı olarak silinecek. Bu işlem geri alınam
 
 AiJournalDetails = Teknik ayrıntılar
 AiJournalSummary = İşlem: { $operation } · { $status } · { $duration } ms · Model: { $model }
+
+ChatInputKeys = Enter — gönder · Shift+Enter — yeni satır
+ChatNeedsConnection = Mesaj göndermek için ayarlardan bir yapay zekâ sağlayıcısına bağlanın.
+SelectSearch = Seçeneklerde ara…
