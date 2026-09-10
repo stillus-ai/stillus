@@ -28,6 +28,10 @@ does not explain these operations. The request journal is accessible only
 from AI settings; do not add it to chat or document toolbars. Menus and
 expanded navigation retain their labels.
 
+Chat history loads earlier messages as scrolling approaches the top. Do not
+add up/down paging buttons to its toolbar. Provide one standard Refresh icon
+to reload the chat without resending requests or discarding the draft.
+
 Input accessories (show/hide password, clear search, remove a selected tag)
 and compact navigation controls are distinct from form action buttons.
 They may use conventional icons inside their control, with localized hints.

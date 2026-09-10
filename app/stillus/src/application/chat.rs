@@ -1025,15 +1025,11 @@ impl Application {
                     let mut view = view.as_ref().clone();
                     if view.before.is_some() {
                         if let Some(old) = c.view.as_ref().filter(|old| old.id == view.id) {
-                            let mut entries = old.history.entries.clone();
-                            entries.extend(view.history.entries.clone());
-                            entries.sort_by(|a, b| a.id.cmp(&b.id));
-                            entries.dedup_by(|a, b| a.id == b.id);
-                            if entries.len() <= 128
-                                && serde_json::to_vec(&entries)
-                                    .is_ok_and(|bytes| bytes.len() <= stillus_chat::MAX_PAGE_BYTES)
-                            {
-                                view.history.entries = entries;
+                            match prepend_history(&old.history.entries, &view.history) {
+                                Ok(history) => view.history = history,
+                                Err(_) => view
+                                    .diagnostics
+                                    .push("Could not merge history pages".into()),
                             }
                         }
                     }
@@ -1533,6 +1529,51 @@ impl Application {
         self.retry_save()
     }
 }
+/// Keep a bounded window around the older page, retaining its overlap with
+/// the current viewport instead of replacing all rows at the 128-record limit.
+fn prepend_history(
+    old: &[HistoryEntry],
+    page: &HistoryPage,
+) -> Result<HistoryPage, serde_json::Error> {
+    let mut ordered = BTreeMap::new();
+    for entry in old.iter().chain(&page.entries) {
+        ordered.insert(&entry.id, entry);
+    }
+    let ordered = ordered.into_values().collect::<Vec<_>>();
+    let sizes = ordered
+        .iter()
+        .map(|entry| serde_json::to_vec(entry).map(|bytes| bytes.len() + 1))
+        .collect::<Result<Vec<_>, _>>()?;
+    let anchor = old
+        .first()
+        .and_then(|first| ordered.iter().position(|entry| entry.id == first.id))
+        .unwrap_or(0);
+    let mut start = 0;
+    let mut end = ordered.len();
+    let mut bytes = sizes.iter().sum::<usize>() + 1;
+    while end - start > 128 || bytes > MAX_PAGE_BYTES {
+        if end > anchor + 1 || start == anchor {
+            end -= 1;
+            bytes -= sizes[end];
+        } else {
+            // Keep the previously visible top message even when large incoming
+            // messages fill the byte budget. Fetch the omitted older rows next.
+            bytes -= sizes[start];
+            start += 1;
+        }
+    }
+    let entries = ordered[start..end]
+        .iter()
+        .map(|entry| (*entry).clone())
+        .collect::<Vec<_>>();
+    let next = if start > 0 {
+        entries.first().map(|entry| entry.id.clone())
+    } else {
+        page.next.clone()
+    };
+    Ok(HistoryPage { entries, next })
+}
+
 fn read_view(
     store: &ChatStore,
     id: &ItemId,
@@ -2124,3 +2165,60 @@ impl Application {
 }
 #[cfg(feature = "test-utils")]
 pub(crate) mod fixtures;
+
+#[cfg(test)]
+mod history_tests {
+    use super::*;
+    fn entry(n: usize, text: usize) -> HistoryEntry {
+        HistoryEntry {
+            id: format!("{n:032x}"),
+            message: None,
+            diagnostic: Some("x".repeat(text)),
+        }
+    }
+    fn page(entries: Vec<HistoryEntry>) -> HistoryPage {
+        HistoryPage {
+            entries,
+            next: None,
+        }
+    }
+    #[test]
+    fn paging_past_128_keeps_the_previous_top_row_and_discards_the_far_end() {
+        let old = (32..160).map(|n| entry(n, 10)).collect::<Vec<_>>();
+        let page = page((0..32).map(|n| entry(n, 10)).collect());
+        let merged = prepend_history(&old, &page).unwrap();
+        let merged = merged.entries;
+        assert_eq!(merged.len(), 128);
+        assert_eq!(merged[0].id, page.entries[0].id);
+        assert_eq!(merged[32].id, old[0].id);
+        assert_eq!(merged.last().unwrap().id, format!("{:032x}", 127));
+    }
+    #[test]
+    fn history_window_preserves_byte_bound_and_prefers_reread_entries() {
+        let old = vec![entry(2, 700_000), entry(3, 700_000)];
+        let incoming = page(vec![entry(1, 700_000), entry(2, 600_000)]);
+        let merged = prepend_history(&old, &incoming).unwrap().entries;
+        assert!(serde_json::to_vec(&merged).unwrap().len() <= MAX_PAGE_BYTES);
+        assert_eq!(merged[1].diagnostic.as_ref().unwrap().len(), 600_000);
+        assert_eq!(merged.len(), 3);
+        let oversized = (0..4).map(|n| entry(n, 700_000)).collect::<Vec<_>>();
+        let bounded = prepend_history(&oversized, &page(vec![])).unwrap().entries;
+        assert_eq!(bounded.len(), 2);
+        assert!(serde_json::to_vec(&bounded).unwrap().len() <= MAX_PAGE_BYTES);
+    }
+    #[test]
+    fn large_pages_keep_the_old_top_message_and_leave_omitted_rows_reachable() {
+        let old = vec![entry(3, 700_000), entry(4, 700_000)];
+        let incoming = page(vec![entry(1, 700_000), entry(2, 700_000)]);
+        let merged = prepend_history(&old, &incoming).unwrap();
+        assert_eq!(merged.entries.len(), 2);
+        assert_eq!(merged.entries[0].id, incoming.entries[1].id);
+        assert_eq!(merged.entries[1].id, old[0].id);
+        assert_eq!(merged.next, Some(incoming.entries[1].id.clone()));
+        assert!(serde_json::to_vec(&merged.entries).unwrap().len() <= MAX_PAGE_BYTES);
+        let next = prepend_history(&merged.entries, &page(vec![entry(1, 700_000)])).unwrap();
+        assert_eq!(next.entries[0].id, incoming.entries[0].id);
+        assert_eq!(next.entries[1].id, merged.entries[0].id);
+        assert!(next.next.is_none());
+    }
+}

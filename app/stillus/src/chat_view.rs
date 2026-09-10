@@ -79,14 +79,6 @@ pub(super) fn panel(
     settings: SettingsPageSignals,
     palette: Palette,
 ) -> AnyView {
-    let _ = model.borrow_mut().query(
-        Caller::Ui,
-        AppQuery::Chat(Query::Read {
-            id: id.to_string(),
-            before: None,
-            limit: 32,
-        }),
-    );
     let draft = create_rw_signal(String::new());
     let loaded = create_rw_signal(false);
     let draft_version = create_rw_signal(String::new());
@@ -101,10 +93,30 @@ pub(super) fn panel(
     let history_width = create_rw_signal(1.0f64);
     let scroll_y = create_rw_signal(0.0);
     let paging = create_rw_signal(false);
+    let history_failed = create_rw_signal(false);
     let anchor = create_rw_signal(None::<(String, f64)>);
     let row_bounds = Rc::new(RefCell::new(
         std::collections::BTreeMap::<String, Rect>::new(),
     ));
+    let restore_bounds = row_bounds.clone();
+    create_effect(move |_| {
+        if paging.get() || anchor.get_untracked().is_none() {
+            return;
+        }
+        let bounds = restore_bounds.clone();
+        // Let the new rows finish layout before restoring the reading position.
+        // Scrolling from row resize callbacks can feed back into that layout.
+        exec_after(Duration::from_millis(10), move |_| {
+            if paging.try_get_untracked() != Some(false) {
+                return;
+            }
+            if let Some((target, offset)) = anchor.try_get_untracked().flatten() {
+                if let Some(rect) = bounds.borrow().get(&target) {
+                    scroll_to.set(Some(Point::new(0.0, (rect.y0 + offset).max(0.0))));
+                }
+            }
+        });
+    });
     let read_model = model.clone();
     let read_id = id.clone();
     let read_once = Rc::new(RefCell::new(None::<String>));
@@ -344,11 +356,6 @@ pub(super) fn panel(
             message_view(entry, row_model.clone(), revision, history_width, palette).on_resize(
                 move |rect| {
                     bounds.borrow_mut().insert(id.clone(), rect);
-                    if let Some((target, offset)) = anchor.try_get_untracked().flatten() {
-                        if target == id {
-                            scroll_to.set(Some(Point::new(0.0, (rect.y0 + offset).max(0.0))));
-                        }
-                    }
                 },
             )
         },
@@ -361,72 +368,59 @@ pub(super) fn panel(
     });
     let earlier_model = model.clone();
     let earlier_id = id.clone();
-    let earlier_state = model.clone();
-    let earlier_state_id = id.clone();
-    let earlier = enabled_icon_button(
-        ICON_ARROW_UP,
-        || tr!(ChatLoadEarlier),
+    let earlier_bounds = row_bounds.clone();
+    let load_earlier: Rc<dyn Fn()> = Rc::new(move || {
+        if paging.get_untracked()
+            || history_failed.get_untracked()
+            || settings.open.get_untracked()
+            || earlier_model.borrow().session_id() != session
+        {
+            return;
+        }
+        let before = earlier_model
+            .borrow()
+            .chat_view()
+            .filter(|v| v.id == earlier_id.as_str())
+            .and_then(|v| v.history.next.clone());
+        let Some(before) = before else {
+            return;
+        };
+        let y = scroll_y.get_untracked();
+        anchor.set(visible_history_anchor(&earlier_bounds.borrow(), y));
+        follow.set(false);
+        load_history(
+            earlier_model.clone(),
+            earlier_id.to_string(),
+            Some(before),
+            paging,
+            history_failed,
+            revision,
+        );
+    });
+    let refresh_model = model.clone();
+    let refresh_id = id.clone();
+    let refresh = toolbar_action_button(
+        ButtonAction::Refresh,
+        || tr!(ChatRefresh),
         IconButtonTone::Secondary,
         palette,
         move || {
             revision.get();
             !paging.get()
-                && earlier_state
-                    .borrow()
-                    .chat_view()
-                    .filter(|v| v.id == earlier_state_id.as_str())
-                    .is_some_and(|v| v.history.next.is_some())
         },
         move || {
-            let before = earlier_model
-                .borrow()
-                .chat_view()
-                .and_then(|v| v.history.next.clone());
-            let y = scroll_y.get_untracked();
-            anchor.set(
-                row_bounds
-                    .borrow()
-                    .iter()
-                    .filter(|(_, rect)| rect.y1 > y)
-                    .min_by(|a, b| a.1.y0.total_cmp(&b.1.y0))
-                    .map(|(id, rect)| (id.clone(), y - rect.y0)),
-            );
-            follow.set(false);
-            load_history(
-                earlier_model.clone(),
-                earlier_id.to_string(),
-                before,
-                paging,
-                revision,
-            );
-        },
-    );
-    let newest_state = model.clone();
-    let newest_model = model.clone();
-    let newest_id = id.clone();
-    let newest = enabled_icon_button(
-        ICON_ARROW_DOWN,
-        || tr!(AiJournalNewest),
-        IconButtonTone::Secondary,
-        palette,
-        move || {
-            revision.get();
-            !paging.get()
-                && (!follow.get()
-                    || newest_state
-                        .borrow()
-                        .chat_view()
-                        .is_some_and(|v| v.before.is_some()))
-        },
-        move || {
+            if refresh_model.borrow().session_id() != session {
+                return;
+            }
             anchor.set(None);
             follow.set(true);
             scroll_to.set(Some(Point::new(0.0, content_height.get_untracked())));
             load_history(
-                newest_model.clone(),
-                newest_id.to_string(),
+                refresh_model.clone(),
+                refresh_id.to_string(),
                 None,
                 paging,
+                history_failed,
                 revision,
             );
         },
@@ -439,8 +433,7 @@ pub(super) fn panel(
                 .map(|item| item.metadata.title)
                 .unwrap_or_else(|| tr!(ChatNew))
         },
-        h_stack((earlier, newest, toolbar))
-            .style(|style| style.items_center().gap(TOOLBAR_ACTION_GAP_PX)),
+        h_stack((refresh, toolbar)).style(|style| style.items_center().gap(TOOLBAR_ACTION_GAP_PX)),
         Some(Rc::new(move || {
             if let Some(item) = item(&title_click_model, &title_click_id) {
                 rename.value.set(item.metadata.title);
@@ -465,7 +458,13 @@ pub(super) fn panel(
                 |s| s.hide(),
             )
     });
-    let history_content = v_stack((empty_hint, rows))
+    let history_error = label(|| tr!(ErrorUnknown)).style(move |s| {
+        s.width_full()
+            .color(palette.danger)
+            .font_size(crate::ui::FONT_BODY)
+            .apply_if(!history_failed.get(), |s| s.hide())
+    });
+    let history_content = v_stack((history_error, empty_hint, rows))
         .style(move |s| s.width(history_width.get()).min_width(0.0).gap(12.0))
         .on_resize(move |r| {
             content_height.set(r.height());
@@ -473,7 +472,7 @@ pub(super) fn panel(
             // Reconcile against the new height, not the preceding page's height.
             let at_bottom =
                 scroll_y.get_untracked() + viewport_height.get_untracked() >= r.height() - 40.0;
-            // Paging owns the viewport until explicit pointer navigation or Newest.
+            // Paging owns the viewport until explicit pointer navigation or Refresh.
             // A transient clamp during relayout must not re-enable following and
             // overwrite the saved visible-message anchor.
             if anchor.get_untracked().is_none() && (follow.get_untracked() || at_bottom) {
@@ -487,16 +486,41 @@ pub(super) fn panel(
     let history_scrollbar_visible = create_rw_signal(false);
     let history_scrollbar_generation = create_rw_signal(0_u64);
     let history_scroll_origin = create_rw_signal(None::<Point>);
+    let load_at_boundary = load_earlier.clone();
     let history = scroll(history_content)
         .on_resize(move |rect| {
             // Leave the history scrollbar beside text, including long links.
             history_width.set((rect.width() - 12.0).max(1.0));
             viewport_height.set(rect.height());
         })
-        .on_event_cont(EventListener::PointerWheel, move |_| anchor.set(None))
-        .on_event_cont(EventListener::PointerDown, move |_| anchor.set(None))
+        .on_event_cont(EventListener::PointerWheel, move |event| {
+            if !paging.get_untracked() {
+                anchor.set(None);
+                // At the boundary another upward wheel event cannot change
+                // the viewport, so on_scroll alone cannot trigger the next page.
+                if matches!(event, Event::PointerWheel(pointer) if pointer.delta.y < 0.0)
+                    && scroll_y.get_untracked() <= 0.0
+                {
+                    let load = load_at_boundary.clone();
+                    exec_after(Duration::from_millis(10), move |_| {
+                        if paging.try_get_untracked() == Some(false)
+                            && anchor.get_untracked().is_none()
+                            && scroll_y.get_untracked() <= 0.0
+                        {
+                            load();
+                        }
+                    });
+                }
+            }
+        })
+        .on_event_cont(EventListener::PointerDown, move |_| {
+            if !paging.get_untracked() {
+                anchor.set(None);
+            }
+        })
         .on_scroll(move |viewport| {
             let origin = viewport.origin();
+            let previous_y = history_scroll_origin.get_untracked().map(|p| p.y);
             if history_scroll_origin
                 .get_untracked()
                 .is_some_and(|previous| previous != origin)
@@ -510,6 +534,24 @@ pub(super) fn panel(
                 anchor.get_untracked().is_none()
                     && viewport.y1 >= content_height.get_untracked() - 40.0,
             );
+            if !paging.get_untracked()
+                && anchor.get_untracked().is_none()
+                && history_near_start(previous_y, viewport.y0, viewport.height())
+            {
+                let load = load_earlier.clone();
+                exec_after(Duration::from_millis(10), move |_| {
+                    if paging.try_get_untracked() == Some(false)
+                        && anchor.get_untracked().is_none()
+                        && history_near_start(
+                            Some(scroll_y.get_untracked() + 1.0),
+                            scroll_y.get_untracked(),
+                            viewport_height.get_untracked(),
+                        )
+                    {
+                        load();
+                    }
+                });
+            }
         })
         .scroll_to(move || scroll_to.get())
         .scroll_style(move |s| {
@@ -853,6 +895,14 @@ pub(super) fn panel(
             .gap(12.0)
             .background(palette.paper)
     });
+    load_history(
+        model,
+        id.to_string(),
+        None,
+        paging,
+        history_failed,
+        revision,
+    );
     v_stack((header, body))
         .style(|s| s.width_full().height_full().min_width(0.0).min_height(0.0))
         .into_any()
@@ -1243,16 +1293,36 @@ fn wrapped_text_layout(text: &str, width: f64, color: Color, size: f32) -> floem
     layout
 }
 
+/// Start fetching before the reader reaches the first visible message.
+fn history_near_start(previous_y: Option<f64>, y: f64, viewport_height: f64) -> bool {
+    viewport_height > 0.0
+        && previous_y.is_some_and(|previous| y < previous)
+        && y <= (viewport_height * 0.5).clamp(120.0, 320.0)
+}
+
+fn visible_history_anchor(
+    bounds: &std::collections::BTreeMap<String, Rect>,
+    y: f64,
+) -> Option<(String, f64)> {
+    bounds
+        .iter()
+        .filter(|(_, rect)| rect.y1 > y)
+        .min_by(|a, b| a.1.y0.total_cmp(&b.1.y0))
+        .map(|(id, rect)| (id.clone(), y - rect.y0))
+}
+
 fn load_history(
     model: Rc<RefCell<AppModel>>,
     id: String,
     before: Option<String>,
     busy: RwSignal<bool>,
+    failed: RwSignal<bool>,
     revision: RwSignal<u64>,
 ) {
     if busy.get_untracked() {
         return;
     }
+    failed.set(false);
     let result = model.borrow_mut().query(
         Caller::Ui,
         AppQuery::Chat(Query::Read {
@@ -1263,13 +1333,17 @@ fn load_history(
     );
     if let Ok(application::api::QueryResult::Pending { operation }) = result {
         busy.set(true);
-        poll_history(model, operation, busy, revision);
+        poll_history(model, operation, busy, failed, revision);
+    } else {
+        failed.set(true);
+        revision.update(|r| *r += 1);
     }
 }
 fn poll_history(
     model: Rc<RefCell<AppModel>>,
     operation: String,
     busy: RwSignal<bool>,
+    failed: RwSignal<bool>,
     revision: RwSignal<u64>,
 ) {
     exec_after(Duration::from_millis(50), move |_| {
@@ -1287,8 +1361,16 @@ fn poll_history(
                 ..
             })
         ) {
-            poll_history(model, operation, busy, revision);
+            poll_history(model, operation, busy, failed, revision);
         } else {
+            failed.set(!matches!(
+                result,
+                Ok(application::api::QueryResult::Operation {
+                    status: application::actions::OperationStatus::Completed(_)
+                        | application::actions::OperationStatus::Saved(_),
+                    ..
+                })
+            ));
             busy.set(false);
             revision.update(|r| *r += 1);
         }
@@ -1300,6 +1382,38 @@ mod tests {
     use super::*;
     use floem::reactive::{Scope, as_child_of_current_scope, with_scope};
     use stillus_chat::{HistoryEntry, Message, ToolCall, Versioned};
+
+    #[test]
+    fn history_prefetch_requires_upward_scroll_near_the_start() {
+        assert!(history_near_start(Some(300.0), 240.0, 500.0));
+        assert!(history_near_start(Some(10.0), 0.0, 500.0));
+        assert!(!history_near_start(None, 0.0, 500.0));
+        assert!(!history_near_start(Some(20.0), 20.0, 500.0));
+        assert!(!history_near_start(Some(10.0), 20.0, 500.0));
+        assert!(!history_near_start(Some(900.0), 800.0, 500.0));
+        assert!(!history_near_start(Some(10.0), 0.0, 0.0));
+    }
+
+    #[test]
+    fn history_anchor_uses_visual_order_and_keeps_the_offset_inside_a_message() {
+        let rows = std::collections::BTreeMap::from([
+            ("z".into(), Rect::new(0.0, 0.0, 400.0, 80.0)),
+            ("a".into(), Rect::new(0.0, 98.0, 400.0, 200.0)),
+        ]);
+        assert_eq!(
+            visible_history_anchor(&rows, 40.0),
+            Some(("z".into(), 40.0))
+        );
+        assert_eq!(
+            visible_history_anchor(&rows, 90.0),
+            Some(("a".into(), -8.0))
+        );
+        assert_eq!(
+            visible_history_anchor(&rows, 120.0),
+            Some(("a".into(), 22.0))
+        );
+        assert_eq!(visible_history_anchor(&rows, 210.0), None);
+    }
 
     fn entry(role: Role) -> HistoryEntry {
         HistoryEntry {

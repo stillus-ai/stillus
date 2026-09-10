@@ -12,7 +12,7 @@ message_keys! {
     ChatStop,
     ChatContinue,
     ChatPlaceholder,
-    ChatLoadEarlier,
+    ChatRefresh,
     ChatRunning,
     ChatQueued,
     ChatPaused,

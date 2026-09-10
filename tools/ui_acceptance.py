@@ -8842,13 +8842,13 @@ def wait_for_chat_reading_position(driver: WindowDriver, *, timeout: float = 10)
     def ready() -> bool:
         nonlocal previous, stable_since, scroll_acknowledged
         frame = driver.capture("chat-reading-position")
-        # The thumb must reach the top of the overflowing history, and Newest
-        # must be enabled: both the wheel input and follow-mode change painted.
+        # The thumb acknowledges the wheel input; Refresh must be available
+        # after any pending history read has completed.
         thumb = shaded_row_runs(frame, x=1215, y=76, height=496, max_luminance=200)
-        newest = sum(value < 160 for value in crop_luminances(frame, (1008, 20, 12, 16)).values())
+        refresh = sum(value < 160 for value in crop_luminances(frame, (1008, 20, 12, 16)).values())
         scroll_acknowledged = scroll_acknowledged or (
             len(thumb) == 1 and thumb[0][0] <= 78
-            and 30 < thumb[0][1] - thumb[0][0] < 468 and newest >= 5
+            and 30 < thumb[0][1] - thumb[0][0] < 468 and refresh >= 5
             and dark_pixel_count(frame, crop=CHAT_READING_CROP) >= 100
         )
         unchanged = previous is not None and image_difference(previous, frame, crop=CHAT_READING_CROP) == 0
@@ -8882,6 +8882,8 @@ def chat_scenario(driver: WindowDriver, workspace: Path) -> None:
     driver.wait_for_stable_frame("empty chat", crop=(260, 40, 960, 500), stable_for=0.2)
     if dark_pixel_count(driver.capture("chat-toolbar"), crop=(800, 12, 148, 32)):
         raise AcceptanceFailure("chat toolbar contains a request journal action")
+    if dark_pixel_count(driver.capture("chat-no-paging-arrows"), crop=(960, 12, 32, 32)):
+        raise AcceptanceFailure("chat toolbar retains a paging arrow")
     export_screenshot(driver.capture("chat-empty"), Path("/workspace/dist/chat-empty.png"))
     composer_crop = (280, 620, 900, 105)
     unfocused = driver.wait_for_stable_frame("unfocused placeholder has no blinking caret",
@@ -9095,12 +9097,12 @@ def chat_paging_layout_scenario(driver: WindowDriver, workspace: Path, chat: Pat
     """Seed only the closed, disposable workspace with a multi-page conversation."""
     for path in (chat / "messages").glob("*.json"):
         path.unlink()
-    for index in range(64):
+    for index in range(160):
         message_id = f"{index + 1:032x}"
         message = {"id": message_id, "run": "fixture", "role": "assistant" if index % 2 else "user",
                    "text": f"Message {index:02d}: a distinct history anchor.\nSecond line {index:02d}.",
                    "delivery": "complete", "created_ms": index, "tool": None}
-        if index == 63:
+        if index == 159:
             message["role"] = "tool"
             message["tool"] = {"id": "fixture/tool", "name": "search/query", "arguments": {"query": "topic"},
                                "state": "completed", "result": {"text": "bounded result " * 100}}
@@ -9109,53 +9111,58 @@ def chat_paging_layout_scenario(driver: WindowDriver, workspace: Path, chat: Pat
     metadata["data"]["common"]["title"] = "Long chat title " * 15
     (chat / "metadata.json").write_text(json.dumps(metadata))
     driver.start_app(workspace, "chat-pages", environment_overrides=fixture)
-    # Compare text positions exactly, excluding Copy controls and the light
-    # bubble corners: their subpixel rounding can change by one color level
-    # when preceding rows are inserted, without moving any text.
     history_crop = (280, 90, 840, 450)
 
-    def history_ink(frame: Path) -> set[tuple[int, int]]:
-        return {point for point, luminance in crop_luminances(frame, history_crop).items()
-                if luminance < 160}
-
-    def navigation_ready(earlier: bool, newest: bool) -> None:
+    def refresh_ready() -> None:
         driver.move_to("sidebar_blank")
+        wait_until("chat refresh completes", lambda: sum(
+            value < 160 for value in crop_luminances(driver.capture("chat-refresh-state"),
+                (1008, 20, 12, 16)).values()) >= 5)
 
-        def matches() -> bool:
-            frame = driver.capture("chat-navigation-state")
-            up = sum(value < 160 for value in crop_luminances(frame, (970, 20, 12, 16)).values())
-            down = sum(value < 160 for value in crop_luminances(frame, (1008, 20, 12, 16)).values())
-            return (up >= 5) == earlier and (down >= 5) == newest
-
-        wait_until("chat page load finishes and navigation availability updates", matches)
-
-    navigation_ready(True, False)
+    refresh_ready()
     latest = driver.wait_for_stable_frame("latest conversation page", crop=history_crop, stable_for=0.3)
-    driver.click_point(976, 28)
-    # Loading a preceding page must leave the currently visible message stationary.
-    driver.wait_for_visual_change("earlier page changes toolbar availability", latest,
-                                  crop=(960, 20, 70, 32), minimum_pixels=10)
-    navigation_ready(False, True)
-    previous = driver.wait_for_stable_frame("history anchor after loading earlier page", crop=history_crop, stable_for=0.3)
-    if history_ink(latest) != history_ink(previous):
-        raise AcceptanceFailure("loading earlier messages moved the visible history anchor")
-    driver.click_point(976, 28)
-    driver.move_to("sidebar_blank")
-    unchanged = driver.wait_for_stable_frame("earlier icon is disabled at oldest page", crop=history_crop, stable_for=0.3)
-    if history_ink(previous) != history_ink(unchanged):
-        raise AcceptanceFailure("disabled earlier icon changed the history")
-    driver.xdotool("mousemove", "--window", driver.window_id, "700", "250", "click", "--repeat", "10", "--delay", "50", "4")
-    scrolled = driver.wait_for_visual_change("history scrolls independently", unchanged,
-                                            crop=history_crop, minimum_pixels=200)
-    if image_difference(unchanged, scrolled, crop=(920, 20, 300, 32)) != 0:
-        raise AcceptanceFailure("scrolling history moved the toolbar")
+    # Traverse more than the 128-row display window using only the wheel.
+    # The first message is outside the initially loaded page and must remain
+    # reachable across successive automatic reads and bounded-window eviction.
+    first_text = "Message 00: a distinct history anchor.\nSecond line 00."
+    reached_first = False
+    for _ in range(16):
+        driver.xdotool("mousemove", "--window", driver.window_id, "700", "250",
+                       "click", "--repeat", "30", "--delay", "10", "4")
+        refresh_ready()
+        driver.wait_for_stable_frame("older messages after scrolling", crop=history_crop, stable_for=0.3)
+        driver.click_point(1180, 104)
+        if clipboard_text(driver.environment) == first_text:
+            reached_first = True
+            break
+    if not reached_first:
+        raise AcceptanceFailure("scrolling to older history never loaded its first message")
+    oldest = driver.wait_for_stable_frame("oldest message stays anchored", crop=history_crop, stable_for=0.3)
+    driver.xdotool("mousemove", "--window", driver.window_id, "700", "250",
+                   "click", "--repeat", "4", "--delay", "30", "4")
+    unchanged = driver.wait_for_stable_frame("scrolling past the oldest message is harmless", crop=history_crop, stable_for=0.3)
+    if image_difference(oldest, unchanged, crop=history_crop):
+        raise AcceptanceFailure("oldest history moved or duplicated after another upward scroll")
+
+    # A manual refresh must actually reread storage, including changes that
+    # arrived while older pages were displayed, and preserve the composer.
+    changed_path = chat / "messages" / f"{159:032x}.json"
+    changed = json.loads(changed_path.read_text())
+    refreshed_text = "Message 158: refreshed from disk.\nSecond line 158."
+    changed["data"]["text"] = refreshed_text
+    changed_path.write_text(json.dumps(changed))
+    driver.click_point(480, 670)
+    driver.key("ctrl+a")
+    driver.type_text("refresh keeps this draft")
     driver.click_point(1014, 28)
-    navigation_ready(True, False)
-    newest = driver.wait_for_stable_frame("down arrow returns to newest messages", crop=history_crop, stable_for=0.3)
-    if history_ink(latest) != history_ink(newest):
-        raise AcceptanceFailure("down arrow did not return to the latest messages")
+    refresh_ready()
+    newest = driver.wait_for_visual_change("refresh returns to latest messages", oldest,
+        crop=history_crop, minimum_pixels=200)
+    driver.wait_for_stable_frame("refreshed latest page", crop=history_crop, stable_for=0.3)
     driver.click_point(1180, 439)
-    wait_until("copy a message after paging", lambda: clipboard_text(driver.environment) == "Message 62: a distinct history anchor.\nSecond line 62.")
+    wait_until("refresh rereads messages from disk", lambda: clipboard_text(driver.environment) == refreshed_text)
+    wait_until("refresh preserves the current draft", lambda:
+        json.loads((chat / "draft.json").read_text())["data"]["text"] == "refresh keeps this draft")
     # The last card has just one compact header; clicking expands its bounded result.
     driver.click_point(350, 552)
     driver.xdotool("mousemove", "--window", driver.window_id, "700", "250", "click", "--repeat", "10", "--delay", "30", "5")
@@ -9182,15 +9189,12 @@ def chat_paging_layout_scenario(driver: WindowDriver, workspace: Path, chat: Pat
     if image_difference(narrow, scrolled_narrow, crop=(650, 4, 290, 48)) != 0:
         raise AcceptanceFailure("narrow history scrolling moved the fixed toolbar")
     export_screenshot(scrolled_narrow, Path("/workspace/dist/chat-narrow.png"))
-    # Journal stays available in the fixed toolbar; Back restores the composer.
-    driver.click_point(666, 28)
-    driver.wait_for_visual_change("journal opens from fixed toolbar", scrolled_narrow,
-                                  crop=(220, 100, 700, 200), minimum_pixels=100)
-    driver.click_point(SIDEBAR_WIDTH + 60, 45)
-    returned = driver.wait_for_stable_frame("journal Back restores narrow chat",
+    # Refresh stays reachable at minimum width without disturbing the draft.
+    driver.click_point(734, 28)
+    returned = driver.wait_for_stable_frame("refresh preserves narrow composer",
                                            crop=(220, 415, 710, 110), stable_for=0.3)
     if image_difference(narrow, returned, crop=(220, 415, 710, 110)) != 0:
-        raise AcceptanceFailure("journal Back did not restore the chat composer")
+        raise AcceptanceFailure("refresh changed the narrow chat composer")
     driver.close_app()
 
 

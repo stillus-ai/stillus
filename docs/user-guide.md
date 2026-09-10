@@ -230,10 +230,13 @@ reply marks it read. Up to two tasks run concurrently, with six waiting.
 
 Your messages appear in shaded bubbles on the right. Replies render Markdown and
 copyable code blocks; long code lines scroll inside their block. Only the history
-scrolls, keeping the toolbar and composer visible. The toolbar's up arrow loads
-earlier messages without moving the message you are reading, and the down arrow
-returns to the latest messages. New replies scroll into view only while you are
-at the bottom. Open the request journal from **Settings → AI settings →
+scrolls, keeping the toolbar and composer visible. Scrolling near the top loads
+earlier messages automatically while preserving the message you are reading.
+The toolbar's Refresh button reloads the latest messages and chat state from
+disk without resending a request or clearing your draft. The visible history
+uses a bounded window; Refresh also returns to the latest messages after reading
+older pages. New replies scroll into view only while you are at the bottom.
+Open the request journal from **Settings → AI settings →
 Request journal**. Hover over a toolbar icon to see its label.
 
 Expand an action card to see its arguments and result. The assistant
