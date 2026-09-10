@@ -388,6 +388,7 @@ ui-check: ui-smoke ui-autosave-smoke ui-recovery-smoke ui-conflict-smoke ui-oper
 .PHONY: ui-click-external ui-click-crash
 ui-click-external: ui-build
 	$(RUN) python3 -B tools/desktop_smoke.py external
+	$(RUN) python3 -B tools/ui_acceptance.py external_sidebar
 
 ui-click-crash: ui-build-test-utils
 	$(RUN) python3 -B tools/desktop_smoke.py crash

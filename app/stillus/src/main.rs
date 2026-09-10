@@ -6463,39 +6463,12 @@ fn external_file_row(
         palette,
     )
     .style(|style| style.min_width(0.0).flex_grow(1.0).height_full());
-    let close = compact_icon_button(
-        || ButtonAction::Close.icon(),
-        || tr!(RemoveSidebar),
-        IconButtonTone::Sidebar,
-        palette,
-        22.0,
-        || true,
-        move || {
-            close_model
-                .borrow_mut()
-                .close_external_target(close_target.clone());
-            revision.update(|value| *value = value.saturating_add(1));
-            schedule_autosave(close_model.clone(), revision);
-        },
-    )
-    .style(move |style| {
-        style
-            .size(22.0, 22.0)
-            .items_center()
-            .justify_center()
-            .flex_shrink(0.0)
-            .border_radius(4.0)
-            .color(if hovered.get() {
-                palette.sidebar_muted
-            } else {
-                Color::TRANSPARENT
-            })
-            .hover(move |style| {
-                style
-                    .color(palette.sidebar_ink)
-                    .background(palette.sidebar_active)
-            })
-            .focus_visible(move |style| style.color(palette.sidebar_ink))
+    let close = sidebar_close_button(hovered, palette, move || {
+        close_model
+            .borrow_mut()
+            .close_external_target(close_target.clone());
+        revision.update(|value| *value = value.saturating_add(1));
+        schedule_autosave(close_model.clone(), revision);
     });
     h_stack((main, close))
         .style(move |style| {

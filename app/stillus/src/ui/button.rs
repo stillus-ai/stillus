@@ -416,6 +416,43 @@ pub(crate) fn busy_icon_toggle_button(
     )
 }
 
+/// Keep a row action's entire surface hidden until hover or keyboard focus.
+pub(crate) fn sidebar_close_button(
+    hovered: RwSignal<bool>,
+    palette: Palette,
+    action: impl Fn() + 'static,
+) -> AnyView {
+    let control = reliable_button(
+        svg(ButtonAction::Close.icon()).style(|s| s.size(14.0, 14.0)),
+        action,
+    )
+    .style(move |s| {
+        s.size(22.0, 22.0)
+            .flex_shrink(0.0)
+            .items_center()
+            .justify_center()
+            .background(Color::TRANSPARENT)
+            .color(if hovered.get() {
+                palette.sidebar_muted
+            } else {
+                Color::TRANSPARENT
+            })
+            .border(1.0)
+            .border_color(Color::TRANSPARENT)
+            .border_radius(4.0)
+            .hover(move |s| {
+                s.color(palette.sidebar_ink)
+                    .background(palette.sidebar_active)
+            })
+            .focus_visible(move |s| {
+                s.color(palette.sidebar_ink)
+                    .background(palette.sidebar_active)
+                    .border_color(palette.accent)
+            })
+    });
+    titled_button(control, Rc::new(|| tr!(RemoveSidebar)), palette).into_any()
+}
+
 pub(crate) fn sidebar_sort_button(
     hovered: RwSignal<bool>,
     palette: Palette,

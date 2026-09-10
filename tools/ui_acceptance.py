@@ -6839,6 +6839,69 @@ def search_scenario(driver: WindowDriver, workspace: Path) -> None:
     assert_no_temporary_files(workspace)
 
 
+def external_sidebar_scenario(driver: WindowDriver, workspace: Path) -> None:
+    driver.start_app(workspace, "external-sidebar-settings")
+    driver.close_app()
+    files = [driver.temporary_root / name for name in ("first.txt", "second.txt")]
+    for file in files:
+        file.write_text("External file must remain unchanged.\n", encoding="utf-8")
+    original = [file.read_bytes() for file in files]
+    settings_path = workspace / ".stillus" / "settings.json"
+    settings = json.loads(settings_path.read_text(encoding="utf-8"))
+    settings["external_files"] = [
+        {"engine_id": "markdown", "absolute_path": str(file.resolve())}
+        for file in files
+    ]
+    settings["selected_external"] = str(files[0].resolve())
+    settings_path.write_text(json.dumps(settings) + "\n", encoding="utf-8")
+    driver.start_app(workspace, "external-sidebar")
+    first_y = SIDEBAR_TREE_TOP + GROUP_ROW_PITCH + NOTE_ROW_HEIGHT // 2
+    second_y = first_y + NOTE_ROW_PITCH
+    close_x = SIDEBAR_WIDTH - 28
+
+    # The entire action is invisible at rest, on selected and ordinary rows.
+    driver.move_to("sidebar_blank")
+    idle = driver.wait_for_stable_frame(
+        "external actions hidden", crop=(210, 90, 30, 64), stable_for=0.2,
+    )
+    for y, background in ((first_y, (54, 94, 130)), (second_y, (36, 42, 51))):
+        crop = (close_x - 8, y - 8, 16, 16)
+        if near_color_pixel_count(idle, background, crop=crop, tolerance=1) != 256:
+            raise AcceptanceFailure("hidden external close action leaves a visible surface")
+
+    driver.xdotool("mousemove", "--window", driver.window_id, "100", str(second_y))
+    action_crop = (close_x - 11, second_y - 11, 22, 22)
+    wait_until("external close glyph on row hover", lambda: near_color_pixel_count(
+        driver.capture("external-hover"), (164, 173, 184),
+        crop=action_crop, tolerance=20,
+    ) >= 10)
+    driver.move_to("sidebar_blank")
+    hidden = driver.wait_for_stable_frame(
+        "external close hides on leave", crop=action_crop, stable_for=0.2,
+    )
+    if image_difference(idle, hidden, crop=action_crop):
+        raise AcceptanceFailure("external close action remains visible after row leave")
+
+    # The close control stays in the keyboard order even while visually hidden.
+    driver.click_point(100, first_y)
+    driver.move_to("sidebar_blank")
+    driver.key("Tab")
+    wait_until("external close glyph on keyboard focus", lambda: near_color_pixel_count(
+        driver.capture("external-focus"), (244, 246, 248),
+        crop=(close_x - 11, first_y - 11, 22, 22), tolerance=35,
+    ) >= 10)
+    driver.key("Return")
+    wait_until("keyboard removes external sidebar entry", lambda: len(
+        json.loads(settings_path.read_text(encoding="utf-8"))["external_files"]
+    ) == 1)
+    driver.click_point(close_x, first_y)
+    wait_until("pointer removes remaining external sidebar entry", lambda: not
+        json.loads(settings_path.read_text(encoding="utf-8"))["external_files"])
+    driver.close_app()
+    if [file.read_bytes() for file in files] != original:
+        raise AcceptanceFailure("closing external sidebar entries changed files on disk")
+
+
 def find_scenario(driver: WindowDriver, workspace: Path) -> None:
     notes = workspace / "notes"
     shutil.rmtree(notes)
@@ -9508,6 +9571,7 @@ def components_scenario(driver: WindowDriver, workspace: Path) -> None:
 
 
 SCENARIOS: dict[str, Callable[[WindowDriver, Path], None]] = {
+    "external_sidebar": external_sidebar_scenario,
     "components": components_scenario,
     "chat": chat_scenario,
     "ai": ai_settings_scenario,
