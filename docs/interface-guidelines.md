@@ -31,6 +31,8 @@ expanded navigation retain their labels.
 Chat history loads earlier messages as scrolling approaches the top. Do not
 add up/down paging buttons to its toolbar. Provide one standard Refresh icon
 to reload the chat without resending requests or discarding the draft.
+Message Copy sits directly after the author label and appears on hover over
+that header or keyboard focus. Reserve its space to avoid shifting message text.
 
 Input accessories (show/hide password, clear search, remove a selected tag)
 and compact navigation controls are distinct from form action buttons.

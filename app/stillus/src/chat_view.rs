@@ -1063,25 +1063,34 @@ fn message_view(
         })
         .collect::<Vec<_>>();
     let content = message.text.clone();
-    let copy = toolbar_action_button(
-        ButtonAction::Copy,
-        || tr!(Copy),
-        IconButtonTone::Secondary,
-        palette,
-        || true,
-        move || {
-            let _ = Clipboard::set_contents(content.clone());
-        },
-    );
+    let header_hovered = create_rw_signal(false);
+    let copy = ui::hover_copy_button(header_hovered, palette, move || {
+        let _ = Clipboard::set_contents(content.clone());
+    });
     let bubble = v_stack((
         h_stack((
             text(role).style(move |s| {
                 s.color(palette.muted)
                     .font_size(crate::ui::FONT_CAPTION as f32)
             }),
-            empty().style(|s| s.flex_grow(1.0)),
             copy,
-        )),
+        ))
+        .on_event_cont(EventListener::PointerEnter, move |_| {
+            header_hovered.set(true)
+        })
+        .on_event_cont(EventListener::PointerLeave, move |_| {
+            header_hovered.set(false)
+        })
+        .style(|s| {
+            ui::rtl_row(s)
+                .items_center()
+                .gap(6.0)
+                .align_self(Some(if i18n::current().is_rtl() {
+                    floem::taffy::AlignItems::FlexEnd
+                } else {
+                    floem::taffy::AlignItems::FlexStart
+                }))
+        }),
         rendered,
         v_stack_from_iter(link_views).style(|s| s.width_full().gap(4.0)),
     ))

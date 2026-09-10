@@ -446,6 +446,47 @@ pub(crate) fn sidebar_sort_button(
         });
     titled_button(control, Rc::new(|| tr!(SortNotes)), palette).into_any()
 }
+/// A message action reserves its space and reveals itself on header hover or
+/// keyboard focus, so appearing controls never move the message text.
+pub(crate) fn hover_copy_button(
+    hovered: RwSignal<bool>,
+    palette: Palette,
+    action: impl Fn() + 'static,
+) -> AnyView {
+    let colors = button_colors(IconButtonTone::Secondary, palette);
+    let control =
+        reliable_button(svg(ICON_COPY).style(|s| s.size(16.0, 16.0)), action).style(move |s| {
+            let visible = hovered.get();
+            s.size(BUTTON_SIZE_PX, BUTTON_SIZE_PX)
+                .flex_shrink(0.0)
+                .items_center()
+                .justify_center()
+                .background(if visible {
+                    colors.background
+                } else {
+                    Color::TRANSPARENT
+                })
+                .color(if visible {
+                    colors.foreground
+                } else {
+                    Color::TRANSPARENT
+                })
+                .border(1.0)
+                .border_color(if visible {
+                    colors.border
+                } else {
+                    Color::TRANSPARENT
+                })
+                .border_radius(5.0)
+                .hover(move |s| s.background(colors.hover).color(colors.hover_foreground))
+                .focus_visible(move |s| {
+                    s.background(colors.background)
+                        .color(colors.foreground)
+                        .border_color(palette.accent)
+                })
+        });
+    titled_button(control, Rc::new(|| tr!(Copy)), palette).into_any()
+}
 /// Toolbar actions show a caption only when their meaning needs explanation.
 pub(crate) fn toolbar_action_button(
     kind: ButtonAction,

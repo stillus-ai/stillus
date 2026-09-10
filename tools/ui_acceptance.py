@@ -9131,18 +9131,45 @@ def chat_paging_layout_scenario(driver: WindowDriver, workspace: Path, chat: Pat
                        "click", "--repeat", "30", "--delay", "10", "4")
         refresh_ready()
         driver.wait_for_stable_frame("older messages after scrolling", crop=history_crop, stable_for=0.3)
-        driver.click_point(1180, 104)
+        driver.click_point(565, 104)
         if clipboard_text(driver.environment) == first_text:
             reached_first = True
             break
     if not reached_first:
         raise AcceptanceFailure("scrolling to older history never loaded its first message")
+    # Copy belongs beside the author, stays hidden outside that header and
+    # appears without shifting the message body. Check both conversation roles.
+    for author, button, expected in (
+        ((529, 104), (565, 104), first_text),
+        ((299, 218), (351, 218), "Message 01: a distinct history anchor.\nSecond line 01."),
+    ):
+        driver.move_to("sidebar_blank")
+        icon_crop = (button[0] - 8, button[1] - 8, 16, 16)
+        hidden = driver.wait_for_stable_frame("message Copy hidden", crop=history_crop, stable_for=0.3)
+        if dark_pixel_count(hidden, crop=icon_crop):
+            raise AcceptanceFailure("message Copy remains visible outside the author header")
+        driver.xdotool("mousemove", "--window", driver.window_id, str(author[0]), str(author[1]))
+        shown = driver.wait_for_visual_change("author hover reveals adjacent Copy", hidden,
+                                              crop=icon_crop, minimum_pixels=5)
+        if image_difference(hidden, shown, crop=(520, 129, 650, 42)):
+            raise AcceptanceFailure("revealing Copy moved the message text")
+        driver.click_point(*button)
+        wait_until("adjacent Copy copies the complete message", lambda:
+                   clipboard_text(driver.environment) == expected)
+    driver.move_to("sidebar_blank")
     oldest = driver.wait_for_stable_frame("oldest message stays anchored", crop=history_crop, stable_for=0.3)
     driver.xdotool("mousemove", "--window", driver.window_id, "700", "250",
                    "click", "--repeat", "4", "--delay", "30", "4")
     unchanged = driver.wait_for_stable_frame("scrolling past the oldest message is harmless", crop=history_crop, stable_for=0.3)
     if image_difference(oldest, unchanged, crop=history_crop):
         raise AcceptanceFailure("oldest history moved or duplicated after another upward scroll")
+
+    driver.key("shift+Tab")
+    wait_until("keyboard focus reveals message Copy", lambda:
+        dark_pixel_count(driver.capture("chat-copy-keyboard"), crop=(557, 96, 16, 16)) >= 5)
+    driver.key("Return")
+    wait_until("keyboard activation copies the message", lambda:
+               clipboard_text(driver.environment) == first_text)
 
     # A manual refresh must actually reread storage, including changes that
     # arrived while older pages were displayed, and preserve the composer.
@@ -9159,7 +9186,7 @@ def chat_paging_layout_scenario(driver: WindowDriver, workspace: Path, chat: Pat
     newest = driver.wait_for_visual_change("refresh returns to latest messages", oldest,
         crop=history_crop, minimum_pixels=200)
     driver.wait_for_stable_frame("refreshed latest page", crop=history_crop, stable_for=0.3)
-    driver.click_point(1180, 439)
+    driver.click_point(565, 439)
     wait_until("refresh rereads messages from disk", lambda: clipboard_text(driver.environment) == refreshed_text)
     wait_until("refresh preserves the current draft", lambda:
         json.loads((chat / "draft.json").read_text())["data"]["text"] == "refresh keeps this draft")
