@@ -1962,7 +1962,7 @@ def assert_password_verification_feedback(
     wait_until(
         "neutral password verification feedback",
         neutral_status_is_painted,
-        timeout=0.6,
+        timeout=DEFAULT_TIMEOUT_SECONDS,
         interval=0.02,
     )
     static_difference = image_difference(
@@ -4643,9 +4643,10 @@ def note_header_scenario(driver: WindowDriver) -> None:
     driver.wait_for_visual_change("full title tooltip in the note header", initial,
         crop=(300, 48, 700, 170), minimum_pixels=50, timeout=3)
     driver.click_point(430, 28)
-    driver.key("ctrl+a")
+    wait_for_field_text(driver, title, "note title field receives focus and its original value")
     set_clipboard_text(driver.environment, "Переименованная заметка")
     driver.key("ctrl+v")
+    wait_for_field_text(driver, "Переименованная заметка", "note title paste reaches the field")
     driver.key("Return")
     renamed = notes / "Переименованная заметка.md"
     wait_until("header rename persisted through the body editor", lambda: renamed.exists()
@@ -5639,7 +5640,12 @@ def secure_scenario(
         markers=(body_marker, search_proof_marker),
     )
     driver.close_app()
-    driver.start_app(secure_workspace, "wrong-unlock")
+    verification_gate = driver.temporary_root / "secure-verification-gate"
+    if password_dialog_only:
+        verification_gate.touch()
+    driver.start_app(secure_workspace, "wrong-unlock", environment_overrides=(
+        {"STILLUS_TEST_SECURE_GATE": str(verification_gate)} if password_dialog_only else None
+    ))
 
     locked_counts = {"all": 1, "favorites": 0, tag: 1}
     driver.click_note(0, counts=locked_counts, categories=(tag,))
@@ -5672,7 +5678,10 @@ def secure_scenario(
     else:
         driver.key("Return")
     if before_verification is not None:
-        assert_password_verification_feedback(driver, before_verification)
+        try:
+            assert_password_verification_feedback(driver, before_verification)
+        finally:
+            verification_gate.unlink(missing_ok=True)
     if protected.read_bytes() != ciphertext_before_unlock:
         raise AcceptanceFailure("wrong password changed protected ciphertext")
     if not plaintext.exists() or protected_note_files(secure_workspace) != [plaintext]:
@@ -5681,8 +5690,9 @@ def secure_scenario(
         driver,
         markers=(title, body_marker, tag, edit_marker, search_proof_marker),
     )
-    driver.wait_for_stable_frame("wrong-password result before retry")
-    time.sleep(0.5)
+    wait_until("wrong password rejected and retry controls enabled", lambda:
+        driver.window_color_pixel_count((164, 69, 69), crop=PASSWORD_UNLOCK_FEEDBACK_CROP) >= 8
+        and driver.window_color_pixel_count((54, 94, 130), crop=PASSWORD_UNLOCK_SUBMIT_CROP) >= 100)
 
     # The rejected password is cleared while the neutral error stays open, so the
     # correct password can be entered after an explicit field click without
@@ -7486,10 +7496,10 @@ def rss_keyboard_scenario(driver: WindowDriver, workspace: Path) -> None:
     driver.close_app()
 
 
-def wait_for_rss_filter_text(driver: WindowDriver, expected: str, description: str) -> None:
+def wait_for_field_text(driver: WindowDriver, expected: str, description: str) -> None:
     # Verify keyboard routing through the field's value, independently of font
     # rasterization and caret blink timing. Clear stale clipboard content first.
-    set_clipboard_text(driver.environment, "RSS clipboard sentinel")
+    set_clipboard_text(driver.environment, "field clipboard sentinel")
 
     def copied() -> bool:
         # Focus and Copy are queued UI events. Retrying these read-only actions
@@ -7548,7 +7558,7 @@ def rss_filters_scenario(driver: WindowDriver, workspace: Path) -> None:
                 if i:
                     driver.key("Return")
                 driver.type_text(line)
-            wait_for_rss_filter_text(driver, value, "regexp field retains exact multiline text")
+            wait_for_field_text(driver, value, "regexp field retains exact multiline text")
         else:
             driver.key("BackSpace")
 
@@ -7558,7 +7568,7 @@ def rss_filters_scenario(driver: WindowDriver, workspace: Path) -> None:
         field(black_y, blacklist)
         field(white_y, whitelist)
         driver.click_point(640, black_y)
-        wait_for_rss_filter_text(driver, blacklist, "switching fields preserves independent drafts")
+        wait_for_field_text(driver, blacklist, "switching fields preserves independent drafts")
 
     edit_preferences()
     driver.key("Escape")

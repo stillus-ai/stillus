@@ -227,6 +227,14 @@ output. Existing `UI_ACCEPTANCE_PASS`/`UI_ACCEPTANCE_FAIL` markers and exit code
 remain unchanged. This diagnostic addition does not establish the cause of an
 earlier failure whose report omitted those details.
 
+The password-dialog scenario holds its verification worker behind an empty
+`STILLUS_TEST_SECURE_GATE` marker while checking the busy feedback and disabled
+buttons, then removes the marker and waits for the actual authentication error
+before retrying. This gate exists only with `test-utils`, contains no password or
+note content, and fails after a bounded wait if the driver does not release it.
+The note-header scenario verifies the focused field's original and pasted text
+through Copy before submitting the rename; it never repeats the paste or submit.
+
 ## Verify the first GitHub runs
 
 After pushing the workflow commit, open **Actions → CI**. A first successful run

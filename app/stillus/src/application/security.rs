@@ -104,9 +104,86 @@ impl PendingSecurityAction {
 
 pub(crate) fn start(job: SecureJob, sender: SyncSender<SecureWorkerEvent>) {
     std::thread::spawn(move || {
+        #[cfg(feature = "test-utils")]
+        if let Some(marker) = std::env::var_os("STILLUS_TEST_SECURE_GATE") {
+            assert!(
+                wait_for_test_release(Path::new(&marker), std::time::Duration::from_secs(30))
+                    .is_ok(),
+                "secure acceptance gate failed"
+            );
+        }
         let completion = job.execute_with_progress(|progress| {
             let _ = sender.try_send(SecureWorkerEvent::Progress(progress));
         });
         let _ = sender.send(SecureWorkerEvent::Completed(Box::new(completion)));
     });
+}
+
+/// The acceptance driver removes an empty marker after inspecting the busy UI.
+/// Only test builds can delay the worker; the marker never contains a secret.
+#[cfg(any(test, feature = "test-utils"))]
+fn wait_for_test_release(path: &Path, timeout: std::time::Duration) -> std::io::Result<()> {
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        match std::fs::symlink_metadata(path) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(error),
+            Ok(metadata) if metadata.is_file() && metadata.len() == 0 => {}
+            Ok(_) => return Err(std::io::Error::other("invalid secure acceptance marker")),
+        }
+        if std::time::Instant::now() >= deadline {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "secure acceptance marker was not released",
+            ));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn acceptance_gate_waits_until_the_driver_releases_it() {
+        let root = crate::test_support::workspace("stillus-secure-gate");
+        let marker = root.join("pending");
+        std::fs::write(&marker, b"").unwrap();
+        let waiting = marker.clone();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            sender
+                .send(wait_for_test_release(&waiting, Duration::from_secs(5)))
+                .unwrap();
+        });
+        assert!(receiver.recv_timeout(Duration::from_millis(50)).is_err());
+        std::fs::remove_file(&marker).unwrap();
+        receiver
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap()
+            .unwrap();
+        worker.join().unwrap();
+        std::fs::remove_dir(root).unwrap();
+    }
+
+    #[test]
+    fn acceptance_gate_rejects_invalid_markers_and_bounds_waiting() {
+        let root = crate::test_support::workspace("stillus-secure-gate-invalid");
+        let marker = root.join("pending");
+        wait_for_test_release(&marker, Duration::ZERO).unwrap();
+        std::fs::write(&marker, b"").unwrap();
+        assert_eq!(
+            wait_for_test_release(&marker, Duration::ZERO)
+                .unwrap_err()
+                .kind(),
+            std::io::ErrorKind::TimedOut
+        );
+        std::fs::write(&marker, b"invalid").unwrap();
+        assert!(wait_for_test_release(&marker, Duration::ZERO).is_err());
+        assert_eq!(std::fs::read(&marker).unwrap(), b"invalid");
+        assert!(wait_for_test_release(&root, Duration::ZERO).is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }
