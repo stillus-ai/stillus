@@ -605,7 +605,7 @@ def clipboard_text(environment: dict[str, str]) -> str | None:
 
 def set_clipboard_text(environment: dict[str, str], text: str) -> None:
     owner = subprocess.Popen(
-        ["xclip", "-selection", "clipboard", "-in", "-loops", "1"],
+        ["xclip", "-selection", "clipboard", "-in", "-loops", "0"],
         env=environment,
         stdin=subprocess.PIPE,
         stdout=subprocess.DEVNULL,
@@ -616,9 +616,12 @@ def set_clipboard_text(environment: dict[str, str], text: str) -> None:
         raise AcceptanceFailure("could not open X clipboard owner stdin")
     owner.stdin.write(text)
     owner.stdin.close()
-    # xclip becomes the asynchronous X selection owner. It exits after the
-    # single diagnostic read below, or earlier when a real UI Copy replaces it.
-    time.sleep(EVENT_SETTLE_SECONDS)
+    # xclip claims the X selection asynchronously. Keep it alive through the
+    # readiness probe and the application's subsequent Paste requests; Copy or
+    # the scenario's X server shutdown releases it. A fixed sleep can leave the
+    # previous selection owner active on a loaded runner.
+    wait_until("X clipboard contains the prepared value", lambda:
+               clipboard_text(environment) == text)
     if owner.poll() not in (None, 0):
         stderr = owner.stderr.read().strip() if owner.stderr is not None else ""
         raise AcceptanceFailure(f"could not seed X clipboard: {stderr}")
@@ -4644,8 +4647,12 @@ def note_header_scenario(driver: WindowDriver) -> None:
         crop=(300, 48, 700, 170), minimum_pixels=50, timeout=3)
     driver.click_point(430, 28)
     wait_for_field_text(driver, title, "note title field receives focus and its original value")
+    before_paste = driver.wait_for_stable_frame("original title selection", crop=(420, 66, 580, 28),
+                                               stable_for=0.2)
     set_clipboard_text(driver.environment, "Переименованная заметка")
     driver.key("ctrl+v")
+    driver.wait_for_visual_change("pasted title replaces its original selection", before_paste,
+                                  crop=(430, 68, 180, 22), minimum_pixels=20)
     wait_for_field_text(driver, "Переименованная заметка", "note title paste reaches the field")
     driver.key("Return")
     renamed = notes / "Переименованная заметка.md"
@@ -7810,14 +7817,21 @@ def localization_scenario(driver: WindowDriver, workspace: Path) -> None:
     driver.click("settings")
     driver.wait_for_stable_frame("language settings", stable_for=0.3, timeout=10)
     driver.resize_window(960, 600)
+    driver.xdotool("mousemove", "--window", driver.window_id, "800", "550")
     baseline = driver.wait_for_stable_frame("English language control", stable_for=0.3, timeout=10)
     escape_control_y = open_language_picker(False)
     language_list_crop = (298, escape_control_y + 24, 300, 520 - escape_control_y - 24)
     expanded = driver.wait_for_visual_change("language list is open before Escape", baseline,
                                             crop=language_list_crop, minimum_pixels=1000)
     driver.key("Escape")
+    # The pointer must leave the select before comparing the original surface:
+    # its delayed value tooltip can otherwise occupy the former list's crop.
+    driver.xdotool("mousemove", "--window", driver.window_id, "800", "550")
     driver.wait_for_visual_change("Escape closes only the language list", expanded,
                                   crop=language_list_crop, minimum_pixels=1000)
+    wait_until("language list restores its original background", lambda:
+        image_difference(baseline, driver.capture("language-list-dismissed"),
+                         crop=language_list_crop) == 0)
     dismissed = driver.wait_for_stable_frame("settings remain after language Escape", stable_for=0.3)
     if image_difference(baseline, dismissed, crop=(0, 0, 230, 180)) != 0:
         raise AcceptanceFailure("language Escape also closed settings")
@@ -9064,7 +9078,8 @@ def chat_scenario(driver: WindowDriver, workspace: Path) -> None:
     """Native chat creation, composer persistence and provider streaming without network."""
     original = {path: path.read_bytes() for path in (workspace / "notes").glob("*.md")}
     root = workspace / ".stillus" / "engines" / "ai" / "chat"
-    fixture = {"STILLUS_TEST_AI": "1"}
+    chat_gate = driver.temporary_root / "chat-double-click-gate"
+    fixture = {"STILLUS_TEST_AI": "1", "STILLUS_TEST_CHAT_GATE": str(chat_gate)}
     driver.start_app(workspace, "chat", environment_overrides=fixture)
     driver.click("create_menu")
     driver.click_point(116, 165)
@@ -9221,14 +9236,18 @@ def chat_scenario(driver: WindowDriver, workspace: Path) -> None:
             raise AcceptanceFailure("a hidden chat response was incorrectly marked read")
     driver.click("settings_back")
     wait_until("visible response marked read", lambda: not json.loads((second / "run.json").read_text())["data"]["unread"], timeout=10)
-    guarded = create_and_send("slow double click")
-    driver.wait_for_stable_frame("double-click Send leaves generation running",
-                                 crop=(1130, 735, 100, 45), stable_for=0.6)
-    if json.loads((guarded / "run.json").read_text())["data"]["status"] != "running":
-        raise AcceptanceFailure("double-click Send activated the replacement Stop action")
-    driver.click_point(1180, 760)
-    wait_until("Stop works after the double-click guard", lambda:
-        json.loads((guarded / "run.json").read_text())["data"]["status"] == "stopped")
+    chat_gate.touch()
+    try:
+        guarded = create_and_send("slow double click")
+        driver.wait_for_stable_frame("double-click Send leaves generation running",
+                                     crop=(1130, 735, 100, 45), stable_for=0.6)
+        if json.loads((guarded / "run.json").read_text())["data"]["status"] != "running":
+            raise AcceptanceFailure("double-click Send activated the replacement Stop action")
+        driver.click_point(1180, 760)
+        wait_until("Stop works after the double-click guard", lambda:
+            json.loads((guarded / "run.json").read_text())["data"]["status"] == "stopped")
+    finally:
+        chat_gate.unlink(missing_ok=True)
     stopped = create_and_send("slow stopped")
     before_trash = driver.capture("chat-before-trash")
     driver.click_point(1204, 28)
@@ -9597,20 +9616,20 @@ def components_scenario(driver: WindowDriver, workspace: Path) -> None:
     driver.type_text("first")
     driver.key("shift+Return")
     driver.type_text("second")
-    driver.key("ctrl+a")
-    driver.key("ctrl+c")
-    wait_until("multiline input", lambda: clipboard_text(driver.environment) == "first\nsecond")
+    wait_for_field_text(driver, "first\nsecond", "multiline input")
     driver.key("End")
+    before_paste = driver.capture("textarea-before-paste")
     set_clipboard_text(driver.environment, " pasted")
     driver.key("ctrl+v")
+    # The gallery's value summary has no caret. Wait for the edit to reach it
+    # before the Copy probe replaces a clipboard source still needed by Paste.
+    driver.wait_for_visual_change("textarea paste updates its value summary", before_paste,
+                                  crop=(24, 384, 950, 24), minimum_pixels=3)
+    wait_for_field_text(driver, "first\nsecond pasted", "textarea paste")
     driver.key("ctrl+z")
-    driver.key("ctrl+a")
-    driver.key("ctrl+c")
-    wait_until("textarea Undo", lambda: clipboard_text(driver.environment) == "first\nsecond")
+    wait_for_field_text(driver, "first\nsecond", "textarea Undo")
     driver.key("ctrl+shift+z")
-    driver.key("ctrl+a")
-    driver.key("ctrl+c")
-    wait_until("textarea Redo", lambda: clipboard_text(driver.environment) == "first\nsecond pasted")
+    wait_for_field_text(driver, "first\nsecond pasted", "textarea Redo")
     driver.click_point(100, 225)
     driver.wait_for_stable_frame("first field loses caret", crop=(24, 72, 900, 112), stable_for=1.2)
     driver.type_text("other")

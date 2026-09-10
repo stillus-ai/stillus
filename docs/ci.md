@@ -235,10 +235,23 @@ note content, and fails after a bounded wait if the driver does not release it.
 The note-header scenario verifies the focused field's original and pasted text
 through Copy before submitting the rename; it never repeats the paste or submit.
 
+The chat double-click scenario holds its offline response behind an empty
+`STILLUS_TEST_CHAT_GATE` marker until it has checked that the task remains running
+and a later Stop works. The fixture emits empty SSE heartbeats while held, so
+cancellation stays responsive; invalid markers or a 30-second deadline fail the
+fixture. This prevents ordinary response completion from masquerading as a Stop.
+Clipboard setup waits until the X selection actually contains the prepared
+value and keeps its owner alive for subsequent Paste requests. The component
+Undo/Redo scenario verifies each field value before the next edit,
+and localization compares the dismissed list with the pointer outside its tooltip.
+The request/tool budget test allows 60 seconds per completed batch of durable
+operations; its exact 20-request and 50/60-tool counts and no-duplication assertions
+remain unchanged. Other chat tests retain their 15-second waits.
+
 ## Verify the first GitHub runs
 
 After pushing the workflow commit, open **Actions → CI**. A first successful run
-must show cache misses/build steps, all four jobs passing, and the nine named
+must show cache misses/build steps, all five jobs passing, and the nine named
 artifacts above. Download the archives before they expire and inspect their
 source SHA, license and checksums; the Unix executable bits are inside the tar
 archives. Use **Run workflow** on the same branch to create a second run, verify

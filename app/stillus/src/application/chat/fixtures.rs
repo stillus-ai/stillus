@@ -104,23 +104,20 @@ impl ResponsesTransport for Transport {
             ));
         }
         events.push_str(&format!("data: {}\n\n",json!({"type":"response.completed","response":{"output":output,"usage":{"input_tokens":123,"output_tokens":45}}})));
-        struct Stream {
-            bytes: std::io::Cursor<Vec<u8>>,
-            delay_ms: u64,
-        }
-        impl Read for Stream {
-            fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
-                if self.delay_ms > 0 {
-                    thread::sleep(Duration::from_millis(self.delay_ms));
-                }
-                let n = buffer.len().min(80);
-                self.bytes.read(&mut buffer[..n])
-            }
-        }
         consume(
             200,
             &mut Stream {
                 bytes: std::io::Cursor::new(events.into_bytes()),
+                gate: if instruction == "slow double click" {
+                    std::env::var_os("STILLUS_TEST_CHAT_GATE").map(|path| {
+                        (
+                            PathBuf::from(path),
+                            std::time::Instant::now() + Duration::from_secs(30),
+                        )
+                    })
+                } else {
+                    None
+                },
                 delay_ms: if instruction.contains("slow") {
                     400
                 } else if instruction.contains("layout fixture") {
@@ -130,5 +127,96 @@ impl ResponsesTransport for Transport {
                 },
             },
         )
+    }
+}
+
+// Keep the double-click fixture alive until the UI has inspected its state.
+// Empty SSE heartbeats leave cancellation responsive and carry no chat data.
+struct Stream {
+    bytes: std::io::Cursor<Vec<u8>>,
+    delay_ms: u64,
+    gate: Option<(PathBuf, std::time::Instant)>,
+}
+
+fn gate_pending(path: &std::path::Path, remaining: bool) -> std::io::Result<bool> {
+    match std::fs::symlink_metadata(path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error),
+        Ok(metadata) if !metadata.is_file() || metadata.len() != 0 => Err(std::io::Error::other(
+            "chat fixture gate must be an empty regular file",
+        )),
+        Ok(_) if !remaining => Err(std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            "chat fixture gate expired",
+        )),
+        Ok(_) => Ok(true),
+    }
+}
+
+impl Read for Stream {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        if buffer.is_empty() {
+            return Ok(0);
+        }
+        if let Some((path, deadline)) = &self.gate {
+            if gate_pending(path, std::time::Instant::now() < *deadline)? {
+                thread::sleep(Duration::from_millis(20));
+                buffer[0] = b'\n';
+                return Ok(1);
+            }
+            self.gate = None;
+        }
+        if self.delay_ms > 0 {
+            thread::sleep(Duration::from_millis(self.delay_ms));
+        }
+        let n = buffer.len().min(80);
+        self.bytes.read(&mut buffer[..n])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn held_stream_yields_heartbeats_then_releases_unchanged_bytes() {
+        let root = crate::test_support::workspace("stillus-chat-gate");
+        let gate = root.join("gate");
+        std::fs::write(&gate, []).unwrap();
+        let mut stream = Stream {
+            bytes: std::io::Cursor::new(b"response".to_vec()),
+            delay_ms: 0,
+            gate: Some((
+                gate.clone(),
+                std::time::Instant::now() + Duration::from_secs(30),
+            )),
+        };
+        assert_eq!(stream.read(&mut []).unwrap(), 0);
+        let mut bytes = [0; 16];
+        assert_eq!(stream.read(&mut bytes).unwrap(), 1);
+        assert_eq!(bytes[0], b'\n');
+        assert_eq!(stream.bytes.position(), 0);
+        std::fs::remove_file(&gate).unwrap();
+        assert_eq!(stream.read(&mut bytes).unwrap(), 8);
+        assert_eq!(&bytes[..8], b"response");
+        assert_eq!(stream.read(&mut bytes).unwrap(), 0);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn gate_rejects_invalid_markers_and_has_a_fixed_deadline() {
+        let root = crate::test_support::workspace("stillus-chat-gate-bound");
+        let gate = root.join("gate");
+        assert!(!gate_pending(&gate, false).unwrap());
+        assert!(gate_pending(&root, true).is_err());
+        std::fs::write(&gate, b"invalid").unwrap();
+        assert!(gate_pending(&gate, true).is_err());
+        std::fs::write(&gate, []).unwrap();
+        assert!(gate_pending(&gate, true).unwrap());
+        assert_eq!(
+            gate_pending(&gate, false).unwrap_err().kind(),
+            std::io::ErrorKind::TimedOut
+        );
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

@@ -1021,7 +1021,10 @@ impl Fixture {
         });
     }
     fn wait_chat(&mut self, id: &str) -> Value {
-        let until = Instant::now() + Duration::from_secs(15);
+        self.wait_chat_with_timeout(id, Duration::from_secs(15))
+    }
+    fn wait_chat_with_timeout(&mut self, id: &str, timeout: Duration) -> Value {
+        let until = Instant::now() + timeout;
         loop {
             self.app.poll();
             let state = serde_json::to_value(
@@ -1344,18 +1347,24 @@ fn chat_compose_send_flushes_the_latest_buffer_and_allows_next_draft_during_task
 #[test]
 fn chat_request_and_tool_budgets_pause_and_continue_without_duplicate_effects() {
     use super::chat::Command as C;
+    // This checks durable request/tool budgets, including 60 fsynced chat
+    // creations, rather than interactive response latency on a shared runner.
+    let deadline = Duration::from_secs(60);
     let mut f = Fixture::new();
     f.chat_connect();
     let id = f.chat_create("Requests");
     f.chat_send(&id, "request limit");
-    let paused = f.wait_chat(&id);
+    let paused = f.wait_chat_with_timeout(&id, deadline);
     assert_eq!(paused["status"], "paused", "{paused}");
     assert_eq!(paused["requests"], 20);
     f.chat_dispatch(C::Continue { id: id.clone() });
-    assert_eq!(f.wait_chat(&id)["status"], "completed");
+    assert_eq!(
+        f.wait_chat_with_timeout(&id, deadline)["status"],
+        "completed"
+    );
     let batch = f.chat_create("Batch");
     f.chat_send(&batch, "tool limit");
-    let paused = f.wait_chat(&batch);
+    let paused = f.wait_chat_with_timeout(&batch, deadline);
     assert_eq!(paused["status"], "paused", "{paused}");
     assert_eq!(paused["tools"], 50);
     assert_eq!(
@@ -1366,7 +1375,7 @@ fn chat_request_and_tool_budgets_pause_and_continue_without_duplicate_effects() 
         52
     );
     f.chat_dispatch(C::Continue { id: batch.clone() });
-    let done = f.wait_chat(&batch);
+    let done = f.wait_chat_with_timeout(&batch, deadline);
     assert_eq!(done["status"], "completed", "{done}");
     assert_eq!(done["tools"], 60);
     assert_eq!(
