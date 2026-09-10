@@ -14,7 +14,9 @@ ahead of GitHub are included; a behind or diverged branch is rejected.
   `gpt-5.6-luna`. The command explicitly selects `medium` reasoning effort.
   Set `CODEX=/absolute/path/to/codex` to select another installation explicitly.
 - A `GITHUB_TOKEN` environment variable containing a fine-grained personal
-  access token with `Contents: Read and write` permission for the repository.
+  access token with `Contents: Read and write` permission for the repository's
+  release API operations.
+- Working GitHub SSH authentication with push access to the repository.
   Repository rules still apply; publication does not bypass branch protection.
 
 Python orchestrates publication on the host, invokes the host's Codex CLI and
@@ -25,10 +27,12 @@ run on the host and in the Docker toolchain, respectively.
 `python3` earlier in `PATH` or a terminal running under Rosetta does not trigger
 the Apple Silicon prerequisite error. It does not change `PATH` or your Python
 installation.
-The token is passed to individual host Git commands in environment variables;
-it is not written to the checkout, saved state or Git configuration. The
-orchestrator removes `GITHUB_TOKEN` from the environment of Codex, builds and
-other child processes. The existing SSH or HTTPS `origin` URL is preserved.
+All network Git commands (fetch, tag lookup and push) use
+`git@github.com:OWNER/REPOSITORY.git` with the host's SSH configuration and keys.
+The existing SSH or HTTPS `origin` URL is preserved and selects the repository.
+`GITHUB_TOKEN` is used only for GitHub's HTTPS REST API; it is not written to the
+checkout, saved state or Git configuration. The orchestrator removes it from the
+environment of all child processes, including Git, Codex and builds.
 Run publication without putting
 the token in shell history, for example:
 

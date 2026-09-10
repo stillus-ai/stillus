@@ -49,14 +49,34 @@ def fixture_archive(path, *, target="linux", sha=SHA, corrupt=False, signed=True
 
 
 class VersionTests(unittest.TestCase):
-    def test_git_runs_on_host_with_authentication_only_in_environment(self):
+    def test_git_uses_host_ssh_without_api_token(self):
         github = publish.GitHub("stillus-ai/stillus", "secret")
-        with patch.object(publish, "run", return_value="") as execute:
-            github.network_git("ls-remote", github.url, "refs/tags/latest")
-        command = execute.call_args.args[0]
-        self.assertEqual(command, ["git", "ls-remote", github.url, "refs/tags/latest"])
-        self.assertNotIn("secret", " ".join(command))
-        self.assertIn("GIT_CONFIG_VALUE_0", execute.call_args.kwargs["env"])
+        url = "git@github.com:stillus-ai/stillus.git"
+        self.assertEqual(github.url, url)
+        commands = (
+            ("ls-remote", url, "refs/tags/latest"),
+            ("fetch", "--no-tags", url, "refs/heads/master:refs/remotes/origin/master"),
+            ("push", "--atomic", url, f"{SHA}:refs/heads/master",
+             "refs/tags/v0.1.1:refs/tags/v0.1.1"),
+            ("push", "--force-with-lease=refs/tags/latest:", url, f"{SHA}:refs/tags/latest"),
+        )
+        for command in commands:
+            with self.subTest(command=command), \
+                    patch.dict(publish.os.environ, {"GITHUB_TOKEN": "secret",
+                                                   "SSH_AUTH_SOCK": "/fixture/agent"}, clear=True), \
+                    patch.object(publish.subprocess, "run", return_value=Mock(stdout="")) as execute:
+                github.network_git(*command)
+            self.assertEqual(execute.call_args.args[0], ["git", *command])
+            self.assertEqual(execute.call_args.kwargs["env"], {
+                "SSH_AUTH_SOCK": "/fixture/agent", "GIT_TERMINAL_PROMPT": "0"})
+
+    def test_api_still_uses_https_and_token(self):
+        opener = Mock()
+        github = publish.GitHub("stillus-ai/stillus", "secret", opener=opener)
+        github.request("GET", github.api_url)
+        request = opener.open.call_args.args[0]
+        self.assertEqual(request.full_url, "https://api.github.com/repos/stillus-ai/stillus")
+        self.assertEqual(request.get_header("Authorization"), "Bearer secret")
 
     def test_remote_tag_distinguishes_raw_object_from_peeled_commit(self):
         github = publish.GitHub("stillus-ai/stillus", "secret")
@@ -295,7 +315,7 @@ class UploadTests(unittest.TestCase):
             release = {"id": 42, "body": "Notes", "draft": True,
                        "html_url": "https://example.invalid/release"}
             github = Mock()
-            github.url = "https://github.com/stillus-ai/stillus.git"
+            github.url = "git@github.com:stillus-ai/stillus.git"
             github.remote_tag.return_value = SHA
             github.release.return_value = release
             github.json_request.return_value = {"tag_name": state["tag"], "draft": False,
@@ -330,7 +350,7 @@ class UploadTests(unittest.TestCase):
             uploaded = {"name": asset.name, "state": "uploaded", "size": asset.stat().st_size,
                         "digest": "sha256:" + publish.file_digest(asset)}
             github = Mock()
-            github.url = "https://github.com/stillus-ai/stillus.git"
+            github.url = "git@github.com:stillus-ai/stillus.git"
             github.remote_tag.return_value = SHA
             github.release.return_value = release
             github.json_request.return_value = {"tag_name": state["tag"], "draft": False,
@@ -402,7 +422,7 @@ class LatestTests(unittest.TestCase):
                       "release_published": True, "url": "https://example.invalid/release"}
         self.remote = None
         self.github = Mock()
-        self.github.url = "https://github.com/stillus-ai/stillus.git"
+        self.github.url = "git@github.com:stillus-ai/stillus.git"
         self.github.api_url = "https://api.github.com/repos/stillus-ai/stillus"
         self.github.json_request.return_value = {
             "tag_name": "v0.1.1", "draft": False, "prerelease": False}

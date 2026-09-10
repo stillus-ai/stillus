@@ -3,7 +3,6 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """Publish a resumable local release using host Git and Docker Rust builds."""
 
-import base64
 from contextlib import contextmanager
 import fcntl
 import hashlib
@@ -181,16 +180,12 @@ class GitHub:
         return None
 
     def network_git(self, *args):
-        credentials = base64.b64encode(("x-access-token:" + self.token).encode()).decode()
-        env = {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "http.https://github.com/.extraheader",
-               "GIT_CONFIG_VALUE_0": "AUTHORIZATION: basic " + credentials,
-               "GIT_TERMINAL_PROMPT": "0"}
-        # Only this host Git process receives authentication; arguments contain no secrets.
-        return git(*args, env=env)
+        # Use the host's SSH credentials. The API token never reaches Git.
+        return git(*args, env={"GIT_TERMINAL_PROMPT": "0"})
 
     @property
     def url(self):
-        return f"https://github.com/{self.repository}.git"
+        return f"git@github.com:{self.repository}.git"
 
     def refresh(self, branch):
         self.network_git("fetch", "--no-tags", self.url,
