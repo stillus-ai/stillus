@@ -184,6 +184,17 @@ def safe_line(line):
                 and (match[4] is None or match[4] in UI_DIAGNOSTIC_FILES)):
             return line
         return None
+    if line in {"Panic payload omitted for privacy.", "Rust panic: payload omitted"}:
+        return "Rust panic: payload omitted"
+    dependency = re.fullmatch(
+        r"(?:Location: (?:[A-Za-z]:)?[/\\][^\r\n]*[/\\]registry[/\\]src[/\\][a-zA-Z0-9_-]+[/\\]|Rust dependency location: )"
+        r"([a-zA-Z0-9_-]+-[0-9][a-zA-Z0-9.+-]*)[/\\](src(?:[/\\][a-zA-Z0-9_-]+)+\.rs):([1-9][0-9]{0,8}):([1-9][0-9]{0,8})",
+        line,
+    )
+    if dependency:
+        crate, source, row, column = dependency.groups()
+        source = source.replace("\\", "/")
+        return f"Rust dependency location: {crate}/{source}:{row}:{column}"
     if re.fullmatch(r"test [a-zA-Z0-9_:]+ \.\.\. (ok|FAILED|ignored)", line):
         return line
     if re.fullmatch(r"test result: (ok|FAILED)\. [0-9a-z ;.]+", line):

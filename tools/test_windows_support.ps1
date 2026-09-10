@@ -141,6 +141,22 @@ Assert-True (-not (Test-NativeSettings -Path 'fixture' -Read { '{}' })) 'missing
 Assert-True (-not (Test-NativeSettings -Path 'fixture' -SelectedNote 'notes/Ready.md' -Read { $valid })) 'missing selected note'
 $selected = '{"version":1,"window":{},"sidebar":{},"external_files":[],"selected_external":null,"selected_note":"notes/Ready.md"}'
 Assert-True (Test-NativeSettings -Path 'fixture' -SelectedNote 'notes/Ready.md' -Read { $selected }) 'startup selection'
+$observation = [ordered]@{ scenario = 'startup' }
+Assert-True (Test-NativeSettings -Path 'fixture' -SelectedNote 'notes/Ready.md' -Read { $selected } -Record $observation) 'observed startup selection'
+Assert-True ($observation.settingsState -eq 'ready') 'ready state observation'
+foreach ($case in @(
+    @{ read = { throw [IO.FileNotFoundException]::new('SYNTHETIC_SECRET') }; state = 'missing' },
+    @{ read = { throw [IO.DirectoryNotFoundException]::new('SYNTHETIC_SECRET') }; state = 'missing' },
+    @{ read = { throw [IO.IOException]::new('SYNTHETIC_SECRET') }; state = 'read' },
+    @{ read = { '{' }; state = 'json' },
+    @{ read = { '{}' }; state = 'schema' },
+    @{ read = { $valid }; state = 'selected_note' }
+)) {
+    $observation = @{}
+    Assert-True (-not (Test-NativeSettings -Path 'fixture' -SelectedNote 'notes/Ready.md' -Read $case.read -Record $observation)) 'failed settings observation'
+    Assert-True ($observation.settingsState -eq $case.state) 'exact failed settings condition'
+    Assert-True (($observation | ConvertTo-Json -Compress) -notmatch 'SYNTHETIC_SECRET|notes/|fixture') 'observation contains no paths or data'
+}
 Assert-Failure { Test-NativeSettings -Path 'fixture' -Read { throw 'SYNTHETIC_SECRET' } } 'runner/error'
 
 $clock.seconds = 0

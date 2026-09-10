@@ -108,7 +108,10 @@ impl ResponsesTransport for Transport {
             200,
             &mut Stream {
                 bytes: std::io::Cursor::new(events.into_bytes()),
-                gate: if instruction == "slow double click" {
+                gate: if matches!(
+                    instruction,
+                    "slow first" | "slow second" | "slow double click" | "slow stopped"
+                ) {
                     std::env::var_os("STILLUS_TEST_CHAT_GATE").map(|path| {
                         (
                             PathBuf::from(path),
@@ -130,7 +133,7 @@ impl ResponsesTransport for Transport {
     }
 }
 
-// Keep the double-click fixture alive until the UI has inspected its state.
+// Keep asynchronous fixtures alive until the UI has inspected their state.
 // Empty SSE heartbeats leave cancellation responsive and carry no chat data.
 struct Stream {
     bytes: std::io::Cursor<Vec<u8>>,

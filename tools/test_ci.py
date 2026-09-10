@@ -30,6 +30,24 @@ SHA = "1234567890abcdef1234567890abcdef12345678"
 
 
 class CITests(unittest.TestCase):
+    def test_native_panic_keeps_dependency_source_without_machine_paths_or_payloads(self):
+        expected = "Rust dependency location: floem-0.2.0/src/renderer.rs:42:7"
+        for line in (
+            "Location: /home/SYNTHETIC_SECRET/.cargo/registry/src/index-123/floem-0.2.0/src/renderer.rs:42:7",
+            r"Location: C:\Users\SYNTHETIC_SECRET\.cargo\registry\src\index-123\floem-0.2.0\src\renderer.rs:42:7",
+            expected,
+        ):
+            self.assertEqual(ci.safe_line(line), expected)
+        self.assertEqual(ci.safe_line("Panic payload omitted for privacy."), "Rust panic: payload omitted")
+        self.assertEqual(ci.safe_line("Rust panic: payload omitted"), "Rust panic: payload omitted")
+        for line in (
+            expected + " SYNTHETIC_SECRET",
+            expected.replace("src/renderer.rs", "src/../SYNTHETIC_SECRET.rs"),
+            "Location: /home/SYNTHETIC_SECRET/private.rs:42:7",
+            "Panic payload omitted for privacy. SYNTHETIC_SECRET",
+        ):
+            self.assertIsNone(ci.safe_line(line))
+
     def test_ai_key_control_waits_for_expected_form_and_painted_readiness(self):
         for editing in (False, True):
             for state in ("delayed", "wrong_form", "alias_card", "missing", "unavailable", "moving"):
@@ -418,12 +436,13 @@ class CITests(unittest.TestCase):
                 driver.wait_for_stable_frame.assert_not_called()
                 driver.capture.assert_not_called()
 
-    def test_rss_filter_text_wait_handles_delayed_focus_and_rejects_stale_or_wrong_text(self):
+    def test_field_copy_wait_handles_delayed_results_and_rejects_stale_or_wrong_text(self):
         expected = "Rust\nsecond line"
         for behavior in ("ready", "delayed", "unfocused", "wrong_field", "single_line"):
             with self.subTest(behavior=behavior):
                 clock = [0.0]
                 clipboard = [expected]
+                pending_copy = [None]
                 driver = Mock(spec=ui_acceptance.WindowDriver)
                 driver.environment = {}
 
@@ -437,28 +456,36 @@ class CITests(unittest.TestCase):
                     advance(0.08)
                     if command != "ctrl+c":
                         return
-                    if behavior == "ready" or behavior == "delayed" and clock[0] >= 0.6:
-                        clipboard[0] = expected
+                    if behavior in {"ready", "delayed"}:
+                        pending_copy[0] = 0.6 if behavior == "delayed" else clock[0]
                     elif behavior == "wrong_field":
                         clipboard[0] = "Promotions"
                     elif behavior == "single_line":
                         clipboard[0] = expected.replace("\n", "")
 
+                def read_clipboard(_environment):
+                    if pending_copy[0] is not None and clock[0] >= pending_copy[0]:
+                        clipboard[0] = expected
+                        pending_copy[0] = None
+                    return clipboard[0]
+
                 driver.key.side_effect = key
                 with patch.object(ui_acceptance.time, "monotonic", side_effect=lambda: clock[0]), \
                         patch.object(ui_acceptance.time, "sleep", side_effect=advance), \
                         patch.object(ui_acceptance, "set_clipboard_text", side_effect=seed), \
-                        patch.object(ui_acceptance, "clipboard_text", side_effect=lambda _env: clipboard[0]):
+                        patch.object(ui_acceptance, "clipboard_text", side_effect=read_clipboard):
                     if behavior in {"ready", "delayed"}:
-                        ui_acceptance.wait_for_rss_filter_text(driver, expected, "field focus")
+                        ui_acceptance.wait_for_field_text(driver, expected, "field focus")
                         self.assertLess(clock[0], 1.0)
                         if behavior == "delayed":
                             self.assertGreaterEqual(clock[0], 0.6)
                     else:
                         with self.assertRaises(ui_acceptance.AcceptanceFailure):
-                            ui_acceptance.wait_for_rss_filter_text(driver, expected, "field focus")
+                            ui_acceptance.wait_for_field_text(driver, expected, "field focus")
                         self.assertGreaterEqual(clock[0], ui_acceptance.DEFAULT_TIMEOUT_SECONDS)
                         self.assertLess(clock[0], ui_acceptance.DEFAULT_TIMEOUT_SECONDS + 0.3)
+                self.assertEqual([call.args for call in driver.key.call_args_list],
+                                 [("ctrl+a",), ("ctrl+c",)])
                 driver.click_point.assert_not_called()
                 driver.type_text.assert_not_called()
                 driver.capture.assert_not_called()

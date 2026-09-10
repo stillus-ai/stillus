@@ -102,7 +102,7 @@ try {
     $startupCheck = [ordered]@{ scenario = 'startup' }
     $report.smokeChecks += $startupCheck
     Invoke-NativeSmoke -Application $application -Arguments @(('"' + $workspace + '"')) -Record $startupCheck -Log (Join-Path $root 'startup.log') -CollectDiagnostics $collectSmokeDiagnostics -State {
-        Test-NativeSettings -Path $settingsPath -SelectedNote 'notes/Ready.md'
+        Test-NativeSettings -Path $settingsPath -SelectedNote 'notes/Ready.md' -Record $startupCheck
     }
     if ([IO.File]::ReadAllText($startupNote) -cne $startupBody) {
         $startupCheck.stage = 'verify'
@@ -119,7 +119,7 @@ try {
     $externalCheck = [ordered]@{ scenario = 'external' }
     $report.smokeChecks += $externalCheck
     Invoke-NativeSmoke -Application $application -Arguments $arguments -Record $externalCheck -Log (Join-Path $root 'external.log') -CollectDiagnostics $collectSmokeDiagnostics -State {
-        Test-NativeSettings -Path $settingsPath -ExternalPaths @($external, $second)
+        Test-NativeSettings -Path $settingsPath -ExternalPaths @($external, $second) -Record $externalCheck
     }
     if ([IO.File]::ReadAllText($external) -cne "External unchanged`n" -or
         [IO.File]::ReadAllText($second) -cne "Second unchanged`n") {

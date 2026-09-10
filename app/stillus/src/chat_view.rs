@@ -591,25 +591,6 @@ pub(super) fn panel(
         revision.get();
         running_model.borrow().chat_running(&running_id)
     });
-    // Send and Stop share the primary action area. Ignore the second click of
-    // a double-click while that area changes meaning after submission.
-    let stop_ready = create_rw_signal(false);
-    let stop_generation = create_rw_signal(0_u64);
-    create_effect(move |_| {
-        let active = running.get();
-        let generation = stop_generation.get_untracked().wrapping_add(1);
-        stop_generation.set(generation);
-        stop_ready.set(false);
-        if active {
-            exec_after(Duration::from_millis(500), move |_| {
-                if stop_generation.try_get_untracked() == Some(generation)
-                    && running.try_get_untracked() == Some(true)
-                {
-                    stop_ready.set(true);
-                }
-            });
-        }
-    });
     let alias_state = model.clone();
     let alias_model = model.clone();
     let alias_id = id.clone();
@@ -767,7 +748,8 @@ pub(super) fn panel(
         },
         move || submit(),
     );
-    let send = send.style(move |s| s.apply_if(running.get(), |s| s.hide()));
+    // Keep Send anchored while it is disabled. Stop appears beside it, so a
+    // delayed second click cannot activate a different action in the same spot.
     let stop_model = model.clone();
     let stop_id = id.clone();
     let stop_state = model.clone();
@@ -779,7 +761,7 @@ pub(super) fn panel(
         palette,
         move || {
             revision.get();
-            stop_ready.get() && stop_state.borrow().chat_running(&stop_state_id)
+            stop_state.borrow().chat_running(&stop_state_id)
         },
         move || {
             dispatch(

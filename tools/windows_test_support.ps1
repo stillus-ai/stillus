@@ -122,26 +122,46 @@ function ConvertTo-NativeComparisonPath([string]$Path) {
 
 function Test-NativeSettings {
     param([string]$Path, [string[]]$ExternalPaths = @(), [string]$SelectedNote = '',
-        [scriptblock]$Read = { param($Name) [IO.File]::ReadAllText($Name) })
-    try { $text = & $Read $Path } catch [IO.IOException] { return $false }
+        [scriptblock]$Read = { param($Name) [IO.File]::ReadAllText($Name) },
+        $Record = @{})
+    # Record only the failed condition, never paths or serialized settings.
+    $Record['settingsState'] = 'read'
+    try { $text = & $Read $Path } catch [IO.FileNotFoundException] {
+        $Record['settingsState'] = 'missing'
+        return $false
+    } catch [IO.DirectoryNotFoundException] {
+        $Record['settingsState'] = 'missing'
+        return $false
+    } catch [IO.IOException] { return $false }
+    $Record['settingsState'] = 'json'
     try { $settings = $text | ConvertFrom-Json -ErrorAction Stop } catch [ArgumentException] { return $false }
+    $Record['settingsState'] = 'schema'
     if ($null -eq $settings -or $null -eq $settings.PSObject.Properties['version'] -or
         $settings.version -ne 1 -or $null -eq $settings.PSObject.Properties['window'] -or
         $null -eq $settings.PSObject.Properties['sidebar'] -or
         $null -eq $settings.PSObject.Properties['external_files'] -or
         $null -eq $settings.PSObject.Properties['selected_external']) { return $false }
+    $Record['settingsState'] = 'selected_note'
     if ($SelectedNote -ne '' -and ($null -eq $settings.PSObject.Properties['selected_note'] -or
         $settings.selected_note -cne $SelectedNote)) { return $false }
+    $Record['settingsState'] = 'external_count'
     $files = @($settings.external_files)
     if ($files.Count -ne $ExternalPaths.Count) { return $false }
+    $Record['settingsState'] = 'external_file'
     for ($index = 0; $index -lt $files.Count; $index++) {
         $file = $files[$index]
         if ($null -eq $file -or $null -eq $file.PSObject.Properties['engine_id'] -or
             $null -eq $file.PSObject.Properties['absolute_path'] -or $file.engine_id -cne 'markdown' -or
             (ConvertTo-NativeComparisonPath $file.absolute_path) -ine $ExternalPaths[$index]) { return $false }
     }
-    if ($ExternalPaths.Count -eq 0) { return $null -eq $settings.selected_external }
-    return (ConvertTo-NativeComparisonPath $settings.selected_external) -ieq $ExternalPaths[0]
+    $Record['settingsState'] = 'selected_external'
+    if ($ExternalPaths.Count -eq 0) {
+        $ready = $null -eq $settings.selected_external
+    } else {
+        $ready = (ConvertTo-NativeComparisonPath $settings.selected_external) -ieq $ExternalPaths[0]
+    }
+    if ($ready) { $Record['settingsState'] = 'ready' }
+    return $ready
 }
 
 function Invoke-NativeSmoke {

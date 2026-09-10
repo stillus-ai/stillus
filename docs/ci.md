@@ -235,18 +235,39 @@ note content, and fails after a bounded wait if the driver does not release it.
 The note-header scenario verifies the focused field's original and pasted text
 through Copy before submitting the rename; it never repeats the paste or submit.
 
-The chat double-click scenario holds its offline response behind an empty
-`STILLUS_TEST_CHAT_GATE` marker until it has checked that the task remains running
-and a later Stop works. The fixture emits empty SSE heartbeats while held, so
+The chat scenario holds its concurrent, double-click and delete-while-running
+offline responses behind an empty `STILLUS_TEST_CHAT_GATE` marker until the UI
+has checked their running states. It releases the concurrent replies after
+settings have hidden both chats, and cancels the others through Stop or Delete. The fixture emits empty SSE heartbeats while held, so
 cancellation stays responsive; invalid markers or a 30-second deadline fail the
-fixture. This prevents ordinary response completion from masquerading as a Stop.
+fixture. This prevents ordinary response completion from masquerading as a Stop
+or a failure to run tasks concurrently. Send remains visible in its original
+position while disabled, and Stop appears beside it. The acceptance check sends
+two clicks to the Send position, verifies the task is still running, then stops
+it through the separate Stop control. German and Arabic captions are also checked
+at 960×600 while the live fixture remains connected.
 Clipboard setup waits until the X selection actually contains the prepared
 value and keeps its owner alive for subsequent Paste requests. The component
-Undo/Redo scenario verifies each field value before the next edit,
-and localization compares the dismissed list with the pointer outside its tooltip.
+Undo/Redo scenario verifies each field value before the next edit. Each field
+probe sends one Copy and waits for its result, so a queued extra Copy cannot
+replace the next Paste source. The title probe first waits for its focused border and completed opening, then
+synchronizes the XTEST Control state before sending the shortcut.
+Localization waits for the popover's focus restoration before moving the pointer
+away and comparing the original background. Stable-frame waits use the common
+six-second bound while retaining their required unchanged interval. Chat refresh
+checks keep probing the message Copy at the current composer position until the
+new disk content is returned.
 The request/tool budget test allows 60 seconds per completed batch of durable
 operations; its exact 20-request and 50/60-tool counts and no-duplication assertions
 remain unchanged. Other chat tests retain their 15-second waits.
+
+Windows smoke reports include a fixed `settingsState` code for the last checked
+readiness condition (`missing`, `read`, `json`, `schema`, `selected_note`,
+`external_count`, `external_file`, `selected_external`, or `ready`). They never
+include settings values or document paths. A native panic also retains its
+payload-omitted marker and Cargo dependency source location, with the machine's
+Cargo root removed, so an error dialog can be distinguished from an application
+window that is still initializing.
 
 ## Verify the first GitHub runs
 

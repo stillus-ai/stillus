@@ -1594,7 +1594,7 @@ class WindowDriver:
         minimum_dark_pixels: int = 0,
         minimum_luminance: float = 0.1,
         stable_for: float = 0.0,
-        timeout: float = 3.0,
+        timeout: float = DEFAULT_TIMEOUT_SECONDS,
         ignore_editor_caret: bool = False,
         ignore_control_caret: bool = False,
     ) -> Path:
@@ -4646,6 +4646,13 @@ def note_header_scenario(driver: WindowDriver) -> None:
     driver.wait_for_visual_change("full title tooltip in the note header", initial,
         crop=(300, 48, 700, 170), minimum_pixels=50, timeout=3)
     driver.click_point(430, 28)
+    wait_until("note title input receives keyboard focus", lambda:
+        driver.window_color_pixel_count((54, 94, 130), crop=(415, 63, 100, 3)) >= 40)
+    driver.wait_for_stable_frame("note title input finishes opening", crop=(420, 66, 580, 28),
+                                 stable_for=0.3)
+    # Establish the modifier state after the new field receives focus. The
+    # first XTEST Control chord can otherwise arrive as an ordinary letter.
+    driver.key("Control_L")
     wait_for_field_text(driver, title, "note title field receives focus and its original value")
     before_paste = driver.wait_for_stable_frame("original title selection", crop=(420, 66, 580, 28),
                                                stable_for=0.2)
@@ -7508,14 +7515,12 @@ def wait_for_field_text(driver: WindowDriver, expected: str, description: str) -
     # rasterization and caret blink timing. Clear stale clipboard content first.
     set_clipboard_text(driver.environment, "field clipboard sentinel")
 
-    def copied() -> bool:
-        # Focus and Copy are queued UI events. Retrying these read-only actions
-        # lets a slow runner settle without repeating clicks or text entry.
-        driver.key("ctrl+a")
-        driver.key("ctrl+c")
-        return clipboard_text(driver.environment) == expected
-
-    wait_until(description, copied)
+    # Send one Copy and wait for its result. Repeated Copy key events can
+    # remain queued after a previous result becomes visible, then overwrite
+    # the clipboard that the next Paste is about to consume.
+    driver.key("ctrl+a")
+    driver.key("ctrl+c")
+    wait_until(description, lambda: clipboard_text(driver.environment) == expected)
 
 
 def rss_filters_scenario(driver: WindowDriver, workspace: Path) -> None:
@@ -7824,11 +7829,13 @@ def localization_scenario(driver: WindowDriver, workspace: Path) -> None:
     expanded = driver.wait_for_visual_change("language list is open before Escape", baseline,
                                             crop=language_list_crop, minimum_pixels=1000)
     driver.key("Escape")
-    # The pointer must leave the select before comparing the original surface:
-    # its delayed value tooltip can otherwise occupy the former list's crop.
-    driver.xdotool("mousemove", "--window", driver.window_id, "800", "550")
     driver.wait_for_visual_change("Escape closes only the language list", expanded,
                                   crop=language_list_crop, minimum_pixels=1000)
+    # Closing the popover restores focus asynchronously and may show the
+    # trigger's value hint. Leave only after that focus/paint has completed.
+    driver.wait_for_stable_frame("language popover dismissal and focus restoration",
+                                 crop=language_list_crop, stable_for=0.3)
+    driver.xdotool("mousemove", "--window", driver.window_id, "800", "550")
     wait_until("language list restores its original background", lambda:
         image_difference(baseline, driver.capture("language-list-dismissed"),
                          crop=language_list_crop) == 0)
@@ -9225,11 +9232,18 @@ def chat_scenario(driver: WindowDriver, workspace: Path) -> None:
             crop=(276, 24, 530, 28), minimum_pixels=30)
         return target
 
-    first = create_and_send("slow first")
-    second = create_and_send("slow second")
-    if json.loads((first / "run.json").read_text())["data"]["status"] != "running":
-        raise AcceptanceFailure("two native chat tasks did not overlap")
-    driver.click("settings")
+    chat_gate.touch()
+    try:
+        first = create_and_send("slow first")
+        second = create_and_send("slow second")
+        if json.loads((first / "run.json").read_text())["data"]["status"] != "running":
+            raise AcceptanceFailure("two native chat tasks did not overlap")
+        before_settings = driver.capture("running-chats-before-settings")
+        driver.click("settings")
+        driver.wait_for_visual_change("settings hide both running chats", before_settings,
+                                      crop=(0, 56, 232, 500), minimum_pixels=1000)
+    finally:
+        chat_gate.unlink(missing_ok=True)
     for target in (first, second):
         wait_until("background chat completed", lambda target=target: json.loads((target / "run.json").read_text())["data"]["status"] == "completed", timeout=25)
         if not json.loads((target / "run.json").read_text())["data"]["unread"]:
@@ -9241,17 +9255,24 @@ def chat_scenario(driver: WindowDriver, workspace: Path) -> None:
         guarded = create_and_send("slow double click")
         driver.wait_for_stable_frame("double-click Send leaves generation running",
                                      crop=(1130, 735, 100, 45), stable_for=0.6)
-        if json.loads((guarded / "run.json").read_text())["data"]["status"] != "running":
-            raise AcceptanceFailure("double-click Send activated the replacement Stop action")
-        driver.click_point(1180, 760)
-        wait_until("Stop works after the double-click guard", lambda:
+        guarded_status = json.loads((guarded / "run.json").read_text())["data"]["status"]
+        if guarded_status == "stopped":
+            raise AcceptanceFailure("double-click Send activated the neighboring Stop action")
+        if guarded_status != "running":
+            raise AcceptanceFailure("held double-click fixture ended before its running-state check")
+        driver.click_point(1080, 760)
+        wait_until("separate Stop works after repeated Send", lambda:
             json.loads((guarded / "run.json").read_text())["data"]["status"] == "stopped")
     finally:
         chat_gate.unlink(missing_ok=True)
-    stopped = create_and_send("slow stopped")
-    before_trash = driver.capture("chat-before-trash")
-    driver.click_point(1204, 28)
-    wait_until("running chat stopped before trash", lambda: json.loads((stopped / "run.json").read_text())["data"]["status"] == "stopped" and json.loads((stopped / "metadata.json").read_text())["data"]["common"]["deleted"], timeout=15)
+    chat_gate.touch()
+    try:
+        stopped = create_and_send("slow stopped")
+        before_trash = driver.capture("chat-before-trash")
+        driver.click_point(1204, 28)
+        wait_until("running chat stopped before trash", lambda: json.loads((stopped / "run.json").read_text())["data"]["status"] == "stopped" and json.loads((stopped / "metadata.json").read_text())["data"]["common"]["deleted"], timeout=15)
+    finally:
+        chat_gate.unlink(missing_ok=True)
     conversation = {path.name: path.read_bytes() for path in (stopped / "messages").glob("*.json")}
     driver.wait_for_visual_change("chat Restore action", before_trash,
                                   crop=(1188, 20, 32, 32), timeout=10)
@@ -9319,11 +9340,69 @@ def chat_scenario(driver: WindowDriver, workspace: Path) -> None:
     if dark_pixel_count(long_frame, crop=(x + 8, y + 8, 250, 35)) < 20:
         raise AcceptanceFailure("long answer pushed the composer off screen")
     export_screenshot(long_frame, Path("/workspace/dist/chat-long.png"))
+    chat_actions_layout_scenario(driver, layout, fixture)
     driver.close_app()
     chat_paging_layout_scenario(driver, workspace, layout, fixture)
     chat_visual_content_scenario(driver, workspace, layout, fixture)
     if {path: path.read_bytes() for path in original} != original:
         raise AcceptanceFailure("ordinary chat modified workspace notes")
+
+
+def chat_actions_layout_scenario(driver: WindowDriver, chat: Path,
+                                 fixture: dict[str, str]) -> None:
+    """Keep the live fixture credential while checking German and Arabic actions."""
+    config_path = driver.home / ".stillus.cfg"
+    gate = Path(fixture["STILLUS_TEST_CHAT_GATE"])
+    driver.resize_window(960, 600)
+    current = "en"
+    for locale, index, send_x, stop_x in (("de", 13, 895, 785), ("ar", 8, 55, 145), ("en", 0, 895, 785)):
+        if locale != "en":
+            click_chat_composer(driver)
+            driver.key("ctrl+a")
+            set_clipboard_text(driver.environment, "slow double click")
+            driver.key("ctrl+v")
+            wait_until("localized action draft is saved", lambda:
+                json.loads((chat / "draft.json").read_text())["data"]["text"] == "slow double click")
+        rtl = current == "ar"
+        driver.click_point(960 - 228 if rtl else 228, 28)
+        driver.wait_for_stable_frame("localized action settings", stable_for=0.3)
+        driver.click_point(880 if rtl else 80, 124)
+        driver.wait_for_stable_frame("localized action general settings", stable_for=0.3)
+        arrow_x = 81 if rtl else 577
+        pixels = crop_luminances(driver.capture("chat-language-control"), (arrow_x, 180, 12, 120))
+        rows = [y for (_, y), value in pixels.items() if value < 170]
+        if not rows:
+            raise AcceptanceFailure("chat language dropdown arrow is not visible")
+        driver.click_point(220 if rtl else 448, max(rows))
+        driver.key("Home")
+        for _ in range(index):
+            driver.key("Down")
+        driver.key("Return")
+        wait_until("chat language is saved", lambda: json.loads(config_path.read_text())["locale"] == locale)
+        driver.wait_for_stable_frame("chat language is rendered", stable_for=0.3)
+        driver.click_point(924 if locale == "ar" else 36, 42)
+        current = locale
+        if locale == "en":
+            break
+        gate.touch()
+        try:
+            wait_until("localized Send is visible at its fixed edge", lambda:
+                driver.window_color_pixel_count((54, 94, 130), crop=(send_x - 20, 548, 40, 24)) >= 100)
+            driver.click_point(send_x, 560)
+            wait_until("localized chat started", lambda:
+                json.loads((chat / "run.json").read_text())["data"]["status"] == "running")
+            driver.xdotool("mousemove", "--window", driver.window_id, "600", "300")
+            wait_until("Send stays in place and disables during generation", lambda:
+                driver.window_color_pixel_count((54, 94, 130), crop=(send_x - 20, 548, 40, 24)) == 0)
+            frame = driver.wait_for_stable_frame("separate localized Send and Stop",
+                                                 crop=(0, 536, 960, 48), stable_for=0.3)
+            export_screenshot(frame, Path(f"/workspace/dist/chat-actions-{locale}.png"))
+            driver.click_point(stop_x, 560)
+            wait_until("localized Stop remains reachable beside Send", lambda:
+                json.loads((chat / "run.json").read_text())["data"]["status"] == "stopped")
+        finally:
+            gate.unlink(missing_ok=True)
+    driver.resize_window(1240, 800)
 
 
 def chat_paging_layout_scenario(driver: WindowDriver, workspace: Path, chat: Path,
@@ -9365,7 +9444,13 @@ def chat_paging_layout_scenario(driver: WindowDriver, workspace: Path, chat: Pat
                        "click", "--repeat", "30", "--delay", "10", "4")
         refresh_ready()
         driver.wait_for_stable_frame("older messages after scrolling", crop=history_crop, stable_for=0.3)
+        driver.xdotool("mousemove", "--window", driver.window_id, "565", "104")
+        wait_until("top message Copy is painted after scrolling", lambda:
+            dark_pixel_count(driver.capture("top-chat-copy"), crop=(557, 96, 16, 16)) >= 5)
+        set_clipboard_text(driver.environment, "chat copy sentinel")
         driver.click_point(565, 104)
+        wait_until("top message Copy responds before further scrolling", lambda:
+            clipboard_text(driver.environment) not in (None, "chat copy sentinel"))
         if clipboard_text(driver.environment) == first_text:
             reached_first = True
             break
@@ -9432,9 +9517,13 @@ def chat_paging_layout_scenario(driver: WindowDriver, workspace: Path, chat: Pat
     newest = driver.wait_for_visual_change("refresh returns to latest messages", oldest,
         crop=history_crop, minimum_pixels=200)
     driver.wait_for_stable_frame("refreshed latest page", crop=history_crop, stable_for=0.3)
+    def copy_refreshed_message() -> bool:
+        _, composer_top, _, _ = chat_composer_rect(driver)
+        driver.click_point(565, composer_top - 148)
+        return clipboard_text(driver.environment) == refreshed_text
+
+    wait_until("refresh rereads messages from disk", copy_refreshed_message)
     _, composer_top, _, _ = chat_composer_rect(driver)
-    driver.click_point(565, composer_top - 148)
-    wait_until("refresh rereads messages from disk", lambda: clipboard_text(driver.environment) == refreshed_text)
     wait_until("refresh preserves the current draft", lambda:
         json.loads((chat / "draft.json").read_text())["data"]["text"] == "refresh keeps this draft")
     # The last card has just one compact header; clicking expands its bounded result.
