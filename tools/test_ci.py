@@ -30,6 +30,56 @@ SHA = "1234567890abcdef1234567890abcdef12345678"
 
 
 class CITests(unittest.TestCase):
+    def test_clipboard_read_is_bounded_and_discards_partial_timeout_output(self):
+        for outcome, expected in (
+            (Mock(returncode=0, stdout="fresh value"), "fresh value"),
+            (Mock(returncode=1, stdout="partial value"), None),
+            (subprocess.TimeoutExpired(["xclip"], 1.0, output="SYNTHETIC_SECRET"), None),
+        ):
+            with self.subTest(expected=expected), patch.object(
+                ui_acceptance.subprocess, "run", side_effect=[outcome],
+            ) as command:
+                self.assertEqual(ui_acceptance.clipboard_text({"DISPLAY": ":99"}), expected)
+                self.assertEqual(command.call_args.kwargs["timeout"], 1.0)
+
+    def test_chat_header_probe_handles_body_offsets_and_waits_for_fresh_copy(self):
+        expected = "Message 00: a distinct history anchor.\nSecond line 00."
+        for visible, delay in ((False, None), (True, None), (True, 0.0), (True, 0.7)):
+            with self.subTest(visible=visible, delay=delay):
+                driver = Mock(spec=ui_acceptance.WindowDriver)
+                driver.environment = {}
+                driver.window_id = "fixture"
+                clock = [0.0]
+                selection = [expected]  # An old selection must not satisfy this probe.
+
+                def seed(_environment, value):
+                    selection[0] = value
+
+                def read(_environment):
+                    if delay is not None and clock[0] >= delay:
+                        return expected
+                    return selection[0]
+
+                def advance(seconds):
+                    clock[0] += seconds
+
+                with patch.object(ui_acceptance, "dark_pixel_count", return_value=10 if visible else 0), \
+                        patch.object(ui_acceptance, "set_clipboard_text", side_effect=seed), \
+                        patch.object(ui_acceptance, "clipboard_text", side_effect=read), \
+                        patch.object(ui_acceptance.time, "monotonic", side_effect=lambda: clock[0]), \
+                        patch.object(ui_acceptance.time, "sleep", side_effect=advance):
+                    result = ui_acceptance.copy_visible_chat_header(driver)
+                self.assertEqual(result, expected if visible and delay is not None else None)
+                if visible:
+                    driver.click_point.assert_called_once_with(565, 104)
+                    if delay is None:
+                        self.assertGreaterEqual(clock[0], 2.0)
+                        self.assertLess(clock[0], 2.1)
+                    elif delay:
+                        self.assertGreaterEqual(clock[0], delay)
+                else:
+                    driver.click_point.assert_not_called()
+
     def test_frame_rounding_allows_one_channel_level_without_hiding_other_changes(self):
         original = bytes((230, 232, 236, 252, 252, 252))
         cases = (

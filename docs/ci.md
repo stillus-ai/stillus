@@ -273,8 +273,16 @@ comparisons remain pixel-exact. Paging also re-enters the author header when a
 new row replaces the old one under the pointer. Journal selection waits for all
 three fixture rows to be painted rather than treating the newly inserted filter
 controls as proof that the rows are ready.
-If paging replaces a row between hover and Copy, the driver retries that read-only
-Copy until its clipboard selection responds, without repeating text edits.
+Intermediate scroll positions may show body text at the top instead of an
+author header. The bounded Copy probe clears stale clipboard data and waits for
+an answer when a header is present; a position without Copy advances the next
+scroll attempt. The scenario still requires the exact first message within
+16 attempts, then checks both roles' Copy controls and unchanged text geometry.
+Each X clipboard read has its own one-second timeout; a vanished or replaced
+selection owner must not block the outer readiness deadline, and partial output
+from a timed-out read is discarded.
+The minimum-width chat snapshot is captured after the resized composer's bounds
+are ready, so its overflow checks never apply new coordinates to an older frame.
 Empty-field placeholder paint and caret-blink checks use the common six-second
 bound for rendering under load; their color and blink assertions are unchanged.
 The request/tool budget test allows 60 seconds per completed batch of durable

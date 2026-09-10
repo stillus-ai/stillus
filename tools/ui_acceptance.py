@@ -595,11 +595,15 @@ def category_order_value(path: Path, category: str) -> int | None:
 
 
 def clipboard_text(environment: dict[str, str]) -> str | None:
-    completed = run_command(
-        ["xclip", "-selection", "clipboard", "-out"],
-        environment=environment,
-        check=False,
-    )
+    try:
+        completed = subprocess.run(
+            ["xclip", "-selection", "clipboard", "-out"],
+            env=environment, check=False, capture_output=True, text=True, timeout=1.0,
+        )
+    except subprocess.TimeoutExpired:
+        # A replaced X selection owner can leave a read unanswered. Discard
+        # partial output and let the caller's bounded readiness check retry.
+        return None
     return completed.stdout if completed.returncode == 0 else None
 
 
@@ -9429,6 +9433,28 @@ def chat_actions_layout_scenario(driver: WindowDriver, chat: Path,
     driver.resize_window(1240, 800)
 
 
+def copy_visible_chat_header(driver: WindowDriver) -> str | None:
+    """Probe the top header; intermediate scroll offsets may contain only body text."""
+    driver.move_to("sidebar_blank")
+    driver.xdotool("mousemove", "--window", driver.window_id, "565", "104")
+    deadline = time.monotonic() + 2.0
+    while dark_pixel_count(driver.capture("top-chat-copy"), crop=(557, 96, 16, 16)) < 5:
+        if time.monotonic() >= deadline:
+            return None
+        time.sleep(0.05)
+    sentinel = "chat copy sentinel"
+    set_clipboard_text(driver.environment, sentinel)
+    driver.click_point(565, 104)
+    deadline = time.monotonic() + 2.0
+    while True:
+        copied = clipboard_text(driver.environment)
+        if copied not in (None, sentinel):
+            return copied
+        if time.monotonic() >= deadline:
+            return None
+        time.sleep(0.05)
+
+
 def chat_paging_layout_scenario(driver: WindowDriver, workspace: Path, chat: Path,
                                 fixture: dict[str, str]) -> None:
     """Seed only the closed, disposable workspace with a multi-page conversation."""
@@ -9468,28 +9494,9 @@ def chat_paging_layout_scenario(driver: WindowDriver, workspace: Path, chat: Pat
                        "click", "--repeat", "30", "--delay", "10", "4")
         refresh_ready()
         driver.wait_for_stable_frame("older messages after scrolling", crop=history_crop, stable_for=0.3)
-        def top_copy_ready() -> bool:
-            # Paging can replace a row under a stationary pointer. Re-enter
-            # its header so the newly created Copy control receives hover.
-            driver.move_to("sidebar_blank")
-            driver.xdotool("mousemove", "--window", driver.window_id, "565", "104")
-            frame = driver.capture("top-chat-copy")
-            return (dark_pixel_count(frame, crop=(557, 96, 16, 16)) >= 5
-                    and sum(value < 160 for value in crop_luminances(
-                        frame, (1008, 20, 12, 16)).values()) >= 5)
-
-        wait_until("top message Copy is painted after scrolling", top_copy_ready)
-        set_clipboard_text(driver.environment, "chat copy sentinel")
-        def copy_top_message() -> bool:
-            if clipboard_text(driver.environment) not in (None, "chat copy sentinel"):
-                return True
-            # A page may replace the row between hover readiness and click.
-            # Copy is read-only; retry only until this selection has answered.
-            driver.click_point(565, 104)
-            return clipboard_text(driver.environment) not in (None, "chat copy sentinel")
-
-        wait_until("top message Copy responds before further scrolling", copy_top_message)
-        if clipboard_text(driver.environment) == first_text:
+        # Only the final oldest position has this header at a fixed coordinate.
+        # A body fragment at intermediate offsets is not a failed Copy action.
+        if copy_visible_chat_header(driver) == first_text:
             reached_first = True
             break
     if not reached_first:
@@ -9498,6 +9505,16 @@ def chat_paging_layout_scenario(driver: WindowDriver, workspace: Path, chat: Pat
     # Wait for the refresh control to become enabled, then settle the new rows
     # before testing that hovering Copy leaves their text exactly in place.
     refresh_ready()
+    def oldest_header_ready() -> bool:
+        if copy_visible_chat_header(driver) != first_text:
+            return False
+        frame = driver.capture("oldest-chat-header-ready")
+        return (dark_pixel_count(frame, crop=(557, 96, 16, 16)) >= 5
+                and sum(value < 160 for value in crop_luminances(
+                    frame, (1008, 20, 12, 16)).values()) >= 5)
+
+    wait_until("oldest header is painted and responds after paging", oldest_header_ready,
+               timeout=10)
     driver.wait_for_stable_frame("first history page finishes rendering",
                                  crop=history_crop, stable_for=0.3)
     # Copy belongs beside the author, stays hidden outside that header and
@@ -9579,13 +9596,13 @@ def chat_paging_layout_scenario(driver: WindowDriver, workspace: Path, chat: Pat
                                            crop=(300, 430, 750, 100), stable_for=0.3)
     export_screenshot(expanded, Path("/workspace/dist/chat-tool.png"))
     driver.resize_window(960, 600)
-    driver.wait_for_stable_frame("minimum window with responsive sidebar", stable_for=0.3)
-    narrow = driver.capture("chat-narrow")
+    x, y, w, h = chat_composer_rect(driver)
+    narrow = driver.wait_for_stable_frame("minimum window with responsive sidebar",
+                                          stable_for=0.3)
     if abs(sidebar_boundary_x(narrow, y=570) - SIDEBAR_WIDTH) > 1:
         raise AcceptanceFailure("chat sidebar did not contract at the minimum size")
     if dark_pixel_count(narrow, crop=(908, 12, 32, 32)) < 10:
         raise AcceptanceFailure("chat toolbar extends beyond the minimum window")
-    x, y, w, h = chat_composer_rect(driver)
     if dark_pixel_count(narrow, crop=(x + 8, y + 8, 250, 30)) < 20:
         raise AcceptanceFailure("composer is outside the minimum window")
     if dark_pixel_count(narrow, crop=(x + 8, y + h - 24, w - 16, 16)) != 0:
@@ -9628,11 +9645,11 @@ def chat_visual_content_scenario(driver: WindowDriver, workspace: Path, chat: Pa
     wide = driver.wait_for_stable_frame("wide long URL and code block", crop=(280, 80, 925, 650), stable_for=0.3)
     export_screenshot(wide, Path("/workspace/dist/chat-content-wide.png"))
     driver.resize_window(960, 600)
+    x, y, w, h = chat_composer_rect(driver)
     narrow = driver.wait_for_stable_frame("200-character composer and long URL at minimum width", crop=(220, 80, 715, 475), stable_for=0.3)
     export_screenshot(narrow, Path("/workspace/dist/chat-content-narrow.png"))
     if abs(sidebar_boundary_x(narrow, y=570) - SIDEBAR_WIDTH) > 1:
         raise AcceptanceFailure("minimum chat sidebar lost its saved width")
-    x, y, w, h = chat_composer_rect(driver)
     if dark_pixel_count(narrow, crop=(x + 8, y + 8, w - 16, h - 16)) < 250:
         raise AcceptanceFailure("200-character composer is clipped or does not wrap")
     if dark_pixel_count(narrow, crop=(225, 540, 680, 36)) < 50:
