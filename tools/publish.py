@@ -39,6 +39,7 @@ MAX_CODEX_OUTPUT = 60000
 GITHUB_API_VERSION = "2026-03-10"
 GITHUB_API_HOSTS = {"api.github.com", "uploads.github.com"}
 MAX_API_RESPONSE = 8 * 1024 * 1024
+PUBLISHER_PATHS = {"tools/publish.py", "tools/test_publish.py", "docs/publishing.md"}
 
 
 def run(command, *, input=None, env=None, stdout=subprocess.PIPE, stderr=None, timeout=None):
@@ -98,11 +99,26 @@ def changed_paths():
     return paths
 
 
-def require_clean(sha=None):
+def require_clean(sha=None, *, allowed_paths=()):
     if changed_paths():
         raise ValueError("commit or remove your working tree changes before publishing")
-    if sha and git("rev-parse", "HEAD").strip() != sha:
-        raise ValueError("HEAD changed during publication; refusing to publish different sources")
+    if sha:
+        head = git("rev-parse", "HEAD").strip()
+        if head != sha:
+            if not allowed_paths:
+                raise ValueError("HEAD changed during publication; refusing to publish different sources")
+            git("merge-base", "--is-ancestor", sha, head)
+            paths = set(filter(None, git("diff", "--no-renames", "--name-only", "-z",
+                                         sha, head).split("\0")))
+            if paths - set(allowed_paths):
+                raise ValueError("sources changed since the pending release; restore its checkout before retrying")
+            require_clean(head)
+
+
+def require_release_checkout(state):
+    # A committed publisher repair may upload already-built bytes from the saved
+    # release SHA. It must never rebuild them from a different checkout.
+    require_clean(state["sha"], allowed_paths=PUBLISHER_PATHS if state.get("assets") else ())
 
 
 def repository_from_remote(url):
@@ -341,7 +357,7 @@ def new_state(repository, branch, head, released_current_sha=None):
 def commit_version(state):
     head = git("rev-parse", "HEAD").strip()
     if state["sha"]:
-        require_clean(state["sha"])
+        require_release_checkout(state)
         return
     if head != state["head"]:
         # Recover a successful commit followed by a crash before state.json was updated.
@@ -488,7 +504,7 @@ def require_latest_release(state, github):
 
 
 def finish_publication(state, github):
-    require_clean(state["sha"])
+    require_release_checkout(state)
     require_latest_release(state, github)
     prepare_latest(state, github)
     sha = state["sha"]
@@ -513,7 +529,7 @@ def finish_publication(state, github):
 
 
 def upload_release(state, github, directory):
-    require_clean(state["sha"])
+    require_release_checkout(state)
     tag, sha = state["tag"], state["sha"]
     existing_tag = github.remote_tag(tag)
     if existing_tag and existing_tag != sha:

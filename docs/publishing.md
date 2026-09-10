@@ -135,7 +135,16 @@ are prepared, a retry runs the full aggregate again. Once prepared, archives are
 reused only if their saved hashes still match.
 
 Keep the pending checkout and `.host-build/publish/` intact until publication
-finishes. Independent changes to HEAD, the version files, prepared assets,
+finishes. After all assets are prepared, committed repairs limited to
+`tools/publish.py`, `tools/test_publish.py` and this publishing guide may resume
+the release from a descendant of its saved commit. The publisher rechecks saved
+asset hashes and pushes the original release commit and tags; the repair commits
+remain local for the next release. It does not rebuild, change the saved source
+SHA or regenerate release notes. Uncommitted changes, unrelated history and
+changes to any other files remain errors. Before assets are prepared, HEAD must
+still match the pending release exactly.
+
+Other independent changes to HEAD, the version files, prepared assets,
 existing release notes or remote tags cause an error rather than being
 overwritten. Restore the pending checkout before retrying; do not discard the
 saved state just to bypass an error. Existing uploaded assets are verified and

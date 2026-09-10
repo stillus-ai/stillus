@@ -243,6 +243,70 @@ class RepositoryTests(unittest.TestCase):
         publish.commit_version(state)
         self.assertEqual((self.root / "Cargo.lock").read_text(), state["updates"]["Cargo.lock"])
 
+    def repair_publisher(self):
+        (self.root / "tools").mkdir()
+        (self.root / "tools/publish.py").write_text("# SSH repair\n", encoding="utf-8")
+        self.git("add", "tools/publish.py")
+        self.git("commit", "-qm", "Repair publisher")
+        return self.git("rev-parse", "HEAD").strip()
+
+    def test_prepared_release_survives_committed_publisher_repair(self):
+        state = self.state()
+        publish.commit_version(state)
+        release = state["sha"]
+        head = self.repair_publisher()
+        work = self.root / ".git/assets"
+        directory = work / state["version"]
+        directory.mkdir(parents=True)
+        asset = directory / "fixture.zip"
+        asset.write_bytes(b"built from the original release")
+        state["assets"] = {asset.name: publish.file_digest(asset)}
+        saved = json.dumps(state, sort_keys=True)
+        publish.commit_version(state)
+        with patch.object(publish, "WORK", work), patch.object(publish, "run") as execute:
+            self.assertEqual(publish.build_assets(state), directory)
+        execute.assert_not_called()
+        self.assertEqual(json.dumps(state, sort_keys=True), saved)
+        self.assertEqual(self.git("rev-parse", "HEAD").strip(), head)
+        self.assertNotEqual(state["sha"], head)
+        self.assertEqual(state["sha"], release)
+
+    def test_publisher_repair_without_prepared_assets_is_rejected(self):
+        state = self.state()
+        publish.commit_version(state)
+        self.repair_publisher()
+        with self.assertRaisesRegex(ValueError, "HEAD changed"):
+            publish.commit_version(state)
+
+    def test_prepared_release_rejects_source_changes(self):
+        state = self.state()
+        publish.commit_version(state)
+        state["assets"] = {"fixture.zip": "saved digest"}
+        self.repair_publisher()
+        (self.root / "feature.txt").write_text("changed application", encoding="utf-8")
+        self.git("add", "feature.txt")
+        self.git("commit", "-qm", "Change application")
+        with self.assertRaisesRegex(ValueError, "sources changed"):
+            publish.commit_version(state)
+
+    def test_prepared_release_rejects_uncommitted_repair(self):
+        state = self.state()
+        publish.commit_version(state)
+        state["assets"] = {"fixture.zip": "saved digest"}
+        self.repair_publisher()
+        (self.root / "tools/publish.py").write_text("# uncommitted repair\n", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "working tree changes"):
+            publish.commit_version(state)
+
+    def test_prepared_release_rejects_unrelated_history(self):
+        state = self.state()
+        publish.commit_version(state)
+        state["assets"] = {"fixture.zip": "saved digest"}
+        self.git("checkout", "-q", "--detach", self.initial)
+        self.repair_publisher()
+        with self.assertRaises(subprocess.CalledProcessError):
+            publish.commit_version(state)
+
     def test_independent_version_edit_is_rejected(self):
         state = self.state()
         manifest = self.root / app_version.MANIFEST
@@ -334,6 +398,9 @@ class UploadTests(unittest.TestCase):
                     patch.object(publish, "save_state"):
                 publish.upload_release(state, github, directory)
             self.assertTrue(state["published"])
+            github.network_git.assert_called_once_with(
+                "push", "--atomic", "git@github.com:stillus-ai/stillus.git",
+                f"{SHA}:refs/heads/master", "refs/tags/v0.1.1:refs/tags/v0.1.1")
             github.upload_asset.assert_not_called()
             github.verify_asset.assert_called_once_with(remote_asset, asset)
             github.publish_release.assert_called_once_with(release)
