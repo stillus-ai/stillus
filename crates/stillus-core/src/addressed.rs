@@ -483,6 +483,7 @@ impl NoteEditJob {
                 output.write_all(self.edit.text.as_bytes())?;
                 source.seek(SeekFrom::Start(self.edit.end as u64))?;
                 io::copy(&mut source, output)?;
+                drop(source);
                 Ok(())
             })?;
             return Ok(commit.path);
@@ -537,6 +538,7 @@ impl NoteEditJob {
                 output.write_all(self.edit.text.as_bytes())?;
                 source.seek(SeekFrom::Start(body + self.edit.end as u64))?;
                 io::copy(&mut source, output)?;
+                drop(source);
                 Ok(())
             },
         )?;

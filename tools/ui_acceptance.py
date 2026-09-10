@@ -2043,7 +2043,7 @@ def assert_password_button_hover_geometry(driver: WindowDriver) -> None:
         wait_until(
             f"{control} hover paint",
             hover_is_painted,
-            timeout=0.6,
+            timeout=DEFAULT_TIMEOUT_SECONDS,
             interval=0.02,
         )
         hovered.unlink(missing_ok=True)
@@ -6886,6 +6886,10 @@ def external_sidebar_scenario(driver: WindowDriver, workspace: Path) -> None:
         crop=action_crop, tolerance=20,
     ) >= 10)
     driver.move_to("sidebar_blank")
+    # A quiet crop can still be the old frame on a busy software renderer.
+    # Require the original pixels before checking that the result stays stable.
+    wait_until("external close returns to its hidden appearance", lambda:
+        image_difference(idle, driver.capture("external-hidden"), crop=action_crop) == 0)
     hidden = driver.wait_for_stable_frame(
         "external close hides on leave", crop=action_crop, stable_for=0.2,
     )
@@ -9636,7 +9640,13 @@ def components_scenario(driver: WindowDriver, workspace: Path) -> None:
     if image_difference(menu_closed, unavailable, crop=menu_crop) < 200:
         raise AcceptanceFailure("unavailable menu entry dismissed the menu")
     driver.key("Home")
+    wait_until("menu Home highlights the first enabled entry", lambda:
+        near_color_pixel_count(driver.capture("menu-home"), (229, 238, 246),
+                               crop=(35, 478, 5, 10), tolerance=2) == 50)
     driver.key("Down")
+    wait_until("menu Down highlights the third entry past the disabled second", lambda:
+        near_color_pixel_count(driver.capture("menu-down"), (229, 238, 246),
+                               crop=(35, 542, 5, 10), tolerance=2) == 50)
     driver.key("Return")
     driver.wait_for_visual_change("menu arrows skip disabled entries and Enter invokes", counters,
                                  crop=counter_crop, minimum_pixels=3)

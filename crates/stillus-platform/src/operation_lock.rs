@@ -22,6 +22,26 @@ pub struct ActivityLease {
 impl ActivityLease {
     pub fn create(path: &Path) -> io::Result<Self> {
         let file = super::create_private_file(path)?;
+        #[cfg(windows)]
+        let file = {
+            use std::os::windows::fs::OpenOptionsExt;
+            let identity = super::file_information(&file)?.identity;
+            // Restrict the empty marker before sharing it. Observers need their
+            // own handle to test the OS lock; private body files stay exclusive.
+            drop(file);
+            let file = OpenOptions::new()
+                .read(true)
+                .write(true)
+                .share_mode(3)
+                .custom_flags(0x0020_0000)
+                .open(path)?;
+            super::validate_private(path)?;
+            let info = super::file_information(&file)?;
+            if info.identity != identity || info.links != 1 || file.metadata()?.len() != 0 {
+                return Err(io::Error::other("activity marker changed during creation"));
+            }
+            file
+        };
         fs4::fs_std::FileExt::lock_exclusive(&file)?;
         Ok(Self { _file: file })
     }
@@ -191,6 +211,29 @@ mod tests {
     use super::*;
     use std::sync::mpsc;
     use std::time::Duration;
+
+    #[test]
+    fn activity_lease_is_observable_until_its_owner_drops() {
+        let root =
+            std::env::temp_dir().join(format!("stillus-activity-observer-{}", std::process::id()));
+        std::fs::create_dir(&root).unwrap();
+        let path = root.join("request.active");
+        assert!(!ActivityLease::is_held(&path).unwrap());
+        let lease = ActivityLease::create(&path).unwrap();
+        assert!(ActivityLease::is_held(&path).unwrap());
+        let observed = path.clone();
+        assert!(
+            std::thread::spawn(move || ActivityLease::is_held(&observed).unwrap())
+                .join()
+                .unwrap()
+        );
+        assert!(ActivityLease::create(&path).is_err());
+        assert!(ActivityLease::is_held(&path).unwrap());
+        drop(lease);
+        assert!(!ActivityLease::is_held(&path).unwrap());
+        assert_eq!(std::fs::read(&path).unwrap(), b"");
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn simultaneous_first_users_serialize_on_one_marker() {

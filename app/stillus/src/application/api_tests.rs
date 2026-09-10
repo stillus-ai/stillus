@@ -293,9 +293,12 @@ fn sessions_are_fixed_and_cannot_be_switched_through_tools_or_settings() {
         Err(ActionError::SessionChanged)
     );
     f.context = ToolContext::capture(&f.app).unwrap();
+    let state = f.call("workspace/state", json!({})).unwrap();
     assert_eq!(
-        f.call("workspace/state", json!({})).unwrap()["path"],
-        other.root.to_string_lossy().as_ref()
+        PathBuf::from(state["path"].as_str().unwrap())
+            .canonicalize()
+            .unwrap(),
+        other.root.canonicalize().unwrap()
     );
     // Both applications have visited this directory; stop its writers before its owner is dropped.
     f.app.shutdown().unwrap();

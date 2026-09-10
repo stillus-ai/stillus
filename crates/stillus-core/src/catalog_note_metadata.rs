@@ -50,6 +50,8 @@ impl WorkspaceSession {
         let (mut file, version) = open_versioned(path)?;
         let frontmatter =
             scan_reader(&mut file).map_err(|error| CoreError::Workspace(error.to_string()))?;
+        // Windows replacement must not retain our metadata reader on the target.
+        drop(file);
         let metadata = match &frontmatter.status {
             FrontMatterStatus::Parsed(parsed) => parsed.metadata.clone(),
             FrontMatterStatus::Plain => Default::default(),
