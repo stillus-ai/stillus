@@ -8972,7 +8972,12 @@ def ai_journal_scenario(driver: WindowDriver, workspace: Path) -> None:
         path.write_text(json.dumps(record))
         path.chmod(0o600)
     driver.wait_for_visual_change("new journal requests", empty, crop=(260, 180, 720, 230), timeout=10)
-    rows = driver.capture("journal-rows")
+    wait_until("all journal rows are painted before selection", lambda: all(
+        dark_pixel_count(driver.capture("journal-row-readiness"),
+                         crop=(280, 194 + index * 36, 290, 20)) >= 50
+        for index in range(3)))
+    rows = driver.wait_for_stable_frame("journal rows ready for selection",
+                                        crop=(276, 184, 850, 110), stable_for=0.3)
     driver.click_point(420, 208)
     summary = driver.wait_for_visual_change("request summary", rows, crop=(276, 300, 850, 150), timeout=10)
     driver.wait_for_stable_frame("compact summary rendered", crop=(276, 300, 850, 150), minimum_dark_pixels=100)
@@ -9463,9 +9468,17 @@ def chat_paging_layout_scenario(driver: WindowDriver, workspace: Path, chat: Pat
                        "click", "--repeat", "30", "--delay", "10", "4")
         refresh_ready()
         driver.wait_for_stable_frame("older messages after scrolling", crop=history_crop, stable_for=0.3)
-        driver.xdotool("mousemove", "--window", driver.window_id, "565", "104")
-        wait_until("top message Copy is painted after scrolling", lambda:
-            dark_pixel_count(driver.capture("top-chat-copy"), crop=(557, 96, 16, 16)) >= 5)
+        def top_copy_ready() -> bool:
+            # Paging can replace a row under a stationary pointer. Re-enter
+            # its header so the newly created Copy control receives hover.
+            driver.move_to("sidebar_blank")
+            driver.xdotool("mousemove", "--window", driver.window_id, "565", "104")
+            frame = driver.capture("top-chat-copy")
+            return (dark_pixel_count(frame, crop=(557, 96, 16, 16)) >= 5
+                    and sum(value < 160 for value in crop_luminances(
+                        frame, (1008, 20, 12, 16)).values()) >= 5)
+
+        wait_until("top message Copy is painted after scrolling", top_copy_ready)
         set_clipboard_text(driver.environment, "chat copy sentinel")
         driver.click_point(565, 104)
         wait_until("top message Copy responds before further scrolling", lambda:
@@ -9475,6 +9488,12 @@ def chat_paging_layout_scenario(driver: WindowDriver, workspace: Path, chat: Pat
             break
     if not reached_first:
         raise AcceptanceFailure("scrolling to older history never loaded its first message")
+    # Copy reads the current model before a pending page has finished painting.
+    # Wait for the refresh control to become enabled, then settle the new rows
+    # before testing that hovering Copy leaves their text exactly in place.
+    refresh_ready()
+    driver.wait_for_stable_frame("first history page finishes rendering",
+                                 crop=history_crop, stable_for=0.3)
     # Copy belongs beside the author, stays hidden outside that header and
     # appears without shifting the message body. Check both conversation roles.
     for author, button, expected in (

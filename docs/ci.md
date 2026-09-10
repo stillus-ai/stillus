@@ -262,6 +262,14 @@ Stable-frame waits use the common
 six-second bound while retaining their required unchanged interval. Chat refresh
 checks keep probing the message Copy at the current composer position until the
 new disk content is returned.
+After Copy reaches the first history message, the chat scenario waits for the
+page load's disabled Refresh control to re-enable and the new rows to finish
+painting before comparing hover geometry. The clipboard can already expose the
+new model while the screen still contains the preceding page; text-position
+comparisons remain pixel-exact. Paging also re-enters the author header when a
+new row replaces the old one under the pointer. Journal selection waits for all
+three fixture rows to be painted rather than treating the newly inserted filter
+controls as proof that the rows are ready.
 The request/tool budget test allows 60 seconds per completed batch of durable
 operations; its exact 20-request and 50/60-tool counts and no-duplication assertions
 remain unchanged. Other chat tests retain their 15-second waits.
