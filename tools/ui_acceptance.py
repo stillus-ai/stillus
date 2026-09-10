@@ -461,7 +461,8 @@ CONTROLS = {
     "password_confirmation": (760, 457),
     "password_unlock_cancel": (620, 474),
     "password_unlock_submit": (735, 474),
-    "footer_retry": (1_176, 784),
+    # Retry precedes the labeled Restore unsaved changes toolbar action.
+    "footer_retry": (970, 784),
     "footer_action": (1_210, 784),
     "integrity_restore": (675, 448),
     "integrity_retry": (785, 448),
@@ -5451,7 +5452,7 @@ def persistence_scenario(driver: WindowDriver, workspace: Path) -> None:
     driver.wait_for_visual_change(
         "retry action after write failure",
         retry_reference,
-        crop=(1_158, 766, 36, 34),
+        crop=(952, 766, 36, 34),
         minimum_pixels=100,
         timeout=5.0,
     )
@@ -6236,22 +6237,20 @@ def secure_conflict_scenario(driver: WindowDriver, workspace: Path) -> None:
     if protected.read_bytes() != external_ciphertext:
         raise AcceptanceFailure("local protected edit overwrote the external conflict fixture")
     driver.wait_for_footer_change(
-        "visible protected recovery action before external replacement",
-        clean_footer,
-        minimum_pixels=30,
-    )
-    clean_footer.unlink(missing_ok=True)
-
-    recovery_footer = driver.wait_for_stable_footer_action(
-        "stable protected recovery action before external replacement"
-    )
-    driver.wait_for_footer_change(
         "visible load-from-disk action after external ciphertext conflict",
-        recovery_footer,
+        clean_footer,
         minimum_pixels=30,
         timeout=7.0,
     )
-    recovery_footer.unlink(missing_ok=True)
+    clean_footer.unlink(missing_ok=True)
+
+    # Recovery actions stay hidden while dirty or saving. The first visible
+    # change can already be the settled conflict; do not require a transient
+    # recovery-only frame before the Load disk version action appears.
+    conflict_footer = driver.wait_for_stable_footer_action(
+        "stable load-from-disk action after external ciphertext conflict"
+    )
+    conflict_footer.unlink(missing_ok=True)
     if not recovery_files(secure_workspace):
         raise AcceptanceFailure("conflict recovery disappeared before load-from-disk click")
     driver.click("footer_action")
