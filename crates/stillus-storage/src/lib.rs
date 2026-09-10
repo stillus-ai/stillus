@@ -2803,10 +2803,10 @@ fn rewrite_external_file_versioned_unix(
         .map_err(|error| precommit(SaveStage::Write, error))?;
     temp.sync_all()
         .map_err(|error| precommit(SaveStage::FileSync, error))?;
-    let temp_version = temp
+    let temp_metadata = temp
         .metadata()
-        .map(|metadata| FileVersion::from_metadata(&metadata))
         .map_err(|error| precommit(SaveStage::FileSync, error))?;
+    let temp_version = FileVersion::from_metadata(&temp_metadata);
 
     let current =
         fs::symlink_metadata(path).map_err(|error| precommit(SaveStage::ConflictCheck, error))?;
@@ -2814,8 +2814,13 @@ fn rewrite_external_file_versioned_unix(
         return Err(SaveError::Conflict);
     }
     drop(temp);
-    fs::rename(guard.path(), path).map_err(|error| precommit(SaveStage::Replace, error))?;
-    guard.disarm();
+    #[cfg(windows)]
+    replace_retry::replace_note(&mut guard, path, expected_version, &temp_metadata)?;
+    #[cfg(unix)]
+    {
+        fs::rename(guard.path(), path).map_err(|error| precommit(SaveStage::Replace, error))?;
+        guard.disarm();
+    }
     let committed = fs::symlink_metadata(path).map_err(|error| SaveError::PostReplaceSync {
         message: error.to_string(),
     })?;
@@ -2899,6 +2904,10 @@ fn rewrite_note_to_destination_internal(
         .map_err(|error| precommit(SaveStage::FileSync, error))?;
     // Release the exclusive Windows writer before verification reopens the
     // completed ciphertext. TempGuard continues to own cleanup on any error.
+    #[cfg(windows)]
+    let prepared = temp
+        .metadata()
+        .map_err(|error| precommit(SaveStage::FileSync, error))?;
     drop(temp);
     let expected_sha256 = hash_output
         .then(|| secure_backups::hash_file(guard.path()))
@@ -2917,8 +2926,14 @@ fn rewrite_note_to_destination_internal(
                 FileVersion::from_metadata(&metadata).same_file_as(expected_version)
             });
     if destination == source || destination_aliases_source {
-        fs::rename(guard.path(), source).map_err(|error| precommit(SaveStage::Replace, error))?;
-        guard.disarm();
+        #[cfg(windows)]
+        replace_retry::replace_note(&mut guard, source, expected_version, &prepared)?;
+        #[cfg(unix)]
+        {
+            fs::rename(guard.path(), source)
+                .map_err(|error| precommit(SaveStage::Replace, error))?;
+            guard.disarm();
+        }
         sync_directory_io(parent).map_err(|error| SaveError::PostReplaceSync {
             message: error.to_string(),
         })?;

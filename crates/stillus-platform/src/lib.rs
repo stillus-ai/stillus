@@ -18,6 +18,8 @@ pub mod credentials;
 pub mod diagnostics;
 mod operation_lock;
 #[cfg(any(windows, test))]
+mod replace_retry;
+#[cfg(any(windows, test))]
 mod sync_marker;
 pub use operation_lock::{ActivityLease, OperationLock};
 
@@ -205,6 +207,20 @@ pub fn replace(source: &Path, destination: &Path) -> io::Result<()> {
             diagnostics::Stage::Publish,
             atomicwrites::replace_atomic(source, destination),
         )
+    }
+}
+
+/// Retry a transient Windows replacement only while both paths retain their
+/// identities, bytes and permissions. The caller must close its handles first.
+/// An uncertain publication or external change stops all further attempts.
+pub fn replace_revalidated(source: &Path, destination: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        replace(source, destination)
+    }
+    #[cfg(windows)]
+    {
+        replace_retry::replace(source, destination)
     }
 }
 

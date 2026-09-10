@@ -169,7 +169,7 @@ impl FileJournal {
                 #[cfg(unix)]
                 fs::remove_file(&temporary)?;
             } else {
-                stillus_platform::replace(&temporary, &destination)?;
+                stillus_platform::replace_revalidated(&temporary, &destination)?;
             }
             stillus_platform::sync_directory(&self.directory)
         })();

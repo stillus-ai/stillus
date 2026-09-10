@@ -643,7 +643,7 @@ fn atomic_write_global_settings(
         file.write_all(&bytes)?;
         file.sync_all()?;
         drop(file);
-        fs::rename(&temporary, &destination)?;
+        stillus_platform::replace_revalidated(&temporary, &destination)?;
         sync_directory(home)?;
         Ok(())
     })();
@@ -675,7 +675,7 @@ fn atomic_write_settings(workspace: &Path, settings: &UiSettings) -> Result<(), 
         file.write_all(&bytes)?;
         file.sync_all()?;
         drop(file);
-        fs::rename(&temporary, &destination)?;
+        stillus_platform::replace_revalidated(&temporary, &destination)?;
         sync_directory(&directory)?;
         Ok(())
     })();
