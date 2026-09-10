@@ -8062,18 +8062,30 @@ struct RssCardData {
     selected: bool,
 }
 
-fn rss_title(label: String, ink: Color) -> impl IntoView {
-    text(label).pointer_events(|| false).style(move |style| {
-        style
-            .width_full()
-            .min_width(0.0)
-            .font_size(ui::FONT_CARD)
-            .line_height(1.25)
-            .font_weight(floem::text::Weight::SEMIBOLD)
-            .selectable(false)
-            .font_family(ui::UI_FONT_FAMILY.to_owned())
-            .color(ink)
-    })
+fn rss_title(
+    label: String,
+    ink: Color,
+    palette: Palette,
+    on_click: Option<Rc<dyn Fn()>>,
+) -> AnyView {
+    ui::selectable_rich_text(
+        move || {
+            let family = [floem::text::FamilyOwned::Name(
+                ui::UI_FONT_FAMILY.to_owned(),
+            )];
+            let attrs = floem::text::Attrs::new()
+                .family(&family)
+                .color(ink)
+                .font_size(ui::FONT_CARD as f32)
+                .weight(floem::text::Weight::SEMIBOLD)
+                .line_height(floem::text::LineHeightValue::Normal(1.25));
+            let mut layout = floem::text::TextLayout::new();
+            layout.set_text(&label, floem::text::AttrsList::new(attrs));
+            (label.clone(), layout)
+        },
+        palette,
+        on_click,
+    )
 }
 
 fn rss_article_link(
@@ -8082,24 +8094,14 @@ fn rss_article_link(
     palette: Palette,
     ink: Color,
 ) -> impl IntoView {
-    selectable_row(rss_title(label, ink), on_press)
-        // The card selects on bubbling pointer events; the title handles its own
-        // selection before opening so it must not also activate the card.
-        .on_event(EventListener::PointerDown, |event| {
-            if is_primary_pointer_down(event) {
-                EventPropagation::Stop
-            } else {
-                EventPropagation::Continue
-            }
-        })
-        .style(move |style| {
-            style
-                .width_full()
-                .min_width(0.0)
-                .cursor(CursorStyle::Pointer)
-                .border_radius(5.0)
-                .focus_visible(|style| style.background(palette.accent_soft))
-        })
+    rss_title(label, ink, palette, Some(Rc::new(on_press))).style(move |style| {
+        style
+            .width_full()
+            .min_width(0.0)
+            .cursor(CursorStyle::Pointer)
+            .border_radius(5.0)
+            .focus_visible(|style| style.background(palette.accent_soft))
+    })
 }
 
 /// Current summary of one subscription. Every feed control reads its state
@@ -8499,7 +8501,7 @@ fn rss_panel(
                 )
                 .into_any()
             } else {
-                rss_title(card.entry.title.clone(), ink).into_any()
+                rss_title(card.entry.title.clone(), ink, palette, None)
             };
             let select_pointer = select_entry.clone();
             let view = v_stack((
@@ -8519,26 +8521,45 @@ fn rss_panel(
                     }),
                 ))
                 .style(|style| style.width_full().min_width(0.0).items_start().gap(12.0)),
-                label(metadata)
-                    .pointer_events(|| false)
-                    .style(move |style| {
-                        style
-                            .width_full()
-                            .min_width(0.0)
-                            .font_size(ui::FONT_CAPTION)
-                            .line_height(1.4)
-                            .font_family(ui::UI_FONT_FAMILY.to_owned())
+                ui::selectable_rich_text(
+                    move || {
+                        let text = metadata();
+                        let family = [floem::text::FamilyOwned::Name(
+                            ui::UI_FONT_FAMILY.to_owned(),
+                        )];
+                        let attrs = floem::text::Attrs::new()
+                            .family(&family)
                             .color(palette.ink2)
-                            .apply_if(card.hidden && !card.expanded, |s| s.hide())
-                    }),
-                floem::views::rich_text(move || summary_layout.clone())
-                    .pointer_events(|| false)
-                    .style(move |style| {
-                        style
-                            .width_full()
-                            .min_width(0.0)
-                            .apply_if(card.hidden && !card.expanded, |s| s.hide())
-                    }),
+                            .font_size(ui::FONT_CAPTION as f32)
+                            .line_height(floem::text::LineHeightValue::Normal(1.4));
+                        let mut layout = floem::text::TextLayout::new();
+                        layout.set_text(&text, floem::text::AttrsList::new(attrs));
+                        (text, layout)
+                    },
+                    palette,
+                    None,
+                )
+                .style(move |style| {
+                    style
+                        .width_full()
+                        .min_width(0.0)
+                        .font_size(ui::FONT_CAPTION)
+                        .line_height(1.4)
+                        .font_family(ui::UI_FONT_FAMILY.to_owned())
+                        .color(palette.ink2)
+                        .apply_if(card.hidden && !card.expanded, |s| s.hide())
+                }),
+                ui::selectable_rich_text(
+                    move || (excerpt.text.clone(), summary_layout.clone()),
+                    palette,
+                    None,
+                )
+                .style(move |style| {
+                    style
+                        .width_full()
+                        .min_width(0.0)
+                        .apply_if(card.hidden && !card.expanded, |s| s.hide())
+                }),
             ))
             .keyboard_navigable()
             .on_event(EventListener::PointerDown, move |event| {

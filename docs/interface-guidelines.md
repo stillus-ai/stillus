@@ -74,6 +74,9 @@ Keep focus visible and keyboard operations consistent across screens.
 Associate validation feedback with the affected field. Selects, menus and
 tooltips must stay within the window and follow their anchors on resize.
 Preserve the secret-input component's clipboard and plaintext protections.
+RSS titles, article text and metadata must support native text selection and
+Ctrl/Cmd+C without editing the feed. Dragging a title must not open its link;
+an ordinary click still opens the original article.
 
 ## Verification
 

@@ -35,6 +35,8 @@ pub(crate) use style::*;
 
 mod textarea;
 pub(crate) use textarea::TextArea;
+mod selectable_text;
+pub(crate) use selectable_text::selectable_rich_text;
 mod select;
 pub(crate) use select::{language_select, select};
 mod menu;

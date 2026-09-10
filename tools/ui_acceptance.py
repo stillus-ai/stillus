@@ -7574,7 +7574,7 @@ def rss_cards_scenario(driver: WindowDriver, workspace: Path) -> None:
     workspace, config_path, cache = cached_rss_workspace(driver, "rss-cards", [{
         "id": "entry/0", "title": "RSS article", "author": None,
         "published": None, "updated": None,
-        "summary": "A **native** RSS article.", "link": article_url,
+        "summary": "A **native** RSS article.\n\nПривет 🌍 — second paragraph.", "link": article_url,
     }])
     state_path = cache / "state.json"
     state_path.write_text(json.dumps({"read_entry_ids": [], "last_read_at": None}),
@@ -7615,6 +7615,41 @@ def rss_cards_scenario(driver: WindowDriver, workspace: Path) -> None:
     driver.start_app(workspace, "cards", environment_overrides={
         "BROWSER": str(browser), "PATH": str(browser_dir),
     })
+    def drag_text(start: tuple[int, int], end: tuple[int, int]) -> None:
+        driver.xdotool("mousemove", "--window", driver.window_id, str(start[0]), str(start[1]))
+        driver.xdotool("mousedown", "1")
+        driver.xdotool("mousemove", "--sync", "--window", driver.window_id, str(end[0]), str(end[1]))
+        driver.release()
+        driver.key("ctrl+c")
+
+    drag_text((305, 116), (500, 116))
+    wait_until("RSS title drag copies instead of opening the URL", lambda:
+               clipboard_text(driver.environment) == "RSS article")
+    if opened() or read_ids():
+        raise AcceptanceFailure("selecting RSS title opened or marked the article read")
+    frame = driver.capture("rss-selectable-body")
+    text_rows = column_runs({y for (_, y), value in
+        crop_luminances(frame, (305, 140, 420, 170)).items() if value < 150}, merge_gap=4)
+    if len(text_rows) != 2:
+        raise AcceptanceFailure("RSS body did not retain its two formatted paragraphs")
+    first_y, second_y = [(start + end) // 2 for start, end in text_rows]
+    body_text = "A native RSS article.\nПривет 🌍 — second paragraph."
+    driver.click_point(350, first_y)
+    unselected = driver.capture("rss-before-selection")
+    driver.key("ctrl+a")
+    driver.wait_for_visual_change("RSS body paints its selection", unselected,
+                                  crop=(305, first_y - 10, 420, second_y - first_y + 24), minimum_pixels=50)
+    driver.key("ctrl+c")
+    wait_until("RSS Copy preserves paragraphs and Unicode without Markdown markers", lambda:
+               clipboard_text(driver.environment) == body_text)
+    drag_text((305, second_y), (900, second_y))
+    wait_until("RSS copies only the selected paragraph", lambda:
+               clipboard_text(driver.environment) == "Привет 🌍 — second paragraph.")
+    drag_text((900, second_y), (305, first_y))
+    wait_until("RSS reverse drag copies both paragraphs", lambda:
+               clipboard_text(driver.environment) == body_text)
+    if opened() or read_ids():
+        raise AcceptanceFailure("selecting RSS body opened or marked the article read")
     driver.click_point(450, 116)
     wait_until("RSS title opens its original URL once", lambda: opened() == [[article_url]])
     wait_until("RSS title persists the read state", lambda: read_ids() == ["entry/0"])
