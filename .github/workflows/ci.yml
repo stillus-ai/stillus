@@ -134,7 +134,9 @@ jobs:
           targets: toolchain
           load: true
       - name: UI smoke and acceptance checks
-        run: make ci-ui
+        # Each native window and screenshot encoder needs responsive event
+        # delivery. Keep all scenarios, without competing UI workers on CI.
+        run: make ci-ui UI_JOBS=1
       - name: Record job outcome
         if: always()
         run: python3 tools/ci.py finish linux "${{ job.status }}"

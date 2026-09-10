@@ -14,7 +14,7 @@ A newer CI run cancels the older run for the same PR or branch.
 | Job | Runner | Command and scope | Timeout |
 | --- | --- | --- | --- |
 | Linux | `ubuntu-24.04`, x64 | Build the Compose toolchain; `make ci-linux` executes `make check-linux` (tests, audits and Linux/macOS checks) and packages Linux | 120 min |
-| UI acceptance | `ubuntu-24.04`, x64 | `make ci-ui` builds the application and runs `make ui-check` (UI smoke tests and click-driven acceptance scenarios) | 90 min |
+| UI acceptance | `ubuntu-24.04`, x64 | `make ci-ui UI_JOBS=1` builds the application and runs `make ui-check` (UI smoke tests and every click-driven acceptance scenario, sequentially) | 90 min |
 | Windows build | `ubuntu-24.04`, x64 | `make ci-windows-build` cross-compiles the Windows application and test kit, then packages both | 90 min |
 | macOS | `macos-15`, Apple Silicon | `make NATIVE=1 ci-macos` builds with pinned Rust and executes the native launch and Finder smoke checks | 90 min |
 | Windows | `windows-2025`, x64 | Verify and unpack the Windows build job's test package from this run; execute its existing PowerShell test runner and native smoke checks | 30 min |
@@ -22,6 +22,9 @@ A newer CI run cancels the older run for the same PR or branch.
 Linux checks, UI acceptance, macOS and the Windows cross-build start independently.
 UI acceptance has no job dependencies or downloaded build artifacts: it waits
 only for an available runner, its own toolchain setup and application build.
+Its independent native scenarios run one at a time so event delivery and PNG
+encoding do not compete with another UI worker. This changes scheduling only;
+all scenarios and their within-application concurrency checks remain enabled.
 Native Windows tests wait only for the Windows build job; Linux UI failures do
 not block them.
 The local `make check` still includes the full gate. Its Windows build targets
@@ -270,6 +273,10 @@ comparisons remain pixel-exact. Paging also re-enters the author header when a
 new row replaces the old one under the pointer. Journal selection waits for all
 three fixture rows to be painted rather than treating the newly inserted filter
 controls as proof that the rows are ready.
+If paging replaces a row between hover and Copy, the driver retries that read-only
+Copy until its clipboard selection responds, without repeating text edits.
+Empty-field placeholder paint and caret-blink checks use the common six-second
+bound for rendering under load; their color and blink assertions are unchanged.
 The request/tool budget test allows 60 seconds per completed batch of durable
 operations; its exact 20-request and 50/60-tool counts and no-duplication assertions
 remain unchanged. Other chat tests retain their 15-second waits.

@@ -332,7 +332,7 @@ class CITests(unittest.TestCase):
         ui = jobs["ui"]
         self.assertNotRegex(ui, r"(?m)^    (needs|if|continue-on-error):")
         self.assertNotIn("actions/download-artifact@", ui)
-        self.assertIn("run: make ci-ui\n", ui)
+        self.assertIn("run: make ci-ui UI_JOBS=1\n", ui)
         self.assertIn('if: always()\n        run: python3 tools/ci.py finish linux "${{ job.status }}"', ui)
         self.assertRegex(ui, r"if: always\(\)\n        uses: actions/upload-artifact@[^\n]+\n"
                             r"        with:\n          name: reports-ui\n          path: .ci/reports/linux/")

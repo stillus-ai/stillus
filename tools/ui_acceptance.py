@@ -1873,7 +1873,7 @@ def assert_focused_input_caret(
     wait_until(
         f"{description} muted placeholder paint",
         placeholder_is_painted,
-        timeout=2.0,
+        timeout=DEFAULT_TIMEOUT_SECONDS,
         interval=0.03,
     )
     changed = driver.wait_for_visual_change(
@@ -1881,7 +1881,7 @@ def assert_focused_input_caret(
         reference,
         crop=crop,
         minimum_pixels=4,
-        timeout=2.0,
+        timeout=DEFAULT_TIMEOUT_SECONDS,
         cropped_reference=True,
     )
     changed.unlink(missing_ok=True)
@@ -9480,9 +9480,15 @@ def chat_paging_layout_scenario(driver: WindowDriver, workspace: Path, chat: Pat
 
         wait_until("top message Copy is painted after scrolling", top_copy_ready)
         set_clipboard_text(driver.environment, "chat copy sentinel")
-        driver.click_point(565, 104)
-        wait_until("top message Copy responds before further scrolling", lambda:
-            clipboard_text(driver.environment) not in (None, "chat copy sentinel"))
+        def copy_top_message() -> bool:
+            if clipboard_text(driver.environment) not in (None, "chat copy sentinel"):
+                return True
+            # A page may replace the row between hover readiness and click.
+            # Copy is read-only; retry only until this selection has answered.
+            driver.click_point(565, 104)
+            return clipboard_text(driver.environment) not in (None, "chat copy sentinel")
+
+        wait_until("top message Copy responds before further scrolling", copy_top_message)
         if clipboard_text(driver.environment) == first_text:
             reached_first = True
             break
