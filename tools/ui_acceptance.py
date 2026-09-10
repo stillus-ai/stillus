@@ -7819,6 +7819,12 @@ def localization_scenario(driver: WindowDriver, workspace: Path) -> None:
         sidebar_x = width - 232 + 5 if rtl else 5
         wait_until("settings sidebar matches window geometry", lambda:
             driver.window_color_pixel_count((36, 42, 51), crop=(sidebar_x, 90, 5, 5)) == 25)
+        content_right = width - 232 if rtl else width
+        wait_until("language card matches the resized content width", lambda:
+            driver.window_color_pixel_count((255, 255, 255),
+                crop=(content_right - 50, 140, 3, 100)) == 300
+            and driver.window_color_pixel_count((246, 247, 248),
+                crop=(content_right - 40, 140, 10, 100)) == 1000)
         # Locate the dropdown arrow independently of each script's line metrics.
         frame = driver.capture("language-control")
         arrow_x = 81 if rtl else 577
@@ -7832,6 +7838,11 @@ def localization_scenario(driver: WindowDriver, workspace: Path) -> None:
         if not rows:
             raise AcceptanceFailure("language dropdown arrow is not visible")
         driver.click_point(220 if rtl else 448, max(rows))
+        list_crop = (68 if rtl else 298, max(rows) + 24, 300, 520 - max(rows) - 24)
+        driver.wait_for_visual_change("language options open before keyboard navigation", frame,
+                                      crop=list_crop, minimum_pixels=1000)
+        driver.wait_for_stable_frame("language options finish opening and taking focus",
+                                     crop=list_crop, stable_for=0.3)
         return max(rows)
 
     languages = ("en", "es", "ru", "zh/hans", "zh/hant", "pt/br", "pt/pt", "hi",
@@ -7880,6 +7891,9 @@ def localization_scenario(driver: WindowDriver, workspace: Path) -> None:
         driver.key("Return")
         driver.wait_for_visual_change("language write error", baseline,
                                       crop=(298, 220, 495, 100), timeout=10)
+        wait_until("language save error is painted", lambda:
+            near_color_pixel_count(driver.capture("language-error-ready"), (164, 69, 69),
+                                   crop=(298, 220, 495, 100)) >= 20, timeout=10)
         failed = driver.wait_for_stable_frame("rejected language retains English", stable_for=0.3)
         if near_color_pixel_count(failed, (164, 69, 69), crop=(298, 220, 495, 100)) < 20:
             raise AcceptanceFailure("language write failure did not show an error")
@@ -7962,8 +7976,11 @@ def localization_scenario(driver: WindowDriver, workspace: Path) -> None:
     driver.resize_window(960, 600)
     driver.wait_for_stable_frame("Korean settings after restart", stable_for=0.3, timeout=10)
     # Return to English using the same control, then check that the choice survives launch.
-    open_language_picker(False)
+    control_y = open_language_picker(False)
     driver.key("Home")
+    wait_until("Home selects the first language after restart", lambda:
+        driver.window_color_pixel_count((229, 238, 246),
+            crop=(305, control_y + 30, 18, 18), tolerance=2) >= 200)
     driver.key("Return")
     wait_until("English restored", lambda: json.loads((driver.home / ".stillus.cfg").read_text())["locale"] == "en")
     driver.resize_window(SCREEN_WIDTH, SCREEN_HEIGHT)
@@ -8994,8 +9011,16 @@ def ai_journal_scenario(driver: WindowDriver, workspace: Path) -> None:
     driver.wait_for_stable_frame("journal details rendered", crop=(276, 420, 850, 280), minimum_dark_pixels=800)
     preview = driver.capture("journal-details")
     export_screenshot(preview, Path("/workspace/dist/ai-journal-preview.png"))
-    driver.click_point(365, 45)
-    driver.wait_for_visual_change("history cleanup confirmation", preview, crop=(260, 180, 720, 160), timeout=10)
+    def open_cleanup_confirmation() -> bool:
+        current = driver.capture("journal-cleanup-confirmation")
+        if image_difference(preview, current, crop=(260, 180, 720, 160)) >= 50:
+            return True
+        # The periodic journal read temporarily disables this action. Opening
+        # its confirmation is idempotent; the actual deletion below is one click.
+        driver.click_point(365, 45)
+        return False
+
+    wait_until("history cleanup confirmation", open_cleanup_confirmation, timeout=10)
     driver.wait_for_stable_frame("history cleanup controls", crop=(260, 180, 720, 160), stable_for=0.5)
     driver.click_point(310, 223)
     wait_until("journal history cleared", lambda: not list(directory.glob("*.json")), timeout=10)

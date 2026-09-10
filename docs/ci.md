@@ -285,6 +285,13 @@ The minimum-width chat snapshot is captured after the resized composer's bounds
 are ready, so its overflow checks never apply new coordinates to an older frame.
 Empty-field placeholder paint and caret-blink checks use the common six-second
 bound for rendering under load; their color and blink assertions are unchanged.
+Localized inputs use their scoped placeholder color, including the muted color
+on the dark search sidebar; unit and UI checks cover this distinction.
+Opening journal cleanup confirmation is retried while periodic reads temporarily
+disable its action. The actual deletion is clicked once and must remove the files.
+Language selection waits for the card's edge at the current window width and the
+opened list before keyboard navigation, including restoring English after a Korean
+restart. Save-error and Home-key checks wait for their specific painted state.
 The request/tool budget test allows 60 seconds per completed batch of durable
 operations; its exact 20-request and 50/60-tool counts and no-duplication assertions
 remain unchanged. Other chat tests retain their 15-second waits.

@@ -10,14 +10,21 @@ use floem::event::{Event, EventPropagation};
 use floem::keyboard::{Key as LogicalKey, NamedKey};
 use floem::kurbo::{Point, Rect};
 use floem::reactive::{RwSignal, SignalGet, create_effect};
-use floem::style::{FontFamily, FontSize};
+use floem::style::{FontFamily, FontSize, Style, TextColor};
 use floem::text::{Attrs, AttrsList, FamilyOwned, TextLayout};
-use floem::views::{TextInput, text_input};
+use floem::views::{PlaceholderTextClass, TextInput, text_input};
 use floem::{View, ViewId};
 use floem_renderer::Renderer;
 use std::any::Any;
 
 type InputKeyHandler = dyn Fn(&Event) -> EventPropagation;
+
+fn hint_color(style: Style) -> floem::peniko::Color {
+    style
+        .apply_class(PlaceholderTextClass)
+        .get(TextColor)
+        .unwrap_or_else(|| super::Palette::new().ink3)
+}
 
 pub(crate) struct LocalizedInput {
     input: TextInput,
@@ -127,7 +134,7 @@ impl View for LocalizedInput {
             Attrs::new()
                 .family(&[FamilyOwned::Name(family)])
                 .font_size(style.get(FontSize).unwrap_or(crate::ui::FONT_BODY as f32))
-                .color(super::Palette::new().ink3),
+                .color(hint_color(style)),
         );
     }
     fn layout(&mut self, cx: &mut LayoutCx) -> floem::taffy::tree::NodeId {
@@ -159,5 +166,24 @@ impl View for LocalizedInput {
         cx.clip(&Rect::new(left, 0.0, right, f64::from(bounds.size.height)));
         cx.draw_text(&self.layout, Point::new(x, y));
         cx.restore();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn localized_hint_uses_each_fields_scoped_placeholder_color() {
+        let palette = crate::ui::Palette::new();
+        for color in [palette.sidebar_muted, palette.ink3, palette.danger] {
+            let style = crate::ui::text_input_affordance(
+                Style::new().color(palette.ink),
+                color,
+                palette.accent,
+            );
+            assert_eq!(hint_color(style), color);
+        }
+        assert_eq!(hint_color(Style::new()), palette.ink3);
     }
 }
