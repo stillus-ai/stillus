@@ -2,7 +2,9 @@
 
 ## Getting started
 
-1. Read [README.md](README.md) in full.
+1. Read only the sections of [README.md](README.md) and other documentation
+   needed for the task. README includes planned capabilities; use this
+   AGENTS.md for current product boundaries.
 2. Run `git status --short --branch` and `git diff` on the host to inspect the
    checkout and user changes. Use `git log` only when history is relevant and
    the user's task permits it.
@@ -58,7 +60,9 @@
   tests, linters, audits, and benchmarks run through the Docker Compose
   `toolchain` service. Run all Git commands directly on the host, never in
   Docker or through Makefile targets that run Git in Docker.
-- On the host, use `git`, `make`, `docker`/`docker compose`, and file editing. Native
+- On the host, use `git`, `make`, `docker`/`docker compose`, file editing, and
+  ordinary file-reading and search utilities such as `rg`. The Docker requirement
+  above applies to Rust toolchain operations. Native
   Apple Silicon operations are exposed by `make build`, `make native-smoke`,
   and `make native-external-smoke`. Builds use pinned Rust in ignored
   `.host-build/` and the system Xcode SDK without changing global Rust or shell
@@ -70,9 +74,9 @@
 - Before changing UI, read and follow the
   [interface guidelines](docs/interface-guidelines.md). They define shared
   controls, scoped styles, button captions, input behavior and UI checks.
-- After changes, run fast unit tests first, then only tests related to the
-  changed behavior. Select specific packages, test filters, and UI scenarios
-  based on the affected code.
+- Run only checks related to the change, starting with relevant fast unit tests.
+  Select specific packages, test filters, and UI scenarios based on the affected
+  code. Repeat passed checks only after changes that could affect their results.
 - Do not run `make`, `make check`, `make ui-check`, or other long full-suite
   checks unless the user explicitly requests them.
 - After fixing a failure, rerun the relevant checks without expanding to a
@@ -83,10 +87,6 @@
   separately before an aggregate that includes it.
 - Keep project license metadata and SPDX notices consistent with `GPL-3.0-only`.
   Preserve dependency license notices and do not bypass audits.
-- After each completed task, create a local Git commit if all selected tests
-  and checks passed. For documentation-only changes, the checks above suffice.
-  Include only changes belonging to the task; do not commit if required checks
-  failed or could not be completed.
 - Push only when the user explicitly requests it. Creating a commit does not
   authorize a push.
 
@@ -94,7 +94,9 @@
 
 1. Run the selected checks according to the rules above.
 2. Review `git diff` on the host and confirm that original user changes are preserved.
-3. If all selected checks passed, commit the task changes locally without pushing.
+3. If the task changed files and all selected checks passed, create a local Git
+   commit containing only the task changes. Do not commit if required checks
+   failed or could not be completed. Tasks without file changes need no commit.
 4. Report what changed, exactly which checks ran and their results, the commit
    hash (or why no commit was created), and any
    remaining failures or risks.
