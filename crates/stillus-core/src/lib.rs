@@ -1495,12 +1495,35 @@ impl WorkspaceSession {
         self.document.as_mut()
     }
 
+    /// Recovery from a previous session must be resolved before making a new
+    /// branch of edits. Current-session snapshots and restored buffers already
+    /// have a recovery revision and must remain editable.
+    fn unresolved_selected_recovery(&self) -> bool {
+        self.document.as_ref().is_some_and(|document| {
+            document.autosave.recovery_revision == 0
+                && document.autosave.saved_revision == 0
+                && match document.target() {
+                    DocumentTarget::WorkspaceNote(index) => self.notes[*index].recovery_available,
+                    DocumentTarget::ExternalFile { engine_id, item_id } => {
+                        self.external_files.iter().any(|file| {
+                            file.engine_id == *engine_id
+                                && file.item_id == *item_id
+                                && file.recovery_available
+                        })
+                    }
+                }
+        })
+    }
+
     pub fn apply_selected_at(
         &mut self,
         command: EditorCommand,
         now_ms: u64,
     ) -> Result<CommandOutcome, CoreError> {
         self.ensure_no_secure_operation()?;
+        if command.changes_text() && self.unresolved_selected_recovery() {
+            return Err(CoreError::UnsavedChanges);
+        }
         let document = self.document.as_mut().ok_or_else(|| {
             CoreError::NoteUnavailable("editor input requires an open note".to_owned())
         })?;
@@ -1569,6 +1592,9 @@ impl WorkspaceSession {
         modified: String,
     ) -> Result<Option<SaveJob>, CoreError> {
         if self.pending_secure_operation.is_some() || self.pending_integrity.is_some() {
+            return Ok(None);
+        }
+        if self.unresolved_selected_recovery() {
             return Ok(None);
         }
         let target = match self.document.as_ref() {
@@ -1666,6 +1692,9 @@ impl WorkspaceSession {
         modified: String,
     ) -> Result<Option<PersistenceJob>, CoreError> {
         if self.pending_secure_operation.is_some() || self.pending_integrity.is_some() {
+            return Ok(None);
+        }
+        if self.unresolved_selected_recovery() {
             return Ok(None);
         }
         let target = match self.document.as_ref() {
@@ -5745,6 +5774,36 @@ pub enum EditorCommand {
     Redo,
 }
 
+impl EditorCommand {
+    fn changes_text(&self) -> bool {
+        match self {
+            Self::ReplaceRange { .. }
+            | Self::Insert(_)
+            | Self::Paste(_)
+            | Self::Backspace
+            | Self::DeleteForward
+            | Self::ToggleTaskDone
+            | Self::Cut
+            | Self::Undo
+            | Self::Redo => true,
+            Self::MoveLeft { .. }
+            | Self::MoveRight { .. }
+            | Self::MoveWordLeft { .. }
+            | Self::MoveWordRight { .. }
+            | Self::MoveLineStart { .. }
+            | Self::MoveLineEnd { .. }
+            | Self::MoveDocumentStart { .. }
+            | Self::MoveDocumentEnd { .. }
+            | Self::MoveUp { .. }
+            | Self::MoveDown { .. }
+            | Self::SetCaret { .. }
+            | Self::SetSelection { .. }
+            | Self::SelectAll
+            | Self::Copy => false,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CommandOutcome {
     pub text_changed: bool,
@@ -5851,6 +5910,52 @@ mod tests {
                 .unwrap(),
             )
             .unwrap()
+    }
+
+    fn assert_pending_recovery_blocks_edits(session: &mut WorkspaceSession) {
+        let before = document_text(session.document().unwrap());
+        session
+            .apply_selected_at(EditorCommand::SelectAll, 1_000)
+            .unwrap();
+        assert_eq!(
+            session
+                .apply_selected_at(EditorCommand::Copy, 1_000)
+                .unwrap()
+                .clipboard,
+            Some(before.clone())
+        );
+        for command in [
+            EditorCommand::Insert("new branch".into()),
+            EditorCommand::Paste("pasted branch".into()),
+            EditorCommand::ReplaceRange {
+                start: 0,
+                end: 0,
+                text: "replacement".into(),
+            },
+            EditorCommand::Backspace,
+            EditorCommand::DeleteForward,
+            EditorCommand::ToggleTaskDone,
+            EditorCommand::Cut,
+            EditorCommand::Undo,
+            EditorCommand::Redo,
+        ] {
+            assert_eq!(
+                session.apply_selected_at(command, 1_000),
+                Err(CoreError::UnsavedChanges)
+            );
+        }
+        if matches!(
+            session.document().unwrap().target(),
+            DocumentTarget::WorkspaceNote(_)
+        ) {
+            assert_eq!(
+                session.edit_selected_title("Renamed", 1_000),
+                Err(CoreError::UnsavedChanges)
+            );
+        }
+        assert_eq!(document_text(session.document().unwrap()), before);
+        assert!(!session.document().unwrap().has_unsaved_work());
+        assert!(session.unresolved_selected_recovery());
     }
 
     #[test]
@@ -6030,6 +6135,8 @@ mod tests {
         let mut restarted = WorkspaceSession::open(workspace.path()).unwrap();
         restarted.attach_external_file(&external).unwrap();
         assert!(restarted.external_files()[0].recovery_available);
+        restarted.open_external_file(&external).unwrap();
+        assert_pending_recovery_blocks_edits(&mut restarted);
         restarted
             .restore_external_recovery(&engine_id, &item_id, 1_000)
             .unwrap();
@@ -6037,6 +6144,9 @@ mod tests {
             document_text(restarted.document().unwrap()),
             "recovered disk\n"
         );
+        restarted
+            .apply_selected_at(EditorCommand::Insert("editable ".into()), 1_001)
+            .unwrap();
     }
 
     #[test]
@@ -6785,6 +6895,39 @@ mod tests {
                 session.document().unwrap().recovery_status(),
                 RecoveryStatus::Saved { revision: 1 }
             );
+            // A snapshot of this session must not turn the editor read-only.
+            session
+                .apply_selected_at(EditorCommand::Insert("more ".into()), 201)
+                .unwrap();
+        }
+
+        {
+            let canonical = fs::read(workspace.note_path("note.md")).unwrap();
+            let records = RecoveryStore::new(workspace.path()).scan().records;
+            let mut pending = WorkspaceSession::open(workspace.path()).unwrap();
+            pending.open_note(0).unwrap();
+            assert_pending_recovery_blocks_edits(&mut pending);
+            // Even callers that directly mutate DocumentSession cannot publish
+            // a new branch or move the note away from the old recovery key.
+            pending
+                .document_mut()
+                .unwrap()
+                .apply_at(EditorCommand::Insert("Renamed\n".into()), 1_000)
+                .unwrap();
+            assert!(
+                pending
+                    .begin_autosave(2_000, "ignored".into())
+                    .unwrap()
+                    .is_none()
+            );
+            assert!(
+                pending
+                    .begin_persistence(2_000, "ignored".into())
+                    .unwrap()
+                    .is_none()
+            );
+            assert_eq!(fs::read(workspace.note_path("note.md")).unwrap(), canonical);
+            assert_eq!(RecoveryStore::new(workspace.path()).scan().records, records);
         }
 
         let mut restarted = WorkspaceSession::open(workspace.path()).unwrap();
@@ -6829,6 +6972,9 @@ mod tests {
                 .unwrap()
                 .ends_with("recovered body\n")
         );
+        restarted
+            .edit_selected_title("Editable after recovery", 2_000)
+            .unwrap();
     }
 
     #[cfg(unix)]
@@ -8047,6 +8193,7 @@ mod tests {
         let mut restarted = WorkspaceSession::open(workspace.path()).unwrap();
         assert!(restarted.notes()[0].recovery_available);
         restarted.unlock_note(0, password).unwrap();
+        assert_pending_recovery_blocks_edits(&mut restarted);
         let restore = restarted
             .begin_restore_protected_recovery(0, 10_000)
             .unwrap();
@@ -8085,6 +8232,9 @@ mod tests {
                 .text,
             "recovered protected body"
         );
+        restarted
+            .apply_selected_at(EditorCommand::Insert("editable ".into()), 10_001)
+            .unwrap();
     }
 
     #[test]

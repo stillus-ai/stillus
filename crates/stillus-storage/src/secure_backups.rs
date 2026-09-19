@@ -293,9 +293,16 @@ pub fn restore_secure_backup(
     workspace: impl AsRef<Path>,
     failure: &IntegrityFailure,
 ) -> Result<SaveCommit, SaveError> {
-    let _operation = stillus_platform::OperationLock::directory(workspace.as_ref())
+    restore_secure_backup_with(workspace.as_ref(), failure, &mut crate::NoFault)
+}
+
+pub(super) fn restore_secure_backup_with(
+    workspace: &Path,
+    failure: &IntegrityFailure,
+    checkpoint: &mut impl crate::Checkpoint,
+) -> Result<SaveCommit, SaveError> {
+    let _operation = stillus_platform::OperationLock::directory(workspace)
         .map_err(|error| precommit(SaveStage::OpenTarget, error))?;
-    let workspace = workspace.as_ref();
     let current = fs::symlink_metadata(&failure.commit.path)
         .map_err(|error| precommit(SaveStage::OpenTarget, error))?;
     if !current.file_type().is_file()
@@ -328,24 +335,50 @@ pub fn restore_secure_backup(
     let mut output = options
         .open(&temporary)
         .map_err(|error| precommit(SaveStage::CreateTemp, error))?;
-    if let Err(error) = copy_bounded(&mut input, &mut output)
+    let mut guard = crate::TempGuard::new(temporary);
+    let copied = copy_bounded(&mut input, &mut output)
         .and_then(|_| output.flush())
-        .and_then(|_| output.sync_all())
-    {
-        let _ = fs::remove_file(&temporary);
-        return Err(precommit(SaveStage::Write, error));
-    }
+        .and_then(|_| output.sync_all());
+    #[cfg(windows)]
+    let prepared = output.metadata();
     drop(output);
+    drop(input);
+    copied.map_err(|error| precommit(SaveStage::Write, error))?;
+    checkpoint
+        .check(SaveStage::Replace)
+        .map_err(|error| precommit(SaveStage::Replace, error))?;
+    // Hashing and copying a backup can be slow. External editors do not honor
+    // the workspace lock, so validate again immediately before publication.
+    let current = fs::symlink_metadata(&failure.commit.path)
+        .map_err(|error| precommit(SaveStage::ConflictCheck, error))?;
+    if !current.file_type().is_file()
+        || FileVersion::from_metadata(&current) != failure.commit.version
+    {
+        return Err(SaveError::Conflict);
+    }
     if destination == &failure.commit.path {
-        fs::rename(&temporary, destination)
-            .map_err(|error| precommit(SaveStage::Replace, error))?;
-    } else {
-        if fs::symlink_metadata(destination).is_ok() {
-            let _ = fs::remove_file(&temporary);
-            return Err(SaveError::Conflict);
+        #[cfg(windows)]
+        crate::replace_retry::replace_note(
+            &mut guard,
+            destination,
+            &failure.commit.version,
+            &prepared.map_err(|error| precommit(SaveStage::FileSync, error))?,
+        )?;
+        #[cfg(not(windows))]
+        {
+            fs::rename(guard.path(), destination)
+                .map_err(|error| precommit(SaveStage::Replace, error))?;
+            guard.disarm();
         }
-        fs::rename(&temporary, destination)
-            .map_err(|error| precommit(SaveStage::Replace, error))?;
+    } else {
+        crate::publish_temp(&mut guard, destination).map_err(|error| match error {
+            crate::NoteOperationError::Collision(_) => SaveError::Conflict,
+            crate::NoteOperationError::PartialCommit { message } => SaveError::PartialCommit {
+                path: destination.clone(),
+                message,
+            },
+            error => precommit(SaveStage::Replace, error),
+        })?;
         let current = fs::symlink_metadata(&failure.commit.path).map_err(|error| {
             SaveError::PartialCommit {
                 path: destination.clone(),

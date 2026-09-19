@@ -4086,6 +4086,112 @@ mod tests {
     }
 
     #[test]
+    fn protected_restore_rechecks_after_copy_and_never_overwrites_a_new_destination() {
+        struct ChangeDuringCopy(Option<PathBuf>);
+        impl Checkpoint for ChangeDuringCopy {
+            fn check(&mut self, stage: SaveStage) -> io::Result<()> {
+                assert_eq!(stage, SaveStage::Replace);
+                if let Some(path) = self.0.take() {
+                    fs::write(path, b"external edit made during backup copy")?;
+                }
+                Ok(())
+            }
+        }
+
+        for scenario in ["candidate", "destination", "relocation"] {
+            let workspace = TestWorkspace::new();
+            let source = workspace.note("Conflict.md", b"Conflict\nold body\n");
+            let password = MasterPassword::new("restore race password".to_owned());
+            let version = open_versioned(&source).unwrap().1;
+            let protected = protect_note_body(&source, &version, &password, "Conflict").unwrap();
+            let original = fs::read(&source).unwrap();
+            fs::create_dir_all(workspace.root.join(".stillus")).unwrap();
+            fs::write(
+                workspace.root.join(".stillus/test-corrupt-protected-save"),
+                b"once",
+            )
+            .unwrap();
+            let title = if scenario == "candidate" {
+                "Conflict"
+            } else {
+                "Renamed"
+            };
+            let body = format!("{title}\nnew body\n");
+            let failure = match rewrite_protected_body_with_title(
+                &workspace.root,
+                &source,
+                &protected.version,
+                ProtectedBodyRewrite {
+                    password: &password,
+                    patch: &MetadataPatch {
+                        modified: Some("2026-09-04T00:00:00Z".to_owned()),
+                        ..MetadataPatch::default()
+                    },
+                    title,
+                    body_len: body.len() as u64,
+                },
+                |writer| writer.write_all(body.as_bytes()),
+            )
+            .unwrap()
+            {
+                VerifiedSave::IntegrityFailure(failure) => failure,
+                VerifiedSave::Verified(_) => panic!("fault injector did not corrupt the save"),
+            };
+            let candidate = fs::read(&failure.commit.path).unwrap();
+            let changed = match scenario {
+                "candidate" => Some(failure.commit.path.clone()),
+                "destination" => Some(source.clone()),
+                _ => None,
+            };
+            let result = secure_backups::restore_secure_backup_with(
+                &workspace.root,
+                &failure,
+                &mut ChangeDuringCopy(changed.clone()),
+            );
+            if let Some(changed) = changed {
+                assert!(
+                    matches!(result, Err(SaveError::Conflict)),
+                    "{scenario}: {result:?}"
+                );
+                assert_eq!(
+                    fs::read(changed).unwrap(),
+                    b"external edit made during backup copy"
+                );
+                if scenario == "destination" {
+                    assert_eq!(fs::read(&failure.commit.path).unwrap(), candidate);
+                }
+                let manifest: serde_json::Value = serde_json::from_slice(
+                    &fs::read(workspace.root.join(".stillus_backups/secure/manifest.json"))
+                        .unwrap(),
+                )
+                .unwrap();
+                assert!(!manifest["notes"][0]["pending"].is_null());
+            } else {
+                assert_eq!(result.unwrap().path, source);
+                assert_eq!(fs::read(&source).unwrap(), original);
+                assert!(!failure.commit.path.exists());
+                assert!(
+                    load_pending_integrity_failure(&workspace.root)
+                        .unwrap()
+                        .is_none()
+                );
+            }
+            assert_eq!(fs::read(&failure.backup.path).unwrap(), original);
+            assert!(
+                fs::read_dir(source.parent().unwrap())
+                    .unwrap()
+                    .all(|entry| {
+                        !entry
+                            .unwrap()
+                            .file_name()
+                            .to_string_lossy()
+                            .starts_with(".stillus-restore-")
+                    })
+            );
+        }
+    }
+
+    #[test]
     fn protected_post_commit_read_failure_is_reported_with_rollback_backup() {
         let workspace = TestWorkspace::new();
         let source = workspace.note("Unreadable.md", b"Unreadable\nold body\n");
