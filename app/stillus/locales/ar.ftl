@@ -126,6 +126,7 @@ SelectedNotFolder = المسار المحدد ليس مجلدًا
 OpenWorkspaceFailed = لا يمكن فتح مساحة العمل
 SearchUnavailable = فهرس البحث غير متاح
 WorkspaceAlreadyOpen = مساحة العمل هذه مفتوحة بالفعل
+WorkspaceInUse = مساحة العمل هذه مفتوحة بالفعل في نافذة Stillus أخرى
 SaveSettingsFailed = لا يمكن حفظ إعدادات مساحة العمل الحالية: { $error }
 RememberWorkspaceFailed = تم فتح المجلد، ولكن لا يمكن تذكره عند التشغيل التالي: { $error }
 WorkspaceChanged = تم تغيير مساحة العمل. تم تحميل إعداداته.

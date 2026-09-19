@@ -25,6 +25,7 @@ pub(crate) struct Preferences {
     worker_revision: u64,
     failed_revision: u64,
     now: u64,
+    lease: Option<std::sync::Weak<stillus_platform::WorkspaceLease>>,
 }
 impl Preferences {
     fn new(store: UiSettingsStore, snapshot: UiSettings) -> Self {
@@ -40,6 +41,7 @@ impl Preferences {
             worker_revision: 0,
             failed_revision: 0,
             now: 0,
+            lease: None,
         }
     }
     pub(crate) fn unbound() -> Self {
@@ -56,6 +58,21 @@ impl Preferences {
             settings,
             diagnostic,
         }
+    }
+    pub(crate) fn bind_lease(&mut self, lease: &std::sync::Arc<stillus_platform::WorkspaceLease>) {
+        self.lease = Some(std::sync::Arc::downgrade(lease));
+    }
+    fn lease_guard(
+        &self,
+    ) -> Result<Option<std::sync::Arc<stillus_platform::WorkspaceLease>>, SettingsError> {
+        self.lease
+            .as_ref()
+            .map(|lease| {
+                lease
+                    .upgrade()
+                    .ok_or_else(|| SettingsError::UnsafePath("workspace session is closed".into()))
+            })
+            .transpose()
     }
     pub(crate) fn snapshot(&self) -> &UiSettings {
         &self.snapshot
@@ -119,12 +136,21 @@ impl Preferences {
         }
         if self.worker.is_none() && self.due.is_some_and(|due| due <= now) {
             self.due = None;
+            let lease = match self.lease_guard() {
+                Ok(lease) => lease,
+                Err(error) => {
+                    self.error = Some(error.to_string());
+                    self.failed_revision = self.revision;
+                    return true;
+                }
+            };
             if let Some(mut store) = self.store.take() {
                 let (sender, receiver) = mpsc::sync_channel(1);
                 self.worker = Some(receiver);
                 self.worker_revision = self.revision;
                 std::thread::spawn(move || {
                     let result = store.flush();
+                    drop(lease);
                     let _ = sender.send((store, result));
                 });
             }
@@ -133,6 +159,7 @@ impl Preferences {
     }
     /// Used at shutdown/session handoff after all content writers have settled.
     pub(crate) fn flush(&mut self) -> Result<(), SettingsError> {
+        let _lease = self.lease_guard()?;
         if let Some(receiver) = self.worker.take() {
             let (mut store, result) = receiver
                 .recv()

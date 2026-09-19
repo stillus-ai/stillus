@@ -33,7 +33,7 @@ impl From<CoreError> for ActionError {
     fn from(error: CoreError) -> Self {
         match error {
             CoreError::Save(stillus_storage::SaveError::Conflict) => Self::Conflict,
-            CoreError::UnsavedChanges => Self::Busy,
+            CoreError::UnsavedChanges | CoreError::WorkspaceBusy => Self::Busy,
             CoreError::MasterPasswordRequired => Self::RequiresUserInteraction,
             CoreError::NoteUnavailable(_) => Self::NotFound,
             CoreError::Secure(_) | CoreError::Security(_) | CoreError::PasswordChange(_) => {
@@ -270,6 +270,7 @@ impl Workspace {
         let sender = self.operations.sender.clone();
         let operation_id = operation.clone();
         let path = self.resolve_target(id)?;
+        let lease = self.lease();
         std::thread::spawn(move || {
             if gate
                 .compare_exchange(0, 1, Ordering::AcqRel, Ordering::Acquire)
@@ -286,6 +287,7 @@ impl Workspace {
                 search: None,
             });
             let result = job().map_err(ActionError::from);
+            drop(lease);
             let _ = sender.send(Completion {
                 operation: operation_id,
                 started: false,

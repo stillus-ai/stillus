@@ -126,6 +126,7 @@ SelectedNotFolder = Le chemin sélectionné n'est pas un dossier
 OpenWorkspaceFailed = Impossible d'ouvrir l'espace de travail
 SearchUnavailable = L'index de recherche n'est pas disponible
 WorkspaceAlreadyOpen = Cet espace de travail est déjà ouvert
+WorkspaceInUse = Cet espace de travail est déjà ouvert dans une autre fenêtre Stillus
 SaveSettingsFailed = Impossible d'enregistrer les paramètres actuels de l'espace de travail : { $error }
 RememberWorkspaceFailed = Dossier ouvert, mais n'a pas pu être mémorisé pour le prochain lancement : { $error }
 WorkspaceChanged = L'espace de travail a changé. Ses paramètres ont été chargés.

@@ -176,6 +176,7 @@ message_keys! {
     OpenWorkspaceFailed,
     SearchUnavailable,
     WorkspaceAlreadyOpen,
+    WorkspaceInUse,
     SaveSettingsFailed,
     RememberWorkspaceFailed,
     WorkspaceChanged,

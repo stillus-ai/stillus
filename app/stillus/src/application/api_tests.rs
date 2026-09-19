@@ -247,7 +247,8 @@ fn addressed_external_edit_preserves_selection_and_deduplicates_absolute_paths()
 #[test]
 fn sessions_are_fixed_and_cannot_be_switched_through_tools_or_settings() {
     let mut f = Fixture::new();
-    let other = Fixture::new();
+    let mut other = Fixture::new();
+    other.app.shutdown().unwrap();
     for name in ["workspace/open", "workspace/initialize", "settings/ui"] {
         assert_eq!(
             f.call(name, json!({"path":other.root})),
@@ -861,6 +862,11 @@ fn workspace_load_cancel_and_shutdown_dispose_prepared_search_workers() {
     let (started, release) = gate_workspace_load(&mut f.app);
     let id = f.app.begin_workspace_switch(&other.root, false).unwrap();
     started.recv_timeout(Duration::from_secs(8)).unwrap();
+    assert!(
+        stillus_platform::WorkspaceLease::try_acquire(&other.root)
+            .unwrap()
+            .is_none()
+    );
     assert_eq!(f.app.cancel_workspace_load(&id), Some(true));
     release.send(()).unwrap();
     assert!(wait_workspace(&mut f.app).is_err());
@@ -868,6 +874,11 @@ fn workspace_load_cancel_and_shutdown_dispose_prepared_search_workers() {
     assert_eq!(
         f.call("operations/status", json!({"id":id})).unwrap(),
         "Cancelled"
+    );
+    assert!(
+        stillus_platform::WorkspaceLease::try_acquire(&other.root)
+            .unwrap()
+            .is_some()
     );
     let (started, release) = gate_workspace_load(&mut f.app);
     f.app.begin_workspace_switch(&other.root, false).unwrap();
@@ -877,6 +888,16 @@ fn workspace_load_cancel_and_shutdown_dispose_prepared_search_workers() {
     // Shutdown joins the loader and its prepared search worker, so removal is safe now.
     fs::remove_dir_all(other.root.join(".stillus")).unwrap();
     assert!(f.app.session_id().is_none());
+    assert!(
+        stillus_platform::WorkspaceLease::try_acquire(&other.root)
+            .unwrap()
+            .is_some()
+    );
+    assert!(
+        stillus_platform::WorkspaceLease::try_acquire(&f.root)
+            .unwrap()
+            .is_some()
+    );
 }
 #[test]
 fn workspace_initialization_and_unloaded_failure_have_queryable_completions() {
@@ -1643,4 +1664,22 @@ fn unreadable_chat_state_does_not_hide_healthy_messages_or_rewrite_records() {
     assert_eq!(view["diagnostics"].as_array().unwrap().len(), 2);
     assert_eq!(fs::read(root.join("run.json")).unwrap(), b"broken state");
     assert_eq!(fs::read(root.join("draft.json")).unwrap(), b"broken draft");
+}
+
+#[test]
+fn workspace_lease_busy_switch_preserves_current_workspace() {
+    let mut first = Fixture::new();
+    let second = Fixture::new();
+    let session = first.app.session_id();
+    first
+        .app
+        .begin_workspace_switch(&second.root, false)
+        .unwrap();
+    let error = match wait_workspace(&mut first.app) {
+        Err(error) => error,
+        Ok(_) => panic!("occupied workspace opened"),
+    };
+    assert_eq!(error, crate::i18n::msg!(WorkspaceInUse).into());
+    assert_eq!(first.app.session_id(), session);
+    assert_eq!(first.app.workspace.as_ref().unwrap().root(), first.root);
 }

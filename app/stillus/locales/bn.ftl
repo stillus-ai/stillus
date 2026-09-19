@@ -126,6 +126,7 @@ SelectedNotFolder = নির্বাচিত পথটি একটি ফো
 OpenWorkspaceFailed = ওয়ার্কস্পেস খোলা যায়নি
 SearchUnavailable = অনুসন্ধান সূচক অনুপলব্ধ
 WorkspaceAlreadyOpen = এই কর্মক্ষেত্র ইতিমধ্যে খোলা আছে
+WorkspaceInUse = এই কর্মক্ষেত্রটি ইতিমধ্যেই অন্য Stillus উইন্ডোতে খোলা আছে
 SaveSettingsFailed = বর্তমান ওয়ার্কস্পেস সেটিংস সংরক্ষণ করা যায়নি: { $error }
 RememberWorkspaceFailed = ফোল্ডার খোলা হয়েছে, কিন্তু পরবর্তী লঞ্চের জন্য মনে রাখা যায়নি: { $error }
 WorkspaceChanged = কর্মক্ষেত্র পরিবর্তিত হয়েছে। এর সেটিংস লোড করা হয়েছে।

@@ -120,8 +120,43 @@ mod tests {
         let root = std::path::PathBuf::from(root);
         std::fs::write(root.join("waiting"), b"").unwrap();
         if await_handoff().unwrap() {
+            let _lease = std::env::var_os("STILLUS_RESTART_LEASE").map(|_| {
+                stillus_platform::WorkspaceLease::try_acquire(&root)
+                    .unwrap()
+                    .expect("old process must release its workspace before handoff")
+            });
             std::fs::write(root.join("started"), b"").unwrap();
         }
+    }
+
+    #[test]
+    fn restart_child_acquires_workspace_only_after_handoff() {
+        let root = crate::test_support::workspace("stillus-restart-lease");
+        let lease = stillus_platform::WorkspaceLease::try_acquire(&root)
+            .unwrap()
+            .unwrap();
+        let mut command = child_command(&root);
+        command.env("STILLUS_RESTART_LEASE", "1");
+        let pending = PendingRestart::spawn(command).unwrap();
+        wait_for(&root.join("waiting"));
+        assert!(!root.join("started").exists());
+        assert!(
+            stillus_platform::WorkspaceLease::try_acquire(&root)
+                .unwrap()
+                .is_none()
+        );
+        drop(lease);
+        pending.complete().unwrap();
+        wait_for(&root.join("started"));
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while stillus_platform::WorkspaceLease::try_acquire(&root)
+            .unwrap()
+            .is_none()
+        {
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

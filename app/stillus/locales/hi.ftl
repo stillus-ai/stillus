@@ -126,6 +126,7 @@ SelectedNotFolder = चयनित पथ कोई फ़ोल्डर न�
 OpenWorkspaceFailed = कार्यस्थान नहीं खुल सका
 SearchUnavailable = खोज सूचकांक अनुपलब्ध है
 WorkspaceAlreadyOpen = यह कार्यक्षेत्र पहले से ही खुला है
+WorkspaceInUse = यह कार्यक्षेत्र पहले से दूसरी Stillus विंडो में खुला है
 SaveSettingsFailed = वर्तमान कार्यस्थान सेटिंग सहेजी नहीं जा सकी: { $error }
 RememberWorkspaceFailed = फ़ोल्डर खोला गया, लेकिन अगले लॉन्च के लिए याद नहीं रखा जा सका: { $error }
 WorkspaceChanged = कार्यक्षेत्र बदल गया. इसकी सेटिंग्स लोड कर दी गई हैं.

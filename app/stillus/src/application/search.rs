@@ -73,10 +73,12 @@ pub(crate) enum SearchEvent {
 pub(crate) fn spawn_search_worker(
     workspace: PathBuf,
     initially_suspended: bool,
+    lease: std::sync::Arc<stillus_platform::WorkspaceLease>,
 ) -> SearchWorkerParts {
     let (command_sender, command_receiver) = mpsc::sync_channel(64);
     let (event_sender, event_receiver) = mpsc::sync_channel(64);
     let worker = thread::spawn(move || {
+        let _lease = lease;
         search_worker(
             workspace,
             command_receiver,

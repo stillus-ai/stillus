@@ -126,6 +126,7 @@ SelectedNotFolder = 所选路径不是文件夹
 OpenWorkspaceFailed = 无法打开工作区
 SearchUnavailable = 搜索索引不可用
 WorkspaceAlreadyOpen = 该工作区已经打开
+WorkspaceInUse = 此工作区已在另一个 Stillus 窗口中打开
 SaveSettingsFailed = 无法保存当前工作区设置：{ $error }
 RememberWorkspaceFailed = 文件夹已打开，但下次启动时无法记住：{ $error }
 WorkspaceChanged = 工作空间发生了变化。其设置已加载。

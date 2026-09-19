@@ -141,6 +141,7 @@ impl From<usize> for DocumentTarget {
 pub enum CoreError {
     Engine(EngineError),
     Workspace(String),
+    WorkspaceBusy,
     NoteUnavailable(String),
     UnsavedChanges,
     Save(SaveError),
@@ -159,6 +160,9 @@ impl fmt::Display for CoreError {
         match self {
             Self::Engine(error) => write!(formatter, "engine error: {error}"),
             Self::Workspace(message) => write!(formatter, "workspace error: {message}"),
+            Self::WorkspaceBusy => {
+                formatter.write_str("workspace is already open in another Stillus window")
+            }
             Self::NoteUnavailable(message) => write!(formatter, "note unavailable: {message}"),
             Self::UnsavedChanges => {
                 formatter.write_str("current note has unsaved changes or an active save")

@@ -17,6 +17,8 @@ use serde::{Deserialize, Serialize};
 pub mod credentials;
 pub mod diagnostics;
 mod operation_lock;
+mod workspace_lease;
+pub use workspace_lease::WorkspaceLease;
 #[cfg(any(windows, test))]
 mod replace_retry;
 #[cfg(any(windows, test))]

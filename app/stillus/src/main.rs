@@ -257,7 +257,7 @@ fn main() -> Result<(), LaunchError> {
     let (model, store, settings, startup_prompt, opened_path) = match startup {
         StartupWorkspace::Open(workspace) => {
             let application::preferences::Load {
-                store,
+                mut store,
                 settings,
                 diagnostic,
             } = UiPreferences::load(&workspace);
@@ -277,6 +277,11 @@ fn main() -> Result<(), LaunchError> {
                 settings.selected_rss.as_deref(),
             );
             model.restore_chat_selection(settings.selected_chat.as_deref());
+            if let Some(opened) = model.workspace.as_ref() {
+                store.bind_lease(&opened.lease());
+            } else {
+                store = UiPreferences::unbound();
+            }
             (model, store, settings, None, Some(workspace))
         }
         StartupWorkspace::Choose(prompt) => (

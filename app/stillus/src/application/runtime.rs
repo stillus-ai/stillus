@@ -950,24 +950,48 @@ impl Application {
         restored_external: Option<&Path>,
         restored_rss: Option<&str>,
     ) -> Self {
+        Self::load_restoring_workspace(
+            path,
+            WorkspaceSession::open(path),
+            restored_note,
+            restored_external_files,
+            restored_external,
+            restored_rss,
+        )
+    }
+
+    fn load_restoring_workspace(
+        path: &Path,
+        workspace_result: Result<WorkspaceSession, CoreError>,
+        restored_note: Option<&Path>,
+        restored_external_files: &[PersistedExternalFile],
+        restored_external: Option<&Path>,
+        restored_rss: Option<&str>,
+    ) -> Self {
+        if let Err(error) = workspace_result {
+            let blocked = matches!(&error, CoreError::PasswordChange(_))
+                || matches!(&error, CoreError::Security(error) if error.blocks_workspace());
+            let mut app = Self::unloaded();
+            app.error = Some(workspace_open_error(error));
+            app.blocked_password_change_workspace = blocked.then(|| path.to_owned());
+            return app;
+        }
         let (save_sender, save_receiver) = mpsc::sync_channel(1);
         let (secure_sender, secure_receiver) = mpsc::sync_channel(32);
-        let workspace_result = WorkspaceSession::open(path);
-        let password_change_blocked = match &workspace_result {
-            Err(CoreError::PasswordChange(_)) => true,
-            Err(CoreError::Security(error)) => error.blocks_workspace(),
-            _ => false,
-        };
-        let search_suspended = password_change_blocked
-            || workspace_result
-                .as_ref()
-                .ok()
-                .is_some_and(|workspace| workspace.integrity_failure().is_some());
+        let search_suspended = workspace_result
+            .as_ref()
+            .expect("open succeeded")
+            .integrity_failure()
+            .is_some();
         let SearchWorkerParts {
             sender: search_sender,
             receiver: search_receiver,
             worker: search_worker,
-        } = spawn_search_worker(path.to_path_buf(), search_suspended);
+        } = spawn_search_worker(
+            path.to_path_buf(),
+            search_suspended,
+            workspace_result.as_ref().expect("open succeeded").lease(),
+        );
         let clock: std::sync::Arc<dyn Clock> = std::sync::Arc::new(SystemClock(Instant::now()));
         match workspace_result {
             Ok(mut workspace) => {
@@ -1114,73 +1138,7 @@ impl Application {
                     chats: None,
                 }
             }
-            Err(error) => Self {
-                workspace: WorkspaceSlot(None),
-
-                error: Some(UiText::Failure {
-                    details: error.to_string(),
-                }),
-                clock,
-                effects: Vec::new(),
-                state_dirty: false,
-                preferences_projection: None,
-                workspace_loader: None,
-                workspace_executor: std::sync::Arc::new(prepare_workspace_load),
-                unloaded_operation: None,
-                workspace_loaded: None,
-                external_deadline: 1000,
-                preferences: None,
-                api: super::api::ApiState::default(),
-                global: None,
-                save_sender,
-                save_receiver,
-                save_worker_active: false,
-                secure_sender,
-                secure_receiver,
-                secure_worker_active: false,
-                secure_operation_id: None,
-                secure_progress: None,
-                pending_password_change: None,
-                password_change_error: None,
-                password_change_result: None,
-                blocked_password_change_workspace: password_change_blocked
-                    .then(|| path.to_path_buf()),
-                secure_ui_operation: None,
-
-                pending_note_path: None,
-                pending_note_action: None,
-                pending_rss_open: None,
-                close_after_save: false,
-                pending_note_creation: None,
-                note_creation_focus_pending: false,
-                pending_external_target: None,
-                pending_external_close: None,
-                pending_security_action: None,
-                unlock_request: None,
-                search_sender,
-                search_worker: Some(search_worker),
-                search_receiver,
-                search_security_operation: None,
-                search_operation_generation: 0,
-                search_ready: false,
-                search_indexing: true,
-                search_error: None,
-                search_query_generation: 0,
-                search_query: String::new(),
-                search_results_generation: None,
-                search_results: Vec::new(),
-                rss_session: RSS_UI_SESSION.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
-
-                rss_status: BTreeMap::new(),
-                rss_errors: BTreeMap::new(),
-                rss_completed: BTreeMap::new(),
-                rss_saves: BTreeMap::new(),
-                rss_save_sequence: 0,
-                expanded_rss_entry: None,
-                rss_refreshing: BTreeSet::new(),
-                selected_rss_entry: None,
-                chats: None,
-            },
+            Err(_) => unreachable!("open errors returned before spawning workers"),
         }
     }
 
@@ -1485,6 +1443,17 @@ impl Application {
             return false;
         }
         self.request_search_worker_shutdown();
+        if let Some(preferences) = &self.preferences {
+            let mut store = super::preferences::Preferences::load(&path).store;
+            store.bind_lease(
+                &replacement
+                    .workspace
+                    .as_ref()
+                    .expect("recovery opened workspace")
+                    .lease(),
+            );
+            *preferences.borrow_mut() = store;
+        }
         replacement.global = self.global.clone();
         replacement.preferences = self.preferences.clone();
         *self = replacement;
@@ -1506,7 +1475,12 @@ impl Application {
         self.secure_ui_operation = Some(operation);
         self.error = None;
         let sender = self.secure_sender.clone();
-        application::security::start(job, sender);
+        let lease = self
+            .workspace
+            .as_ref()
+            .expect("secure job owns a workspace")
+            .lease();
+        application::security::start(job, sender, lease);
         true
     }
 
@@ -3750,7 +3724,12 @@ impl Application {
             }
         }
         if let Some(job) = job {
-            persistence::start(job, self.save_sender.clone());
+            let lease = self
+                .workspace
+                .as_ref()
+                .expect("save owns a workspace")
+                .lease();
+            persistence::start(job, self.save_sender.clone(), lease);
         }
         changed
     }
@@ -3938,6 +3917,13 @@ impl Application {
             search::shutdown(&self.search_sender, &self.search_receiver, worker)
                 .map_err(|_| "search worker failed".to_owned())?;
         }
+        if let Some(preferences) = &self.preferences {
+            preferences
+                .borrow_mut()
+                .flush()
+                .map_err(|error| error.to_string())?;
+            *preferences.borrow_mut() = super::preferences::Preferences::unbound();
+        }
         self.workspace.0.take();
         Ok(())
     }
@@ -3950,6 +3936,102 @@ pub(crate) fn category_path_is_same_or_descendant(candidate: &str, ancestor: &st
     let candidate = category_path_segments(candidate);
     let ancestor = category_path_segments(ancestor);
     candidate.len() > ancestor.len() && candidate.starts_with(&ancestor)
+}
+
+#[cfg(test)]
+mod workspace_lease_tests {
+    use super::*;
+    use std::{fs, time::Duration};
+
+    #[test]
+    fn workspace_lease_busy_open_has_no_workers_or_workspace_writes() {
+        let root = crate::test_support::workspace("stillus-lease-busy-app");
+        stillus_core::initialize_workspace(&root).unwrap();
+        let lease = WorkspaceSession::acquire(&root).unwrap();
+        let mut app = Application::load(&root);
+        assert!(app.workspace.is_none());
+        assert!(app.search_worker.is_none());
+        assert!(app.chats.is_none());
+        assert_eq!(app.error, Some(msg!(WorkspaceInUse).into()));
+        app.poll();
+        app.shutdown().unwrap();
+        assert!(!root.join(".stillus").exists());
+        assert!(!root.join(".stillus_security").exists());
+        assert!(!root.join(".stillus-operation.lock").exists());
+        // Initialization must also reject an occupied root before creating notes.
+        fs::remove_dir(root.join("notes")).unwrap();
+        assert!(matches!(
+            prepare_workspace_load(root.clone(), true),
+            Err(WorkspaceLoadError {
+                reason: super::super::actions::ActionError::Busy,
+                ..
+            })
+        ));
+        assert!(!root.join("notes").exists());
+        drop(lease);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn workspace_lease_two_windows_and_reopen_after_shutdown() {
+        let root = crate::test_support::workspace("stillus-lease-windows");
+        stillus_core::initialize_workspace(&root).unwrap();
+        let mut first = Application::load(&root);
+        let mut second = Application::load(&root.join("."));
+        assert!(first.workspace.is_some());
+        assert!(second.workspace.is_none());
+        second.shutdown().unwrap();
+        first.shutdown().unwrap();
+        let mut reopened = Application::load(&root);
+        assert!(reopened.workspace.is_some());
+        reopened.shutdown().unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn workspace_lease_persistence_keeps_ownership_after_session_drop() {
+        let root = crate::test_support::workspace("stillus-lease-worker");
+        stillus_core::initialize_workspace(&root).unwrap();
+        fs::write(root.join("notes/Note.md"), "# Note\nbody\n").unwrap();
+        let mut workspace = WorkspaceSession::open(&root).unwrap();
+        workspace.open_note(0).unwrap();
+        workspace
+            .apply_selected_at(EditorCommand::Insert("pending ".into()), 0)
+            .unwrap();
+        let job = workspace
+            .begin_persistence(RECOVERY_DEBOUNCE_MS, "2026-09-19T00:00:00Z".into())
+            .unwrap()
+            .unwrap();
+        let transaction = stillus_platform::OperationLock::directory(&root).unwrap();
+        let (send, receive) = mpsc::sync_channel(1);
+        persistence::start(job, send, workspace.lease());
+        drop(workspace);
+        assert!(matches!(
+            WorkspaceSession::acquire(&root),
+            Err(CoreError::WorkspaceBusy)
+        ));
+        assert!(receive.recv_timeout(Duration::from_millis(25)).is_err());
+        drop(transaction);
+        receive.recv_timeout(Duration::from_secs(5)).unwrap();
+        let reopened = WorkspaceSession::open(&root).unwrap();
+        assert!(reopened.notes()[0].recovery_available);
+        drop(reopened);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn workspace_lease_closed_preferences_cannot_write() {
+        let root = crate::test_support::workspace("stillus-lease-preferences");
+        stillus_core::initialize_workspace(&root).unwrap();
+        let workspace = WorkspaceSession::open(&root).unwrap();
+        let mut preferences = super::super::preferences::Preferences::load(&root).store;
+        preferences.bind_lease(&workspace.lease());
+        preferences.flush().unwrap();
+        drop(workspace);
+        assert!(preferences.flush().is_err());
+        assert!(WorkspaceSession::open(&root).is_ok());
+        fs::remove_dir_all(root).unwrap();
+    }
 }
 
 impl Application {
@@ -4090,7 +4172,29 @@ pub(crate) struct PreparedWorkspaceSwitch {
     pub(crate) diagnostic: Option<String>,
 }
 
+fn workspace_open_error(error: CoreError) -> UiText {
+    match error {
+        CoreError::WorkspaceBusy => msg!(WorkspaceInUse).into(),
+        error => UiText::Failure {
+            details: error.to_string(),
+        },
+    }
+}
+
+#[cfg(test)]
 pub(crate) fn prepare_workspace_switch(path: &Path) -> Result<PreparedWorkspaceSwitch, UiText> {
+    if !path.is_absolute() {
+        return Err(msg!(EnterAbsoluteWorkspace).into());
+    }
+    WorkspaceSession::validate_notes(path).map_err(workspace_open_error)?;
+    let lease = WorkspaceSession::acquire(path).map_err(workspace_open_error)?;
+    prepare_workspace_switch_leased(path, lease)
+}
+
+fn prepare_workspace_switch_leased(
+    path: &Path,
+    lease: std::sync::Arc<stillus_platform::WorkspaceLease>,
+) -> Result<PreparedWorkspaceSwitch, UiText> {
     if !path.is_absolute() {
         return Err(msg!(EnterAbsoluteWorkspace).into());
     }
@@ -4101,17 +4205,19 @@ pub(crate) fn prepare_workspace_switch(path: &Path) -> Result<PreparedWorkspaceS
         return Err(msg!(SelectedNotFolder).into());
     }
     let application::preferences::Load {
-        store,
+        mut store,
         settings,
         diagnostic,
     } = super::preferences::Preferences::load(&canonical_path);
+    store.bind_lease(&lease);
     let restored_note = settings
         .selected_note
         .as_deref()
         .and_then(|path| super::settings::resolve_note_path(&canonical_path, path));
     let selected_external = settings.selected_external.as_deref().map(Path::new);
-    let mut model = Application::load_restoring_state(
+    let mut model = Application::load_restoring_workspace(
         &canonical_path,
+        WorkspaceSession::open_leased(&canonical_path, lease),
         restored_note.as_deref(),
         &settings.external_files,
         selected_external,
@@ -4140,9 +4246,6 @@ pub(crate) struct WorkspaceChanged {
     pub settings: super::settings::UiSettings,
     pub diagnostic: Option<UiText>,
     pub changed: bool,
-}
-pub(crate) fn initialize_workspace(path: &Path) -> Result<(), CoreError> {
-    stillus_core::initialize_workspace(path)
 }
 impl Application {
     fn apply_workspace_switch(
@@ -4306,7 +4409,27 @@ pub(super) fn prepare_workspace_load(
     initialize: bool,
 ) -> Result<LoadedWorkspace, WorkspaceLoadError> {
     if initialize {
-        initialize_workspace(&path).map_err(|error| WorkspaceLoadError {
+        stillus_storage::initialize_workspace_root(&path).map_err(|error| WorkspaceLoadError {
+            message: msg!(CreateWorkspaceFailed, "error" => error.to_string()).into(),
+            reason: super::actions::ActionError::Failed(error.to_string()),
+        })?;
+    }
+    if !initialize {
+        WorkspaceSession::validate_notes(&path).map_err(|error| WorkspaceLoadError {
+            reason: super::actions::ActionError::Failed(error.to_string()),
+            message: workspace_open_error(error),
+        })?;
+    }
+    let lease = WorkspaceSession::acquire(&path).map_err(|error| WorkspaceLoadError {
+        reason: if matches!(error, CoreError::WorkspaceBusy) {
+            super::actions::ActionError::Busy
+        } else {
+            super::actions::ActionError::Failed(error.to_string())
+        },
+        message: workspace_open_error(error),
+    })?;
+    if initialize {
+        stillus_core::initialize_workspace(&path).map_err(|error| WorkspaceLoadError {
             message: msg!(CreateWorkspaceFailed, "error" => error.to_string()).into(),
             reason: error.into(),
         })?;
@@ -4317,7 +4440,7 @@ pub(super) fn prepare_workspace_load(
         store,
         settings,
         diagnostic,
-    } = prepare_workspace_switch(&path).map_err(|message| WorkspaceLoadError {
+    } = prepare_workspace_switch_leased(&path, lease).map_err(|message| WorkspaceLoadError {
         reason: super::actions::ActionError::Failed("workspace load failed".into()),
         message,
     })?;

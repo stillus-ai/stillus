@@ -126,6 +126,7 @@ SelectedNotFolder = 選択したパスはフォルダーではありません
 OpenWorkspaceFailed = ワークスペースを開けませんでした
 SearchUnavailable = 検索インデックスが使用できません
 WorkspaceAlreadyOpen = このワークスペースはすでに開いています
+WorkspaceInUse = このワークスペースは別のStillusウィンドウで既に開かれています
 SaveSettingsFailed = 現在のワークスペース設定を保存できませんでした: { $error }
 RememberWorkspaceFailed = フォルダーは開きましたが、次回の起動のために記憶できませんでした: { $error }
 WorkspaceChanged = ワークスペースが変更されました。設定がロードされました。

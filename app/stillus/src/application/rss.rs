@@ -73,11 +73,15 @@ pub(crate) struct Service {
     pub sender: SyncSender<Command>,
     pub receiver: Receiver<Snapshot>,
     alive: Arc<Mutex<bool>>,
+    worker: Option<thread::JoinHandle<()>>,
 }
 
 impl Drop for Service {
     fn drop(&mut self) {
         *self.alive.lock().expect("RSS session gate") = false;
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
     }
 }
 
@@ -86,19 +90,27 @@ enum Completion {
 }
 
 impl Service {
-    pub fn start(root: PathBuf) -> Self {
-        Self::with_executor(root, Arc::new(execute_rss_refresh))
+    pub fn start(root: PathBuf, lease: Arc<stillus_platform::WorkspaceLease>) -> Self {
+        Self::start_leased(root, Arc::new(execute_rss_refresh), lease)
     }
-    pub(crate) fn with_executor(root: PathBuf, executor: Executor) -> Self {
+    pub(super) fn start_leased(
+        root: PathBuf,
+        executor: Executor,
+        lease: Arc<stillus_platform::WorkspaceLease>,
+    ) -> Self {
         let (sender, commands) = mpsc::sync_channel(64);
         let (snapshots, receiver) = mpsc::sync_channel(1);
         let alive = Arc::new(Mutex::new(true));
         let gate = alive.clone();
-        thread::spawn(move || run_with_executor(root, commands, snapshots, gate, executor));
+        let worker = thread::spawn(move || {
+            let _lease = lease;
+            run_with_executor(root, commands, snapshots, gate, executor);
+        });
         Self {
             sender,
             receiver,
             alive,
+            worker: Some(worker),
         }
     }
 }
@@ -582,7 +594,14 @@ mod tests {
         let directory = root.join(".stillus/engines/rss");
         std::fs::rename(&directory, root.join("saved_rss")).unwrap();
         std::fs::write(directory, "blocks directory creation").unwrap();
-        let service = Service::start(root.clone());
+        let service = Service::start(
+            root.clone(),
+            Arc::new(
+                stillus_platform::WorkspaceLease::try_acquire(&root)
+                    .unwrap()
+                    .unwrap(),
+            ),
+        );
         service
             .sender
             .send(Command::Preferences(

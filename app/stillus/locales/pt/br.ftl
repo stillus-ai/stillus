@@ -126,6 +126,7 @@ SelectedNotFolder = O caminho selecionado não é uma pasta
 OpenWorkspaceFailed = Não foi possível abrir o espaço de trabalho
 SearchUnavailable = O índice de pesquisa não está disponível
 WorkspaceAlreadyOpen = Este espaço de trabalho já está aberto
+WorkspaceInUse = Este espaço de trabalho já está aberto em outra janela do Stillus
 SaveSettingsFailed = Não foi possível salvar as configurações atuais do espaço de trabalho: { $error }
 RememberWorkspaceFailed = Pasta aberta, mas não pôde ser lembrada para o próximo lançamento: { $error }
 WorkspaceChanged = Espaço de trabalho alterado. Suas configurações foram carregadas.

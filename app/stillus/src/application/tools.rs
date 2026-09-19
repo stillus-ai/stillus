@@ -469,9 +469,21 @@ mod tests {
     };
     use stillus_core::{EditorCommand, initialize_workspace};
     static NEXT: AtomicU64 = AtomicU64::new(0);
+    struct TestWorkspace(Option<Workspace>);
+    impl std::ops::Deref for TestWorkspace {
+        type Target = Workspace;
+        fn deref(&self) -> &Workspace {
+            self.0.as_ref().unwrap()
+        }
+    }
+    impl std::ops::DerefMut for TestWorkspace {
+        fn deref_mut(&mut self) -> &mut Workspace {
+            self.0.as_mut().unwrap()
+        }
+    }
     struct Fixture {
         root: PathBuf,
-        workspace: Workspace,
+        workspace: TestWorkspace,
     }
     impl Fixture {
         fn new() -> Self {
@@ -492,7 +504,10 @@ mod tests {
             )
             .unwrap();
             let workspace = Workspace::open(&root).unwrap();
-            Self { root, workspace }
+            Self {
+                root,
+                workspace: TestWorkspace(Some(workspace)),
+            }
         }
         fn id(&mut self, title: &str) -> String {
             self.workspace
@@ -505,6 +520,7 @@ mod tests {
     }
     impl Drop for Fixture {
         fn drop(&mut self) {
+            self.workspace.0.take();
             fs::remove_dir_all(&self.root).unwrap();
         }
     }
@@ -527,7 +543,8 @@ mod tests {
 
     #[test]
     fn ui_adapter_and_tools_apply_the_same_document_edit() {
-        let left = Fixture::new();
+        let mut left = Fixture::new();
+        left.workspace.0.take();
         let mut right = Fixture::new();
         let mut ui = crate::AppModel::load(&left.root);
         let index = ui
@@ -622,6 +639,7 @@ mod tests {
             .unwrap(),
             json!("Cancelled")
         );
+        f.workspace.0.take();
         assert_eq!(
             call(
                 &mut Workspace::open(&f.root).unwrap(),
@@ -695,6 +713,7 @@ mod tests {
             .unwrap()
             .unwrap();
         f.workspace.finish_persistence(recovery.execute()).unwrap();
+        f.workspace.0.take();
         let mut reopened = Workspace::open(&f.root).unwrap();
         let index = reopened
             .notes()
@@ -831,6 +850,7 @@ mod tests {
             ),
             Err(ActionError::Conflict)
         );
+        f.workspace.0.take();
         let mut fresh = Workspace::open(&f.root).unwrap();
         assert_eq!(
             call(&mut fresh, "notes/read", json!({"id":id}), 0),
@@ -841,6 +861,7 @@ mod tests {
             "---\ntitle: Protected\nstillus_encryption: age-body-v1\n---\n\nnot plaintext\n",
         )
         .unwrap();
+        drop(fresh);
         let mut protected = Workspace::open(&f.root).unwrap();
         let id = protected
             .targets()

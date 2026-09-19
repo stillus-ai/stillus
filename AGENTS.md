@@ -20,6 +20,10 @@
   front matter in `<workspace>/notes/`. Preserve unknown fields, files, and
   directories.
 - Opening or scanning a workspace must not rewrite notes.
+- Application workspace sessions are exclusive on one computer through the
+  OS-held `.stillus-session.lock`. Acquire it before recovery or worker startup,
+  retain it until outstanding writes finish, and never unlink it or expire it
+  using timestamps. Low-level file operations still enforce version conflicts.
 - Saves and metadata operations must preserve atomic/no-overwrite,
   conflict/recovery, and bounded-memory guarantees.
 - Protected notes leave YAML and filenames readable while storing the Markdown

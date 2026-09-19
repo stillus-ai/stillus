@@ -186,7 +186,22 @@ Project-owned Rust forbids unsafe code. This does not mean all transitive
 dependencies are safe-only or free of defects. See the dated dependency
 warnings and native release limitations in the [development guide](development.md).
 
-## Concurrent local windows
+## Workspace ownership and concurrent file operations
+
+A workspace can be open in only one Stillus window/process on the same computer.
+Before recovery, scanning or starting background workers, the application takes
+an exclusive OS lock on the empty `<workspace>/.stillus-session.lock` file.
+A second window reports that the workspace is already open and does not start
+workers or write workspace settings. Different workspaces remain independent.
+
+The session and its outstanding writers retain the lock until they finish.
+Normal close, workspace switching and update restart release it after writes
+stop. A crash or forced process termination releases the OS lock automatically;
+the empty marker stays and is reused on the next launch. There is no timestamp
+expiry or forced takeover: a live but suspended process still owns its workspace.
+Do not delete this marker while Stillus is running. Older Stillus versions and
+external editors do not honor the session lease, so file-version conflict checks
+remain necessary. The lease does not coordinate copies on other computers.
 
 A workspace root (or an external file's containing directory) can contain an
 empty `.stillus-operation.lock`. It coordinates short filesystem operations;

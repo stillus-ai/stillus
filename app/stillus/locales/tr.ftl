@@ -126,6 +126,7 @@ SelectedNotFolder = Seçilen yol bir klasör değil
 OpenWorkspaceFailed = Çalışma alanı açılamadı
 SearchUnavailable = Arama dizini kullanılamıyor
 WorkspaceAlreadyOpen = Bu çalışma alanı zaten açık
+WorkspaceInUse = Bu çalışma alanı başka bir Stillus penceresinde zaten açık
 SaveSettingsFailed = Mevcut çalışma alanı ayarları kaydedilemedi: { $error }
 RememberWorkspaceFailed = Klasör açıldı ancak bir sonraki başlatma için hatırlanamadı: { $error }
 WorkspaceChanged = Çalışma alanı değişti. Ayarları yüklendi.

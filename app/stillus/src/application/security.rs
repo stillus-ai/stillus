@@ -102,7 +102,11 @@ impl PendingSecurityAction {
     }
 }
 
-pub(crate) fn start(job: SecureJob, sender: SyncSender<SecureWorkerEvent>) {
+pub(crate) fn start(
+    job: SecureJob,
+    sender: SyncSender<SecureWorkerEvent>,
+    lease: std::sync::Arc<stillus_platform::WorkspaceLease>,
+) {
     std::thread::spawn(move || {
         #[cfg(feature = "test-utils")]
         if let Some(marker) = std::env::var_os("STILLUS_TEST_SECURE_GATE") {
@@ -115,6 +119,7 @@ pub(crate) fn start(job: SecureJob, sender: SyncSender<SecureWorkerEvent>) {
         let completion = job.execute_with_progress(|progress| {
             let _ = sender.try_send(SecureWorkerEvent::Progress(progress));
         });
+        drop(lease);
         let _ = sender.send(SecureWorkerEvent::Completed(Box::new(completion)));
     });
 }

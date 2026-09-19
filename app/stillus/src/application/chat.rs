@@ -392,6 +392,11 @@ impl Application {
         + Send
         + 'static,
     ) {
+        let lease = self
+            .workspace
+            .as_ref()
+            .expect("chat owns workspace")
+            .lease();
         let c = self.chats.as_mut().expect("initialized");
         let sender = c.io_send.clone();
         let store = c.store.clone();
@@ -408,6 +413,7 @@ impl Application {
                         )
                     });
             let items = writing.then(|| store.list().map_err(ActionError::from));
+            drop(lease);
             let _ = sender.send(IoCompletion {
                 operation: id,
                 result,
@@ -1337,7 +1343,13 @@ impl Application {
             let (send, completion) = mpsc::sync_channel(1);
             let (update_send, updates) = mpsc::sync_channel(2);
             let credentials = c.credentials.clone();
+            let lease = self
+                .workspace
+                .as_ref()
+                .expect("chat owns workspace")
+                .lease();
             let worker = thread::spawn(move || {
+                let _lease = lease;
                 let result = run_worker(
                     &store,
                     &worker_start,

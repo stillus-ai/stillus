@@ -95,7 +95,7 @@ pub struct WorkspaceScan {
 
 pub fn initialize_workspace(workspace: impl AsRef<Path>) -> io::Result<()> {
     let workspace = workspace.as_ref();
-    ensure_workspace_directory(workspace)?;
+    initialize_workspace_root(workspace)?;
     let notes = workspace.join("notes");
     match fs::symlink_metadata(&notes) {
         Ok(metadata) if metadata.file_type().is_dir() => {}
@@ -117,7 +117,9 @@ pub fn initialize_workspace(workspace: impl AsRef<Path>) -> io::Result<()> {
     validate_real_notes_directory(&notes)
 }
 
-fn ensure_workspace_directory(workspace: &Path) -> io::Result<()> {
+/// Create or validate only the root, allowing the application to acquire its
+/// session lease before initializing any workspace contents.
+pub fn initialize_workspace_root(workspace: &Path) -> io::Result<()> {
     match fs::symlink_metadata(workspace) {
         Ok(metadata) if metadata.file_type().is_dir() => Ok(()),
         Ok(_) => Err(io::Error::new(
@@ -147,7 +149,7 @@ fn ensure_workspace_directory(workspace: &Path) -> io::Result<()> {
             match fs::create_dir(workspace) {
                 Ok(()) => sync_directory_io(parent),
                 Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
-                    ensure_workspace_directory(workspace)
+                    initialize_workspace_root(workspace)
                 }
                 Err(error) => Err(error),
             }

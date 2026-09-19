@@ -84,6 +84,11 @@ After successfully opening a workspace, Stillus remembers its absolute path in
 workspace. See [Storage and security](storage.md) for what to preserve when
 moving or backing up a workspace.
 
+Each workspace can be open in only one Stillus window at a time on this computer.
+If it is already open, close its existing window before opening it again.
+After a crash or forced quit, you can reopen it normally; do not delete lock
+files. Different workspaces can be open independently.
+
 ## Notes and organization
 
 Notes use UTF-8 Markdown with YAML front matter compatible with Notable.

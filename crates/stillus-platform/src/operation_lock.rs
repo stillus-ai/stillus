@@ -139,7 +139,7 @@ impl OperationLock {
 }
 
 #[cfg(unix)]
-fn prepare_marker(path: &Path) -> io::Result<()> {
+pub(super) fn prepare_marker(path: &Path) -> io::Result<()> {
     match super::create_private_file(path) {
         Ok(file) => {
             drop(file);
@@ -151,7 +151,7 @@ fn prepare_marker(path: &Path) -> io::Result<()> {
 }
 
 #[cfg(windows)]
-fn prepare_marker(path: &Path) -> io::Result<()> {
+pub(super) fn prepare_marker(path: &Path) -> io::Result<()> {
     use std::sync::atomic::{AtomicU64, Ordering};
     static NEXT: AtomicU64 = AtomicU64::new(0);
 

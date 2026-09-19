@@ -111,6 +111,8 @@ pub(crate) struct Workspace {
     pub(super) operations: super::tools::Operations,
     rss_service: Option<super::rss::Service>,
     pub(super) search_sender: Option<std::sync::mpsc::SyncSender<super::search::SearchCommand>>,
+    // Dropped after the RSS service has closed its publication gate.
+    lease: std::sync::Arc<stillus_platform::WorkspaceLease>,
 }
 
 #[allow(
@@ -118,7 +120,39 @@ pub(crate) struct Workspace {
     reason = "Typed commands are shared with the upcoming built-in assistant."
 )]
 impl Workspace {
+    pub(super) fn validate_notes(root: &Path) -> Result<(), CoreError> {
+        let metadata = std::fs::symlink_metadata(root.join("notes"))
+            .map_err(|error| CoreError::Workspace(error.to_string()))?;
+        if !metadata.file_type().is_dir() {
+            return Err(CoreError::Workspace(
+                "workspace requires a real notes directory".into(),
+            ));
+        }
+        Ok(())
+    }
+    pub(crate) fn acquire(
+        root: &Path,
+    ) -> Result<std::sync::Arc<stillus_platform::WorkspaceLease>, CoreError> {
+        stillus_platform::WorkspaceLease::try_acquire(root)
+            .map_err(|error| CoreError::Workspace(error.to_string()))?
+            .map(std::sync::Arc::new)
+            .ok_or(CoreError::WorkspaceBusy)
+    }
+    pub(crate) fn lease(&self) -> std::sync::Arc<stillus_platform::WorkspaceLease> {
+        self.lease.clone()
+    }
     pub(crate) fn open(root: impl AsRef<Path>) -> Result<Self, CoreError> {
+        Self::validate_notes(root.as_ref())?;
+        let lease = Self::acquire(root.as_ref())?;
+        Self::open_leased(root.as_ref(), lease)
+    }
+    pub(super) fn open_leased(
+        root: &Path,
+        lease: std::sync::Arc<stillus_platform::WorkspaceLease>,
+    ) -> Result<Self, CoreError> {
+        let root = root
+            .canonicalize()
+            .map_err(|error| CoreError::Workspace(error.to_string()))?;
         Ok(Self {
             core: stillus_core::WorkspaceSession::open(root)?,
             session: NEXT_SESSION.fetch_add(1, Ordering::Relaxed),
@@ -131,6 +165,7 @@ impl Workspace {
             operations: super::tools::Operations::default(),
             rss_service: None,
             search_sender: None,
+            lease,
         })
     }
     pub(crate) fn bind_search(
@@ -157,7 +192,7 @@ impl Workspace {
     }
     pub(crate) fn ensure_rss(&mut self) {
         if self.rss_service.is_none() {
-            self.rss_service = Some(super::rss::Service::start(self.root().into()));
+            self.rss_service = Some(super::rss::Service::start(self.root().into(), self.lease()));
         }
     }
     pub(crate) fn send_rss(
@@ -1307,9 +1342,10 @@ impl Workspace {
 impl Workspace {
     #[cfg(test)]
     pub(super) fn set_rss_executor(&mut self, executor: super::rss::Executor) {
-        self.rss_service = Some(super::rss::Service::with_executor(
+        self.rss_service = Some(super::rss::Service::start_leased(
             self.root().into(),
             executor,
+            self.lease(),
         ));
     }
 }

@@ -126,6 +126,7 @@ SelectedNotFolder = Jalur yang dipilih bukanlah folder
 OpenWorkspaceFailed = Tidak dapat membuka ruang kerja
 SearchUnavailable = Indeks pencarian tidak tersedia
 WorkspaceAlreadyOpen = Ruang kerja ini sudah terbuka
+WorkspaceInUse = Ruang kerja ini sudah terbuka di jendela Stillus lain
 SaveSettingsFailed = Tidak dapat menyimpan pengaturan ruang kerja saat ini: { $error }
 RememberWorkspaceFailed = Folder dibuka, namun tidak dapat diingat untuk peluncuran berikutnya: { $error }
 WorkspaceChanged = Ruang kerja berubah. Pengaturannya telah dimuat.

@@ -126,6 +126,7 @@ SelectedNotFolder = The selected path is not a folder
 OpenWorkspaceFailed = Could not open the workspace
 SearchUnavailable = Search index is unavailable
 WorkspaceAlreadyOpen = This workspace is already open
+WorkspaceInUse = This workspace is already open in another Stillus window
 SaveSettingsFailed = Could not save the current workspace settings: { $error }
 RememberWorkspaceFailed = Folder opened, but could not be remembered for next launch: { $error }
 WorkspaceChanged = Workspace changed. Its settings have been loaded.

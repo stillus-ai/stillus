@@ -171,6 +171,11 @@ test-editor:
 test-core:
 	$(RUN) cargo test -p stillus-core
 
+.PHONY: test-workspace-lease
+test-workspace-lease:
+	$(RUN) cargo test -p stillus-platform workspace_lease
+	$(RUN) python3 -B tools/test_workspace_lease.py
+
 test-recovery:
 	$(RUN) cargo test -p stillus-recovery
 

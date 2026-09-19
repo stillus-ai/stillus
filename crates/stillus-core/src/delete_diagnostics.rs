@@ -77,7 +77,7 @@ fn classify(error: &CoreError) -> (String, String) {
             NoteOperationError::PartialCommit { .. } => "Operation/PartialCommit",
             NoteOperationError::Save(_) => unreachable!(),
         },
-        CoreError::Workspace(_) => "Workspace",
+        CoreError::Workspace(_) | CoreError::WorkspaceBusy => "Workspace",
         CoreError::NoteUnavailable(_) => "NoteUnavailable",
         CoreError::UnsavedChanges => "UnsavedChanges",
         CoreError::Secure(_) => "Secure",

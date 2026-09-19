@@ -2741,6 +2741,27 @@ def workspace_scenario(driver: WindowDriver, workspace: Path) -> None:
     if (driver.home / ".stillus.cfg").exists():
         raise AcceptanceFailure("invalid workspace replaced global config")
 
+    # Hold the same OS lock as an independent Stillus process. Its permanent
+    # marker must not be mistaken for a stale lock after the owner releases it.
+    import fcntl
+    busy = create_workspace(driver.temporary_root, "occupied-workspace")
+    lock_path = busy / ".stillus-session.lock"
+    with os.fdopen(os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600), "r+") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        driver.start_app(busy, "workspace-in-use")
+        driver.wait_for_stable_frame("occupied-workspace error shell")
+        driver.close_app()
+        if (busy / ".stillus").exists() or list((busy / "notes").iterdir()):
+            raise AcceptanceFailure("occupied workspace started workers or wrote settings")
+        if global_config.exists():
+            raise AcceptanceFailure("occupied workspace replaced global config")
+    driver.start_app(busy, "workspace-released")
+    driver.click("create_menu")
+    driver.click("create_note")
+    wait_until("reopen with leftover lease marker", (busy / "notes" / "New note.md").is_file)
+    driver.close_app()
+    global_config.unlink()
+
     empty = create_workspace(driver.temporary_root, "empty-workspace")
     driver.start_app(empty, "empty")
     created = empty / "notes" / "New note.md"

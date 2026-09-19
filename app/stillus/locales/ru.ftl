@@ -126,6 +126,7 @@ SelectedNotFolder = Выбранный путь не является папко
 OpenWorkspaceFailed = Не удалось открыть рабочую папку
 SearchUnavailable = поисковый индекс недоступен
 WorkspaceAlreadyOpen = Эта рабочая папка уже открыта
+WorkspaceInUse = Рабочая область уже открыта в другом окне Stillus
 SaveSettingsFailed = Не удалось сохранить настройки текущей папки: { $error }
 RememberWorkspaceFailed = Папка открыта, но не сохранена для следующего запуска: { $error }
 WorkspaceChanged = Рабочая папка изменена. Её настройки загружены.

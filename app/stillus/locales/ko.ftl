@@ -126,6 +126,7 @@ SelectedNotFolder = 선택한 경로는 폴더가 아닙니다
 OpenWorkspaceFailed = 작업공간을 열 수 없습니다.
 SearchUnavailable = 검색 색인을 사용할 수 없습니다.
 WorkspaceAlreadyOpen = 이 작업공간은 이미 열려 있습니다.
+WorkspaceInUse = 이 작업 공간은 다른 Stillus 창에서 이미 열려 있습니다
 SaveSettingsFailed = 현재 작업공간 설정을 저장할 수 없습니다: { $error }
 RememberWorkspaceFailed = 폴더가 열렸지만 다음 실행을 위해 기억할 수 없습니다: { $error }
 WorkspaceChanged = 작업공간이 변경되었습니다. 해당 설정이 로드되었습니다.

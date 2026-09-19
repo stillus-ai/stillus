@@ -126,6 +126,7 @@ SelectedNotFolder = Der ausgewählte Pfad ist kein Ordner
 OpenWorkspaceFailed = Der Arbeitsbereich konnte nicht geöffnet werden
 SearchUnavailable = Der Suchindex ist nicht verfügbar
 WorkspaceAlreadyOpen = Dieser Arbeitsbereich ist bereits geöffnet
+WorkspaceInUse = Dieser Arbeitsbereich ist bereits in einem anderen Stillus-Fenster geöffnet
 SaveSettingsFailed = Die aktuellen Arbeitsbereichseinstellungen konnten nicht gespeichert werden: { $error }
 RememberWorkspaceFailed = Ordner geöffnet, konnte aber für den nächsten Start nicht gespeichert werden: { $error }
 WorkspaceChanged = Arbeitsbereich geändert. Seine Einstellungen wurden geladen.
