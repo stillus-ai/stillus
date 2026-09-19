@@ -8,6 +8,7 @@
 
 use std::collections::BTreeMap;
 use std::fs;
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -24,6 +25,7 @@ use stillus_search::SearchIndex;
 use stillus_storage::{EMPTY_NOTE_TITLE, NoteScanResult, create_note, scan_workspace};
 
 pub const MARKDOWN_ENGINE_ID: &str = "markdown";
+const UTF8_READ_BYTES: usize = 64 * 1024;
 
 #[derive(Default)]
 pub struct MarkdownEngineFactory;
@@ -202,13 +204,19 @@ impl FileEngine for MarkdownEngine {
             .ok_or_else(|| EngineError::Io("external file name is not valid UTF-8".to_owned()))?
             .to_owned();
         if matches!(availability, ItemAvailability::Ready) {
-            match fs::read(&normalized) {
-                Ok(bytes) => {
-                    std::str::from_utf8(&bytes).map_err(|error| {
-                        EngineError::Io(format!("external file is not valid UTF-8: {error}"))
-                    })?;
+            let validation = fs::File::open(&normalized)
+                .map_err(ExternalUtf8Error::Io)
+                .and_then(validate_external_utf8);
+            match validation {
+                Ok(()) => {}
+                Err(ExternalUtf8Error::Invalid { offset }) => {
+                    return Err(EngineError::Io(format!(
+                        "external file is not valid UTF-8 at byte {offset}"
+                    )));
                 }
-                Err(error) => availability = ItemAvailability::Unavailable(error.to_string()),
+                Err(ExternalUtf8Error::Io(error)) => {
+                    availability = ItemAvailability::Unavailable(error.to_string());
+                }
             }
         }
         let item_id = external_item_id(&normalized)?;
@@ -284,6 +292,52 @@ impl FileEngine for MarkdownEngine {
     fn resume(&mut self) {}
 
     fn security_rotated(&mut self) {}
+}
+
+#[derive(Debug)]
+enum ExternalUtf8Error {
+    Io(io::Error),
+    Invalid { offset: u64 },
+}
+
+/// Validate the entire file without retaining its contents. A UTF-8 character
+/// split across reads leaves at most three bytes at the start of the next block.
+fn validate_external_utf8(mut reader: impl Read) -> Result<(), ExternalUtf8Error> {
+    let mut buffer = [0_u8; UTF8_READ_BYTES];
+    let mut carry = 0;
+    let mut offset = 0_u64;
+    loop {
+        let read = match reader.read(&mut buffer[carry..]) {
+            Ok(read) => read,
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+            Err(error) => return Err(ExternalUtf8Error::Io(error)),
+        };
+        if read == 0 {
+            return if carry == 0 {
+                Ok(())
+            } else {
+                Err(ExternalUtf8Error::Invalid { offset })
+            };
+        }
+        let length = carry + read;
+        match std::str::from_utf8(&buffer[..length]) {
+            Ok(_) => {
+                offset += length as u64;
+                carry = 0;
+            }
+            Err(error) if error.error_len().is_none() => {
+                let valid = error.valid_up_to();
+                offset += valid as u64;
+                carry = length - valid;
+                buffer.copy_within(valid..length, 0);
+            }
+            Err(error) => {
+                return Err(ExternalUtf8Error::Invalid {
+                    offset: offset + error.valid_up_to() as u64,
+                });
+            }
+        }
+    }
 }
 
 fn normalize_absolute_path(path: &Path) -> Result<PathBuf, EngineError> {
@@ -507,6 +561,122 @@ mod tests {
         assert!(engine.open_external_file(&invalid).is_err());
         assert!(engine.open_external_file(&directory).is_err());
         assert!(engine.external_files().is_empty());
+    }
+
+    #[test]
+    fn external_utf8_accepts_characters_split_at_every_block_boundary() {
+        let workspace = TempDir::new().unwrap();
+        fs::create_dir(workspace.path().join("notes")).unwrap();
+        let path = workspace.path().join("unicode.txt");
+        let mut engine = MarkdownEngine::open(workspace.path()).unwrap();
+        for character in ["я", "界", "😀"] {
+            for split in 1..character.len() {
+                let content = format!("{}{character}tail", "a".repeat(UTF8_READ_BYTES - split));
+                fs::write(&path, &content).unwrap();
+                let summary = engine.open_external_file(&path).unwrap();
+                assert_eq!(summary.availability, ItemAvailability::Ready);
+                assert_eq!(fs::read_to_string(&path).unwrap(), content);
+            }
+        }
+        assert_eq!(engine.external_files().len(), 1);
+        validate_external_utf8(io::empty()).unwrap();
+        validate_external_utf8(io::repeat(b'a').take(UTF8_READ_BYTES as u64)).unwrap();
+    }
+
+    #[test]
+    fn external_utf8_rejects_invalid_and_truncated_sequences_after_the_first_block() {
+        let workspace = TempDir::new().unwrap();
+        fs::create_dir(workspace.path().join("notes")).unwrap();
+        let path = workspace.path().join("invalid.txt");
+        let mut engine = MarkdownEngine::open(workspace.path()).unwrap();
+        for (offset, suffix) in [
+            (UTF8_READ_BYTES + 7, &[0xff][..]),
+            (UTF8_READ_BYTES - 1, &[0xf0, 0x9f][..]),
+            (UTF8_READ_BYTES - 1, &[0xf0, b'a'][..]),
+            (UTF8_READ_BYTES + 7, &[0xe2, 0x82][..]),
+        ] {
+            let mut content = vec![b'a'; offset];
+            content.extend_from_slice(suffix);
+            assert!(matches!(
+                validate_external_utf8(content.as_slice()),
+                Err(ExternalUtf8Error::Invalid { offset: actual }) if actual == offset as u64
+            ));
+            fs::write(&path, &content).unwrap();
+            assert!(engine.open_external_file(&path).is_err());
+            assert!(engine.external_files().is_empty());
+        }
+    }
+
+    #[test]
+    fn external_utf8_retries_interruptions_and_accepts_short_reads() {
+        struct ShortReads<'a> {
+            bytes: &'a [u8],
+            interrupt: bool,
+        }
+        impl Read for ShortReads<'_> {
+            fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+                self.interrupt = !self.interrupt;
+                if self.interrupt {
+                    return Err(io::ErrorKind::Interrupted.into());
+                }
+                self.bytes.read(&mut buffer[..1])
+            }
+        }
+        validate_external_utf8(ShortReads {
+            bytes: "ASCII я界😀".as_bytes(),
+            interrupt: false,
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn external_utf8_preserves_read_errors_and_missing_files_remain_unavailable() {
+        struct FailingRead;
+        impl Read for FailingRead {
+            fn read(&mut self, _: &mut [u8]) -> io::Result<usize> {
+                Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "read failed",
+                ))
+            }
+        }
+        // A read error while a character is incomplete must stay an I/O error.
+        let input = io::Cursor::new([0xf0, 0x9f]).chain(FailingRead);
+        assert!(matches!(
+            validate_external_utf8(input),
+            Err(ExternalUtf8Error::Io(error)) if error.kind() == io::ErrorKind::PermissionDenied
+                && error.to_string() == "read failed"
+        ));
+        let workspace = TempDir::new().unwrap();
+        fs::create_dir(workspace.path().join("notes")).unwrap();
+        let mut engine = MarkdownEngine::open(workspace.path()).unwrap();
+        let summary = engine
+            .open_external_file(&workspace.path().join("missing.txt"))
+            .unwrap();
+        assert!(matches!(
+            summary.availability,
+            ItemAvailability::Unavailable(_)
+        ));
+        assert_eq!(engine.external_files().len(), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn external_large_file_attachment_is_streamed() {
+        let workspace = TempDir::new().unwrap();
+        fs::create_dir(workspace.path().join("notes")).unwrap();
+        let path = workspace.path().join("large.txt");
+        // Sparse zeros are valid UTF-8. This also runs under a 192 MiB container
+        // limit to catch accidental whole-file allocations in the attachment path.
+        let size = 1024 * 1024 * 1024;
+        fs::File::create(&path).unwrap().set_len(size).unwrap();
+        let mut engine = MarkdownEngine::open(workspace.path()).unwrap();
+        assert_eq!(
+            engine.open_external_file(&path).unwrap().availability,
+            ItemAvailability::Ready
+        );
+        assert_eq!(engine.external_files().len(), 1);
+        assert_eq!(fs::metadata(path).unwrap().len(), size);
     }
 
     #[cfg(unix)]
