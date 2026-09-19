@@ -26,7 +26,8 @@ use tantivy::{Index, IndexReader, IndexWriter, ReloadPolicy, Term};
 use unicode_normalization::UnicodeNormalization;
 use unicode_segmentation::UnicodeSegmentation;
 
-pub const INDEX_SCHEMA_VERSION: u32 = 1;
+// Version 1 may retain protected bodies in logically deleted documents.
+pub const INDEX_SCHEMA_VERSION: u32 = 2;
 pub const MAX_QUERY_CHARS: usize = 256;
 pub const MAX_RESULTS: usize = 50;
 pub const MAX_SNIPPET_CHARS: usize = 180;
@@ -34,7 +35,7 @@ const BODY_CHUNK_BYTES: usize = 64 * 1024;
 const BODY_OVERLAP_CHARS: usize = MAX_QUERY_CHARS - 1;
 const BODY_READ_BYTES: usize = BODY_CHUNK_BYTES - (MAX_QUERY_CHARS * 4);
 const WRITER_MEMORY_BYTES: usize = 20_000_000;
-const MANIFEST: &str = "STILLUS_SEARCH\nschema=1\n";
+const MANIFEST: &str = "STILLUS_SEARCH\nschema=2\n";
 const BODY_CANDIDATE_MULTIPLIER: usize = 12;
 const BODY_TOKENIZER: &str = "stillus_body_ngram3";
 static GENERATION_ID: AtomicU64 = AtomicU64::new(0);
@@ -140,20 +141,27 @@ impl SearchIndex {
     pub fn open_or_rebuild(workspace: impl AsRef<Path>) -> Result<Self, SearchError> {
         let workspace = workspace.as_ref().to_path_buf();
         validate_workspace(&workspace)?;
-        match Self::open_current(&workspace) {
+        let mut index = match Self::open_current(&workspace) {
             Ok(index) => Ok(index),
             Err(_) => Self::build_and_publish(&workspace, &BTreeSet::new(), PublishFault::None),
-        }
+        }?;
+        // A saved index can predate an external protection change. Reconcile
+        // before exposing it to queries, not only on the worker's next tick.
+        index.reconcile()?;
+        Ok(index)
     }
 
     pub fn rebuild(&mut self) -> Result<(), SearchError> {
         let replacement =
             Self::build_and_publish(&self.workspace, &self.excluded, PublishFault::None)?;
         *self = replacement;
-        Ok(())
+        cleanup_generations(&self.search_root, &self.generation_name, true)
     }
 
     pub fn reconcile(&mut self) -> Result<ReconcileReport, SearchError> {
+        // Retry incomplete physical cleanup even when publication succeeded
+        // before a cleanup error or process exit. Never remove other .stillus data.
+        cleanup_generations(&self.search_root, &self.generation_name, true)?;
         let (current, _scanned_files) =
             scan_catalog_incremental(&self.workspace, &self.catalog, &self.excluded)?;
         #[cfg(test)]
@@ -179,6 +187,22 @@ impl SearchIndex {
         if removed.is_empty() && changed.is_empty() {
             self.catalog = current;
             return Ok(ReconcileReport::default());
+        }
+
+        // Tombstones leave stored plaintext readable. Rebuild once for the whole
+        // batch when a changed note no longer permits body indexing. Removed
+        // entries may be protected notes that were renamed, trashed or damaged;
+        // their current catalog entries cannot tell us which, so purge them too.
+        if !removed.is_empty()
+            || changed
+                .iter()
+                .any(|path| current.get(path).is_some_and(|entry| !entry.index_body))
+        {
+            self.rebuild()?;
+            return Ok(ReconcileReport {
+                added_or_updated: changed.len(),
+                removed: removed.len(),
+            });
         }
 
         let mut writer = self.index.writer(WRITER_MEMORY_BYTES)?;
@@ -1082,7 +1106,9 @@ fn catalog_bytes(stamps: &BTreeMap<String, FileStamp>) -> Vec<u8> {
 fn read_catalog(generation_path: &Path) -> Result<BTreeMap<String, FileStamp>, SearchError> {
     let source = fs::read_to_string(generation_path.join("stillus.catalog"))?;
     let mut lines = source.lines();
-    if lines.next() != Some("STILLUS_SEARCH_CATALOG") || lines.next() != Some("schema=1") {
+    if lines.next() != Some("STILLUS_SEARCH_CATALOG")
+        || lines.next() != Some(format!("schema={INDEX_SCHEMA_VERSION}").as_str())
+    {
         return Err(SearchError::Corrupt("catalog header mismatch".to_owned()));
     }
     let mut stamps = BTreeMap::new();
@@ -1326,6 +1352,116 @@ mod tests {
         index.rebuild().unwrap();
         assert_eq!(fs::read(alpha).unwrap(), before);
         assert_eq!(index.query("searchable", 10).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn external_protection_physically_purges_plaintext_live_and_after_restart() {
+        for restart in [false, true] {
+            for mode in ["active", "deleted", "invalid", "renamed"] {
+                let workspace = TestWorkspace::new();
+                let note = workspace.note(
+                    "Secret.md",
+                    "Secret",
+                    &["Vault"],
+                    "externalbodysecretmarker",
+                );
+                workspace.note("Other.md", "Other", &[], "publicretainedmarker");
+                let mut index = SearchIndex::open_or_rebuild(&workspace.root).unwrap();
+                assert!(stored_body_contains(&index, "externalbodysecretmarker"));
+                let old_generation = index.generation_name().to_owned();
+                let password = MasterPassword::new("external protection password".into());
+                let body = b"# Secret\nexternalbodysecretmarker";
+                let mut encrypted =
+                    BodyEnvelopeWriter::new_for_test(Vec::new(), &password, body.len() as u64)
+                        .unwrap();
+                encrypted.write_all(body).unwrap();
+                let mut bytes = format!("---\ntitle: Secret\ntags: [Vault]\ndeleted: {}\nstillus_encryption: age-body-v1\n---\n", mode == "deleted").into_bytes();
+                bytes.extend(encrypted.finish().unwrap());
+                if mode == "invalid" {
+                    bytes.truncate(bytes.len() - 20);
+                }
+                fs::write(&note, &bytes).unwrap();
+                let note = if mode == "renamed" {
+                    let renamed = workspace.root.join("notes/Renamed.md");
+                    fs::rename(&note, &renamed).unwrap();
+                    renamed
+                } else {
+                    note
+                };
+                if restart {
+                    drop(index);
+                    index = SearchIndex::open_or_rebuild(&workspace.root).unwrap();
+                }
+                index.reconcile().unwrap();
+                assert!(
+                    index
+                        .query("externalbodysecretmarker", 10)
+                        .unwrap()
+                        .is_empty()
+                );
+                assert!(
+                    !stored_body_contains(&index, "externalbodysecretmarker"),
+                    "{restart}/{mode}"
+                );
+                assert!(!index.search_root().join(old_generation).exists());
+                assert_eq!(managed_generation_count(index.search_root()), 1);
+                assert_eq!(index.query("publicretainedmarker", 10).unwrap().len(), 1);
+                assert_eq!(fs::read(note).unwrap(), bytes);
+                let clean_generation = index.generation_name().to_owned();
+                assert_eq!(index.reconcile().unwrap(), ReconcileReport::default());
+                assert_eq!(index.generation_name(), clean_generation);
+            }
+        }
+    }
+
+    #[test]
+    fn external_protection_rebuilds_indexes_written_by_the_old_version() {
+        let workspace = TestWorkspace::new();
+        let note = workspace.note("Secret.md", "Secret", &[], "oldversionsecretmarker");
+        workspace.note("Other.md", "Other", &[], "publicretainedmarker");
+        let index = SearchIndex::open_or_rebuild(&workspace.root).unwrap();
+        let generation = index.search_root().join(index.generation_name());
+        // Simulate an old client recording new stamps after only logical deletion.
+        fs::write(
+            &note,
+            "---\ntitle: Secret\nstillus_encryption: age-body-v1\n---\ninvalid envelope",
+        )
+        .unwrap();
+        let stamps = BTreeMap::from([(
+            "notes/Secret.md".into(),
+            file_stamp(&fs::metadata(&note).unwrap()),
+        )]);
+        write_catalog_atomic(&generation, &stamps).unwrap();
+        fs::write(
+            generation.join("stillus.manifest"),
+            "STILLUS_SEARCH\nschema=1\n",
+        )
+        .unwrap();
+        drop(index);
+        let reopened = SearchIndex::open_or_rebuild(&workspace.root).unwrap();
+        assert!(!stored_body_contains(&reopened, "oldversionsecretmarker"));
+        assert!(!generation.exists());
+        assert_eq!(reopened.query("publicretainedmarker", 10).unwrap().len(), 1);
+    }
+
+    fn stored_body_contains(index: &SearchIndex, needle: &str) -> bool {
+        // Read stored documents including logically deleted ones. Searching or
+        // scanning compressed files for raw bytes cannot prove physical removal.
+        let searcher = index.reader.searcher();
+        for segment in searcher.segment_readers() {
+            let store = segment.get_store_reader(0).unwrap();
+            for id in 0..segment.max_doc() {
+                let document: TantivyDocument = store.get(id).unwrap();
+                if document
+                    .get_first(index.fields.display)
+                    .and_then(|v| v.as_str())
+                    .is_some_and(|body| body.contains(needle))
+                {
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     #[test]
