@@ -81,13 +81,26 @@ pub struct OperationLock {
 
 impl OperationLock {
     pub fn directory(directory: &Path) -> io::Result<Self> {
+        Self::acquire(directory, true).map(|lock| lock.expect("blocking lock acquired"))
+    }
+
+    /// Returns None if any operation owns the directory, including on this
+    /// thread. Opportunistic cleanup must never reenter an active transaction.
+    pub fn try_directory(directory: &Path) -> io::Result<Option<Self>> {
+        Self::acquire(directory, false)
+    }
+
+    fn acquire(directory: &Path, blocking: bool) -> io::Result<Option<Self>> {
         let directory = directory.canonicalize()?;
         super::validate_real_path(&directory)?;
-        HELD.with(|held| {
+        let acquired = HELD.with(|held| {
             let mut held = held.borrow_mut();
             if let Some((_, depth)) = held.get_mut(&directory) {
+                if !blocking {
+                    return Ok(false);
+                }
                 *depth += 1;
-                return Ok(());
+                return Ok(true);
             }
             let path = directory.join(".stillus-operation.lock");
             // Publish an empty restricted marker before opening a shared handle.
@@ -108,18 +121,25 @@ impl OperationLock {
             if file.metadata()?.len() != 0 || super::file_information(&file)?.links != 1 {
                 return Err(io::Error::other("invalid operation lock marker"));
             }
-            io_result(
+            let acquired = io_result(
                 Operation::Lock,
                 Stage::Acquire,
-                fs4::fs_std::FileExt::lock_exclusive(&file),
+                if blocking {
+                    fs4::fs_std::FileExt::lock_exclusive(&file).map(|()| true)
+                } else {
+                    fs4::fs_std::FileExt::try_lock_exclusive(&file)
+                },
             )?;
+            if !acquired {
+                return Ok(false);
+            }
             held.insert(directory.clone(), (file, 1));
-            Ok::<_, io::Error>(())
+            Ok::<_, io::Error>(true)
         })?;
-        Ok(Self {
+        Ok(acquired.then(|| Self {
             directory,
             thread: PhantomData,
-        })
+        }))
     }
 
     /// Workspace notes share their root lock with recovery and password changes;
@@ -312,6 +332,40 @@ mod tests {
             identity
         );
         assert_eq!(std::fs::read_dir(&root).unwrap().count(), 1);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn opportunistic_lock_skips_active_operations_and_preserves_the_marker() {
+        let root = std::env::temp_dir().join(format!(
+            "stillus-operation-opportunistic-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir(&root).unwrap();
+        let lock = OperationLock::directory(&root).unwrap();
+        assert!(OperationLock::try_directory(&root).unwrap().is_none());
+        let other = root.clone();
+        std::thread::spawn(move || {
+            assert!(OperationLock::try_directory(&other).unwrap().is_none());
+        })
+        .join()
+        .unwrap();
+        let marker = root.join(".stillus-operation.lock");
+        let identity = super::super::file_information(&File::open(&marker).unwrap())
+            .unwrap()
+            .identity;
+        drop(lock);
+        let acquired = OperationLock::try_directory(&root)
+            .unwrap()
+            .expect("released lock");
+        assert_eq!(
+            super::super::file_information(&File::open(&marker).unwrap())
+                .unwrap()
+                .identity,
+            identity
+        );
+        drop(acquired);
+        assert!(marker.exists());
         std::fs::remove_dir_all(root).unwrap();
     }
 

@@ -232,14 +232,20 @@ fn a_published_release_is_downloaded_verified_and_installed() {
     .unwrap();
     assert!(!seen.is_empty());
     assert_eq!(fs::read_to_string(&executable).unwrap(), "new executable");
-    // Nothing is left behind in the installation directory.
+    // The persistent OS lock marker is retained; deleting it could split the
+    // installation lock between processes. All temporary update files are gone.
     installation.cleanup();
     let hidden = fs::read_dir(installation.root())
         .unwrap()
         .flatten()
         .filter(|entry| entry.file_name().to_string_lossy().starts_with('.'))
-        .count();
-    assert_eq!(hidden, 0);
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+    assert_eq!(hidden, [".stillus-operation.lock"]);
+    assert_eq!(
+        fs::read(installation.root().join(".stillus-operation.lock")).unwrap(),
+        b""
+    );
 }
 
 #[test]

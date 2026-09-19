@@ -50,6 +50,13 @@ turn the startup check on or off.
 Only the application's own installation directory is written. Workspaces,
 notes and `.stillus/` are never touched by an update.
 
+Updates using the same installation directory share an OS-held lock from
+extraction through replacement, rollback and staging cleanup. Another updater
+waits for that lock; startup cleanup skips a busy installation without delaying
+the window. The empty `.stillus-operation.lock` file beside the application
+bundle or executable remains after completion. Do not remove it while Stillus
+is running: the OS releases the lock automatically when its owner exits.
+
 ## Where updates are unavailable
 
 - **Development builds.** A binary that is not a packaged installation, for

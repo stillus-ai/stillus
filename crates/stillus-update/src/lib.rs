@@ -297,7 +297,7 @@ pub fn install(
     let staging = installation.staging()?;
     archive::extract(&bytes, kind, staging.path())?;
     payload::validate(staging.path(), installation, release.version)?;
-    installation.apply(staging.path())?;
+    installation.apply(&staging)?;
     drop(staging);
     installation.cleanup();
     Ok(())

@@ -166,16 +166,27 @@ impl Installation {
     /// A staging directory on the same filesystem as the installation, so the
     /// final replacement is a rename and never a copy.
     pub(crate) fn staging(&self) -> Result<Staging, UpdateError> {
+        // Hold the OS lock through extraction, validation, replacement/rollback
+        // and Staging::drop. A second updater waits; startup cleanup skips it.
+        let operation = stillus_platform::OperationLock::directory(&self.root)?;
         let path = unique(&self.root, "staging");
         fs::create_dir(&path)?;
-        Ok(Staging { path })
+        Ok(Staging {
+            path,
+            _operation: operation,
+        })
     }
 
     /// Moves an extracted package into place.
-    pub(crate) fn apply(&self, staged: &Path) -> Result<(), UpdateError> {
+    pub(crate) fn apply(&self, staged: &Staging) -> Result<(), UpdateError> {
+        if staged.path().parent() != Some(self.root()) {
+            return Err(UpdateError::Package(
+                "staging belongs to another installation",
+            ));
+        }
         match self.kind {
-            InstallKind::MacApp => self.apply_bundle(staged),
-            InstallKind::Linux | InstallKind::Windows => self.apply_files(staged),
+            InstallKind::MacApp => self.apply_bundle(staged.path()),
+            InstallKind::Linux | InstallKind::Windows => self.apply_files(staged.path()),
         }
     }
 
@@ -197,6 +208,18 @@ impl Installation {
     fn apply_files(&self, staged: &Path) -> Result<(), UpdateError> {
         let mut relative = Vec::new();
         collect(staged, Path::new(""), &mut relative)?;
+        if relative.iter().any(|path| {
+            path.components().next().is_some_and(|component| {
+                component
+                    .as_os_str()
+                    .to_str()
+                    .is_some_and(|name| name.eq_ignore_ascii_case(".stillus-operation.lock"))
+            })
+        }) {
+            return Err(UpdateError::Package(
+                "package replaces the installation lock",
+            ));
+        }
         relative.sort();
         let mut retired: Vec<(PathBuf, PathBuf)> = Vec::new();
         let mut installed: Vec<PathBuf> = Vec::new();
@@ -228,8 +251,13 @@ impl Installation {
     }
 
     /// Removes replaced files and abandoned staging directories. Safe to call
-    /// at any time; failures are ignored because the next start retries.
+    /// at any time: an active update is skipped without blocking startup.
+    /// Failures are ignored because the next start retries.
     pub fn cleanup(&self) {
+        let Ok(Some(_operation)) = stillus_platform::OperationLock::try_directory(&self.root)
+        else {
+            return;
+        };
         let Ok(entries) = fs::read_dir(&self.root) else {
             return;
         };
@@ -306,6 +334,7 @@ fn unique(root: &Path, purpose: &str) -> PathBuf {
 /// Removes its directory when the update finishes or fails.
 pub(crate) struct Staging {
     path: PathBuf,
+    _operation: stillus_platform::OperationLock,
 }
 
 impl Staging {
@@ -336,6 +365,115 @@ mod tests {
         write(&bundle.join(MAC_EXECUTABLE), "old binary");
         write(&bundle.join(MAC_MANIFEST), "{}");
         bundle
+    }
+
+    #[test]
+    fn cleanup_preserves_active_staging_and_rollback() {
+        let directory = tempfile::tempdir().unwrap();
+        let bundle = mac_layout(directory.path());
+        let installation = Installation::mac_app(bundle.clone()).unwrap();
+        let staged = installation.staging().unwrap();
+        write(
+            &staged.path().join(BUNDLE_NAME).join(MAC_EXECUTABLE),
+            "new binary",
+        );
+        let retired = unique(directory.path(), "bundle");
+        // Pause installation between retiring the old bundle and publishing the new one.
+        fs::rename(&bundle, &retired).unwrap();
+        let cleaner = installation.clone();
+        let (send, receive) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            cleaner.cleanup();
+            send.send(()).unwrap();
+        });
+        // Startup cleanup must also remain nonblocking while an update owns the lock.
+        receive
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .unwrap();
+        worker.join().unwrap();
+        assert!(
+            staged
+                .path()
+                .join(BUNDLE_NAME)
+                .join(MAC_EXECUTABLE)
+                .is_file()
+        );
+        assert!(retired.join(MAC_EXECUTABLE).is_file());
+        // Same-thread cleanup must not bypass the guard either.
+        installation.cleanup();
+        assert!(retired.exists());
+        fs::rename(staged.path().join(BUNDLE_NAME), &bundle).unwrap();
+        drop(staged);
+        installation.cleanup();
+        assert!(!retired.exists());
+        assert_eq!(
+            fs::read_to_string(bundle.join(MAC_EXECUTABLE)).unwrap(),
+            "new binary"
+        );
+    }
+
+    #[test]
+    fn packages_cannot_replace_the_installation_lock() {
+        for name in [
+            ".stillus-operation.lock",
+            ".STILLUS-OPERATION.LOCK",
+            ".stillus-operation.lock/nested",
+        ] {
+            let directory = tempfile::tempdir().unwrap();
+            let root = directory.path();
+            write(&root.join("stillus"), "old binary");
+            write(&root.join("build.json"), "{}");
+            let installation = Installation::linux(root.join("stillus")).unwrap();
+            let staging = installation.staging().unwrap();
+            write(&staging.path().join(name), "package data");
+            write(&staging.path().join("stillus"), "new binary");
+            assert_eq!(
+                installation.apply(&staging),
+                Err(UpdateError::Package(
+                    "package replaces the installation lock"
+                ))
+            );
+            assert_eq!(fs::read(root.join(".stillus-operation.lock")).unwrap(), b"");
+            assert_eq!(
+                fs::read_to_string(root.join("stillus")).unwrap(),
+                "old binary"
+            );
+        }
+    }
+
+    #[test]
+    fn concurrent_staging_is_serialized_until_the_first_guard_drops() {
+        let directory = tempfile::tempdir().unwrap();
+        let installation = Installation::mac_app(mac_layout(directory.path())).unwrap();
+        let first = installation.staging().unwrap();
+        let (entered_send, entered_receive) = std::sync::mpsc::channel();
+        let (ready_send, ready_receive) = std::sync::mpsc::channel();
+        let other = installation.clone();
+        let worker = std::thread::spawn(move || {
+            ready_send.send(()).unwrap();
+            let second = other.staging().unwrap();
+            entered_send.send(second.path().to_path_buf()).unwrap();
+        });
+        ready_receive
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .unwrap();
+        let blocked = entered_receive
+            .recv_timeout(std::time::Duration::from_millis(100))
+            .is_err();
+        let first_path = first.path().to_owned();
+        drop(first);
+        if blocked {
+            entered_receive
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .unwrap();
+        }
+        worker.join().unwrap();
+        assert!(
+            blocked,
+            "another installation entered while the first was active"
+        );
+        assert!(!first_path.exists());
+        installation.cleanup();
     }
 
     #[test]
@@ -388,7 +526,7 @@ mod tests {
             &staged.path().join(BUNDLE_NAME).join(MAC_EXECUTABLE),
             "new binary",
         );
-        installation.apply(staged.path()).unwrap();
+        installation.apply(&staged).unwrap();
         assert_eq!(
             fs::read_to_string(bundle.join(MAC_EXECUTABLE)).unwrap(),
             "new binary"
@@ -397,7 +535,7 @@ mod tests {
 
         let empty = installation.staging().unwrap();
         assert_eq!(
-            installation.apply(empty.path()),
+            installation.apply(&empty),
             Err(UpdateError::Package("package has no application bundle"))
         );
         assert_eq!(
@@ -422,7 +560,7 @@ mod tests {
             "{\"platform\":\"linux\"}",
         );
         write(&staged.path().join("nested/stillus.svg"), "icon");
-        installation.apply(staged.path()).unwrap();
+        installation.apply(&staged).unwrap();
 
         assert_eq!(
             fs::read_to_string(root.join("stillus")).unwrap(),
