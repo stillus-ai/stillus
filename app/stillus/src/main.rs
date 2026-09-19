@@ -12700,6 +12700,7 @@ mod tests {
         fs::create_dir_all(&notes).expect("create search-purge test workspace");
         let target = notes.join("Needle.md");
         fs::write(&target, "private-marker-for-search\n").expect("write indexed note");
+        let target = target.canonicalize().expect("canonical indexed note");
 
         let mut model = AppModel::load(&root);
         let purge_id = model.next_search_operation_id();
