@@ -2014,7 +2014,12 @@ impl WorkspaceSession {
                 let note = self.notes.get(*index).ok_or_else(|| {
                     CoreError::NoteUnavailable("selected note disappeared".to_owned())
                 })?;
-                (note.path.clone(), note.protection)
+                let protection = if document.is_protected() {
+                    NoteProtection::Protected
+                } else {
+                    NoteProtection::Plain
+                };
+                (note.path.clone(), protection)
             }
             DocumentTarget::ExternalFile { engine_id, item_id } => {
                 let file = self
@@ -2078,17 +2083,28 @@ impl WorkspaceSession {
         let DocumentTarget::WorkspaceNote(note_index) = target else {
             unreachable!()
         };
-        if protection == NoteProtection::Plain {
+        let note_index = if protection == NoteProtection::Plain {
             // The external writer may have changed the front matter too, so the
-            // note summary (title, tags, flags) is rescanned with the document.
+            // current protection must decide which loader may read the body.
             let note_index = self.refresh_plain_note(note_index, &path)?;
-            self.document = Some(load_document(
-                note_index,
-                &self.notes[note_index].title,
-                &path,
-            )?);
-            return Ok(ExternalPollStart::Immediate(ExternalPoll::Reloaded));
-        }
+            if self.notes[note_index].protection == NoteProtection::Plain {
+                self.document = Some(load_document(
+                    note_index,
+                    &self.notes[note_index].title,
+                    &path,
+                )?);
+                return Ok(ExternalPollStart::Immediate(ExternalPoll::Reloaded));
+            }
+            // The old plain buffer must not remain editable under a protected
+            // selection, including while decryption is pending or if it fails.
+            self.select_protected_note_for_loading(note_index);
+            if self.master_password.is_none() {
+                return Ok(ExternalPollStart::Immediate(ExternalPoll::Reloaded));
+            }
+            note_index
+        } else {
+            note_index
+        };
         let password = self
             .master_password
             .as_ref()
@@ -2108,11 +2124,16 @@ impl WorkspaceSession {
     }
 
     pub fn discard_local_and_reload(&mut self) -> Result<(), CoreError> {
-        let target = self
+        let document = self
             .document
             .as_ref()
-            .map(|document| document.target().clone())
             .ok_or_else(|| CoreError::NoteUnavailable("no open note".to_owned()))?;
+        let target = document.target().clone();
+        let protection = if document.is_protected() {
+            NoteProtection::Protected
+        } else {
+            NoteProtection::Plain
+        };
         if let DocumentTarget::ExternalFile { engine_id, item_id } = target {
             let file = self
                 .external_files
@@ -2147,7 +2168,6 @@ impl WorkspaceSession {
             .get(note_index)
             .ok_or_else(|| CoreError::NoteUnavailable("selected note disappeared".to_owned()))?;
         let path = note.path.clone();
-        let protection = note.protection;
         if protection == NoteProtection::Protected {
             let completion = self.begin_discard_protected_local_and_reload()?.execute();
             return match self.finish_secure_operation(completion)? {
@@ -2160,6 +2180,14 @@ impl WorkspaceSession {
         let (note_index, replacement) = match protection {
             NoteProtection::Plain => {
                 let note_index = self.refresh_plain_note(note_index, &path)?;
+                if self.notes[note_index].protection == NoteProtection::Protected {
+                    // Discard was explicitly requested, but the replacement
+                    // now requires unlocking rather than a plain-text reload.
+                    let key = self.recovery_store.key_for_note(&path)?;
+                    self.recovery_store.remove(&key)?;
+                    self.select_protected_note_for_loading(note_index);
+                    return Ok(());
+                }
                 let document = load_document(note_index, &self.notes[note_index].title, &path)?;
                 (note_index, document)
             }
@@ -2218,18 +2246,21 @@ impl WorkspaceSession {
         ))
     }
 
-    /// Rescans one plain note so its summary matches on-disk front matter and
+    /// Rescans a previously plain note so its summary matches on-disk front matter and
     /// returns the note's possibly re-sorted index.
     fn refresh_plain_note(&mut self, note_index: usize, path: &Path) -> Result<usize, CoreError> {
         let result = scan_note(path).map_err(|error| CoreError::Workspace(error.to_string()))?;
         let mut note = note_summary(path.to_path_buf(), result);
         if let Ok(key) = self.recovery_store.key_for_note(path) {
-            note.recovery_available = self
-                .recovery_store
-                .scan()
-                .records
-                .iter()
-                .any(|record| record.key == key);
+            note.recovery_available = if note.protection == NoteProtection::Protected {
+                self.recovery_store.protected_exists(&key)?
+            } else {
+                self.recovery_store
+                    .scan()
+                    .records
+                    .iter()
+                    .any(|record| record.key == key)
+            };
         }
         let slot = self.notes.get_mut(note_index).ok_or_else(|| {
             CoreError::NoteUnavailable(format!("reloaded note index {note_index} disappeared"))
@@ -2256,6 +2287,14 @@ impl WorkspaceSession {
         self.selected_note = Some(index);
         self.selected_external = None;
         self.selected_engine = None;
+        // A subsequent load/cleanup can fail. Keep the retained document bound
+        // to its original path even if the refreshed title changed the order.
+        if let Some(document) = self.document.as_mut()
+            && document.target == DocumentTarget::WorkspaceNote(note_index)
+        {
+            document.note_index = index;
+            document.target = DocumentTarget::WorkspaceNote(index);
+        }
         Ok(index)
     }
 
@@ -3596,7 +3635,10 @@ fn load_document(
         scan_reader(&mut file).map_err(|error| CoreError::NoteUnavailable(error.to_string()))?;
     let body_offset = match scan.status {
         FrontMatterStatus::Plain => 0,
-        FrontMatterStatus::Parsed(parsed) => parsed.body_offset,
+        FrontMatterStatus::Parsed(parsed) if parsed.metadata.encryption.is_none() => {
+            parsed.body_offset
+        }
+        FrontMatterStatus::Parsed(_) => return Err(CoreError::MasterPasswordRequired),
         FrontMatterStatus::Invalid { issue, .. } => {
             return Err(CoreError::NoteUnavailable(issue.to_string()));
         }
@@ -7146,6 +7188,154 @@ mod tests {
         )
         .unwrap();
         assert!(!contains_bytes(&recovery_bytes, b"local-secret-marker"));
+    }
+
+    #[test]
+    fn external_protection_reloads_only_through_the_secure_loader() {
+        for cached in [None, Some("external password"), Some("wrong password")] {
+            let workspace = TestWorkspace::new();
+            workspace.write_note("note.md", "# Alpha\noriginal\n");
+            workspace.write_note("other.md", "# Middle\nkeep\n");
+            let path = workspace.note_path("note.md");
+            let mut session = WorkspaceSession::open(workspace.path()).unwrap();
+            session.open_note(0).unwrap();
+            if let Some(password) = cached {
+                session
+                    .configure_workspace_security(MasterPassword::new(password.into()))
+                    .unwrap();
+            }
+            let password = MasterPassword::new("external password".into());
+            workspace.replace_protected_note(
+                &path,
+                "note.md",
+                b"---\ntitle: Zulu\n---\n# Zulu\nexternal secret\n",
+                &password,
+            );
+            let ciphertext = fs::read(&path).unwrap();
+            let poll = session.begin_poll_external(10).unwrap();
+            assert!(session.selected_is_protected());
+            assert_eq!(session.notes()[session.selected_note().unwrap()].path, path);
+            assert!(session.document().is_none());
+            assert!(
+                session
+                    .apply_selected_at(EditorCommand::Insert("must not be saved".into()), 11)
+                    .is_err()
+            );
+            assert!(
+                session
+                    .begin_persistence(10_000, "now".into())
+                    .unwrap()
+                    .is_none()
+            );
+            match (cached, poll) {
+                (None, ExternalPollStart::Immediate(ExternalPoll::Reloaded)) => {
+                    session
+                        .unlock_note(session.selected_note().unwrap(), password)
+                        .unwrap();
+                    assert!(session.document().unwrap().is_protected());
+                }
+                (Some(candidate), ExternalPollStart::Secure(job)) => {
+                    let completion = job.execute();
+                    assert!(session.document().is_none());
+                    let result = session.finish_secure_operation(completion);
+                    if candidate == "external password" {
+                        assert_eq!(
+                            result.unwrap(),
+                            SecureOutcome::ExternalPoll(ExternalPoll::Reloaded)
+                        );
+                        assert!(session.document().unwrap().is_protected());
+                        assert_eq!(session.document().unwrap().title(), "Zulu");
+                    } else {
+                        assert!(result.is_err());
+                        assert!(session.document().is_none());
+                    }
+                }
+                _ => panic!("external protection must lock or decrypt asynchronously"),
+            }
+            assert_eq!(fs::read(&path).unwrap(), ciphertext);
+            assert_eq!(
+                fs::read_to_string(workspace.note_path("other.md")).unwrap(),
+                "# Middle\nkeep\n"
+            );
+        }
+    }
+
+    #[test]
+    fn external_protection_preserves_dirty_work_until_explicit_discard() {
+        let workspace = TestWorkspace::new();
+        workspace.write_note("note.md", "# Alpha\noriginal\n");
+        workspace.write_note("other.md", "# Middle\nkeep\n");
+        let path = workspace.note_path("note.md");
+        let mut session = WorkspaceSession::open(workspace.path()).unwrap();
+        session.open_note(0).unwrap();
+        session
+            .apply_selected_at(EditorCommand::Insert("local ".into()), 0)
+            .unwrap();
+        let recovery = session
+            .begin_persistence(RECOVERY_DEBOUNCE_MS, "now".into())
+            .unwrap()
+            .unwrap();
+        session.finish_persistence(recovery.execute()).unwrap();
+        let password = MasterPassword::new("external password".into());
+        workspace.replace_protected_note(
+            &path,
+            "note.md",
+            b"---\ntitle: Zulu\n---\n# Zulu\nexternal secret\n",
+            &password,
+        );
+        let ciphertext = fs::read(&path).unwrap();
+        assert_eq!(session.poll_external(1000).unwrap(), ExternalPoll::Conflict);
+        assert!(matches!(
+            session.document().unwrap().save_status(),
+            SaveStatus::Conflict { .. }
+        ));
+        assert_eq!(
+            session
+                .document()
+                .unwrap()
+                .viewport(ViewportRequest::default())
+                .unwrap()
+                .lines[0]
+                .text,
+            "local # Alpha"
+        );
+        assert!(
+            session
+                .begin_autosave(10_000, "now".into())
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(session.recovery_store.scan().records.len(), 1);
+        assert_eq!(fs::read(&path).unwrap(), ciphertext);
+
+        session.discard_local_and_reload().unwrap();
+        assert!(session.document().is_none());
+        assert!(session.selected_is_protected());
+        assert_eq!(session.notes()[session.selected_note().unwrap()].path, path);
+        assert!(session.recovery_store.scan().records.is_empty());
+        session
+            .unlock_note(session.selected_note().unwrap(), password)
+            .unwrap();
+        assert!(session.document().unwrap().is_protected());
+        assert_eq!(session.document().unwrap().title(), "Zulu");
+        assert_eq!(fs::read(&path).unwrap(), ciphertext);
+    }
+
+    #[test]
+    fn external_protection_is_rejected_even_with_a_stale_plain_catalog() {
+        let workspace = TestWorkspace::new();
+        workspace.write_note("note.md", "# Alpha\noriginal\n");
+        let path = workspace.note_path("note.md");
+        let mut session = WorkspaceSession::open(workspace.path()).unwrap();
+        let password = MasterPassword::new("external password".into());
+        protect_note_body(&path, &open_versioned(&path).unwrap().1, &password, "Alpha").unwrap();
+        let ciphertext = fs::read(&path).unwrap();
+        assert!(matches!(
+            session.open_note(0),
+            Err(CoreError::MasterPasswordRequired)
+        ));
+        assert!(session.document().is_none());
+        assert_eq!(fs::read(&path).unwrap(), ciphertext);
     }
 
     #[test]
