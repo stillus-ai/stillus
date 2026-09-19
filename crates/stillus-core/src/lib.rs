@@ -7474,7 +7474,9 @@ mod tests {
         let path = workspace.note_path("note.md");
         let mut session = WorkspaceSession::open(workspace.path()).unwrap();
         let password = MasterPassword::new("external password".into());
-        protect_note_body(&path, &open_versioned(&path).unwrap().1, &password, "Alpha").unwrap();
+        let (document, version) = open_versioned(&path).unwrap();
+        drop(document);
+        protect_note_body(&path, &version, &password, "Alpha").unwrap();
         let ciphertext = fs::read(&path).unwrap();
         assert!(matches!(
             session.open_note(0),

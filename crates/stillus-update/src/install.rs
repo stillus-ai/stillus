@@ -458,6 +458,8 @@ mod tests {
                     "package replaces the installation lock"
                 ))
             );
+            // Windows byte-range locks also prevent reads from another handle.
+            drop(staging);
             assert_eq!(fs::read(root.join(".stillus-operation.lock")).unwrap(), b"");
             assert_eq!(
                 fs::read_to_string(root.join("stillus")).unwrap(),

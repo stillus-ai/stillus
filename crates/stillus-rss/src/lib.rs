@@ -970,10 +970,13 @@ fn preserve_unknown(value: &mut serde_json::Value, old: &serde_json::Value) {
 }
 
 fn ensure_directories(path: &Path) -> Result<(), EngineError> {
-    let mut current = PathBuf::new();
-    for component in path.components() {
-        current.push(component.as_os_str());
-        match fs::symlink_metadata(&current) {
+    // Inspect whole paths: a bare Windows verbatim drive prefix is not a directory.
+    let ancestors: Vec<_> = path
+        .ancestors()
+        .filter(|p| !p.as_os_str().is_empty())
+        .collect();
+    for current in ancestors.into_iter().rev() {
+        match fs::symlink_metadata(current) {
             Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
                 return Err(EngineError::Io(format!(
                     "invalid RSS directory: {}",
@@ -982,10 +985,10 @@ fn ensure_directories(path: &Path) -> Result<(), EngineError> {
             }
             Ok(_) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                match fs::create_dir(&current) {
+                match fs::create_dir(current) {
                     Ok(()) => {}
                     Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-                        let metadata = fs::symlink_metadata(&current)
+                        let metadata = fs::symlink_metadata(current)
                             .map_err(|error| EngineError::Io(error.to_string()))?;
                         if metadata.file_type().is_symlink() || !metadata.is_dir() {
                             return Err(EngineError::Io(format!(
@@ -1205,6 +1208,20 @@ mod tests {
                     .starts_with("http://example.test/")
             );
         }
+    }
+
+    #[test]
+    fn canonical_workspace_can_create_and_reopen_subscription() {
+        let root = tempfile::tempdir().unwrap();
+        let canonical = root.path().canonicalize().unwrap();
+        let mut engine = RssEngine::open(&canonical).unwrap();
+        assert!(!canonical.join(".stillus").exists());
+        let id = engine
+            .create_subscription("https://example.test/feed", vec![], false, "1")
+            .unwrap();
+        let reopened = RssEngine::open(&canonical).unwrap();
+        assert_eq!(reopened.subscriptions().len(), 1);
+        assert!(reopened.feed(&id).is_ok());
     }
 
     #[test]

@@ -988,7 +988,11 @@ impl Application {
             receiver: search_receiver,
             worker: search_worker,
         } = spawn_search_worker(
-            path.to_path_buf(),
+            workspace_result
+                .as_ref()
+                .expect("open succeeded")
+                .root()
+                .to_path_buf(),
             search_suspended,
             workspace_result.as_ref().expect("open succeeded").lease(),
         );

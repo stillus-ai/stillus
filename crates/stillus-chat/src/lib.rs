@@ -504,10 +504,8 @@ fn valid_id(id: &str) -> Result<(), ChatError> {
     }
 }
 fn validate_path(path: &Path) -> Result<(), ChatError> {
-    let mut current = PathBuf::new();
-    for c in path.components() {
-        current.push(c);
-        match fs::symlink_metadata(&current) {
+    for current in path.ancestors().filter(|p| !p.as_os_str().is_empty()) {
+        match fs::symlink_metadata(current) {
             Ok(m) if stillus_platform::is_link(&m) => return Err(ChatError::Io),
             Ok(_) => {}
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}

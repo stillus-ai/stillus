@@ -1681,5 +1681,8 @@ fn workspace_lease_busy_switch_preserves_current_workspace() {
     };
     assert_eq!(error, crate::i18n::msg!(WorkspaceInUse).into());
     assert_eq!(first.app.session_id(), session);
-    assert_eq!(first.app.workspace.as_ref().unwrap().root(), first.root);
+    assert_eq!(
+        first.app.workspace.as_ref().unwrap().root(),
+        first.root.canonicalize().unwrap()
+    );
 }

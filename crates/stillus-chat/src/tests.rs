@@ -18,6 +18,29 @@ fn setup() -> (tempfile::TempDir, ChatStore, ItemId) {
         .unwrap();
     (dir, store, id)
 }
+#[test]
+fn canonical_workspace_can_open_and_create_chat_without_rewriting_on_open() {
+    let dir = tempfile::tempdir().unwrap();
+    let canonical = dir.path().canonicalize().unwrap();
+    let store = ChatStore::open(&canonical).unwrap();
+    assert!(!store.root().exists());
+    let id = store
+        .create_chat(Metadata {
+            common: CommonMetadata {
+                title: "Canonical workspace".into(),
+                ..Default::default()
+            },
+            alias: "default".into(),
+            automatic_title: false,
+        })
+        .unwrap();
+    assert_eq!(store.list().unwrap().len(), 1);
+    assert_eq!(
+        store.metadata(&id).unwrap().value.common.title,
+        "Canonical workspace"
+    );
+}
+
 fn message(run: &str) -> Message {
     Message {
         id: new_id(),

@@ -11828,7 +11828,7 @@ mod tests {
         crate::i18n::set_current(crate::i18n::Locale::English);
         model.apply(EditorCommand::Undo);
         assert_eq!(render_editor(&model), original_editor);
-        model.shutdown_search_worker();
+        model.application.shutdown().unwrap();
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -12218,7 +12218,7 @@ mod tests {
         let mut prepared = prepare_workspace_switch(&root).expect("prepare valid workspace");
         assert_eq!(prepared.canonical_path, root.canonicalize().unwrap());
         assert!(prepared.model.workspace.is_some());
-        prepared.model.shutdown_search_worker();
+        prepared.model.shutdown().unwrap();
         fs::remove_dir_all(root).expect("remove target workspace");
     }
 
@@ -12264,7 +12264,7 @@ mod tests {
         model.secure_ui_operation = None;
         assert!(!password_change_busy(&model));
 
-        model.shutdown_search_worker();
+        model.application.shutdown().unwrap();
         fs::remove_dir_all(root).expect("remove source workspace");
     }
 
@@ -12340,7 +12340,7 @@ mod tests {
             percent: Some(49),
         }));
 
-        model.shutdown_search_worker();
+        model.application.shutdown().unwrap();
         fs::remove_dir_all(root).expect("remove progress workspace");
     }
 
@@ -13060,7 +13060,10 @@ mod tests {
 
         let workspace = model.workspace.as_ref().expect("workspace stays open");
         assert_eq!(workspace.selected_note(), Some(0));
-        assert_eq!(model.pending_note_path.as_deref(), Some(target.as_path()));
+        assert_eq!(
+            model.pending_note_path,
+            Some(target.canonicalize().unwrap())
+        );
         assert!(model.error.is_none());
         assert!(workspace.next_autosave_deadline().is_some());
 
@@ -15149,14 +15152,20 @@ mod tests {
         let mut restored = AppModel::load_restoring(&root, Some(&second));
         let workspace = restored.workspace.as_ref().expect("workspace opens");
         let selected = workspace.selected_note().expect("selected note restores");
-        assert_eq!(workspace.notes()[selected].path, second);
-        restored.shutdown_search_worker();
+        assert_eq!(
+            workspace.notes()[selected].path,
+            second.canonicalize().unwrap()
+        );
+        restored.application.shutdown().unwrap();
 
         let mut stale = AppModel::load_restoring(&root, Some(&notes.join("Missing.md")));
         let workspace = stale.workspace.as_ref().expect("workspace opens");
         let selected = workspace.selected_note().expect("default note opens");
-        assert_eq!(workspace.notes()[selected].path, first);
-        stale.shutdown_search_worker();
+        assert_eq!(
+            workspace.notes()[selected].path,
+            first.canonicalize().unwrap()
+        );
+        stale.application.shutdown().unwrap();
         fs::remove_dir_all(root).expect("remove settings selection workspace");
     }
 
@@ -15249,7 +15258,7 @@ mod tests {
             search_results_for(&mut model, "searchmutationmarker").len(),
             1
         );
-        model.shutdown_search_worker();
+        model.application.shutdown().unwrap();
         let bytes = fs::read_to_string(&note).unwrap();
         assert!(bytes.contains("future: keep\n"));
         assert!(bytes.ends_with("# searchmutationmarker\n"));
@@ -15319,7 +15328,7 @@ mod tests {
                 .any(|row| matches!(row, SidebarRow::ExternalGroup { .. }))
         );
 
-        model.shutdown_search_worker();
+        model.application.shutdown().unwrap();
         fs::remove_dir_all(root).expect("remove external selection workspace");
     }
 
@@ -15346,7 +15355,7 @@ mod tests {
         assert!(model.pending_note_creation.is_none());
         assert!(model.note_creation_focus_pending);
 
-        model.shutdown_search_worker();
+        model.application.shutdown().unwrap();
         fs::remove_dir_all(root).expect("remove pending-note workspace");
     }
 

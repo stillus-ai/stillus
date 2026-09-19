@@ -166,8 +166,11 @@ def external(root, env):
 
 
 def concurrent(root, env):
-    workspace = root / "concurrent workspace"
-    generate_demo_workspace(workspace)
+    # Sessions are exclusive per workspace; independent workspaces may still
+    # open the same external file and must detect conflicting saves.
+    workspaces = [root / f"concurrent workspace {index}" for index in range(2)]
+    for workspace in workspaces:
+        generate_demo_workspace(workspace)
     path = root / "concurrent.md"
     path.write_text("Original external body\n")
     processes = []
@@ -189,7 +192,7 @@ def concurrent(root, env):
         xd("type", "--clearmodifiers", "--delay", "1", text).check_returncode()
 
     try:
-        for _ in range(2):
+        for workspace in workspaces:
             process = subprocess.Popen([str(BINARY), "--workspace", str(workspace), "--open", str(path)],
                                        env=env, cwd=root, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             processes.append(process)
@@ -203,10 +206,10 @@ def concurrent(root, env):
         committed = path.read_bytes()
         time.sleep(2)
         assert b"SECOND_PROCESS_UNSAVED" not in committed
-        # A competing recovery write is rejected while the first window owns
-        # the artifact. A subsequent edit can persist after its checked save.
+        # The stale editor keeps its own durable recovery, including later edits,
+        # without replacing the other workspace's committed external file.
         edit(second, "_RECOVERY_RETRY")
-        recovery = workspace / ".stillus/recovery"
+        recovery = workspaces[1] / ".stillus/recovery"
         def retry_persisted():
             try:
                 return any(b"SECOND_PROCESS_UNSAVED_RECOVERY_RETRY" in record.read_bytes()
