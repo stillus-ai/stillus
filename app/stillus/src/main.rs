@@ -6738,6 +6738,14 @@ fn sidebar_note_row(
     view.into_any()
 }
 
+fn rss_sidebar_badge_text(unread: u64) -> String {
+    if unread > 99 {
+        "99+".to_owned()
+    } else {
+        unread.to_string()
+    }
+}
+
 fn engine_sidebar_row(
     parent: SidebarFilter,
     depth: usize,
@@ -6769,6 +6777,7 @@ fn engine_sidebar_row(
     let badge_style_model = model.clone();
     let badge_style_id = item_id.clone();
     let chat_badge = engine == stillus_chat::engine_id();
+    let rss_badge = engine == stillus_core::rss_engine_id();
     let pinned = summary.metadata.pinned;
     let ready = matches!(summary.availability, stillus_core::ItemAvailability::Ready);
     let content = h_stack((
@@ -6802,6 +6811,8 @@ fn engine_sidebar_row(
                 "…".to_owned()
             } else if chat_badge && unread == 0 {
                 String::new()
+            } else if rss_badge {
+                rss_sidebar_badge_text(unread)
             } else {
                 unread.to_string()
             }
@@ -14648,6 +14659,19 @@ mod tests {
         model.shutdown_search_worker();
         drop(model);
         fs::remove_dir_all(root).expect("remove line-number workspace");
+    }
+
+    #[test]
+    fn rss_sidebar_badge_caps_counts_above_99() {
+        for (unread, expected) in [
+            (0, "0"),
+            (1, "1"),
+            (99, "99"),
+            (100, "99+"),
+            (u64::MAX, "99+"),
+        ] {
+            assert_eq!(super::rss_sidebar_badge_text(unread), expected);
+        }
     }
 
     #[test]
