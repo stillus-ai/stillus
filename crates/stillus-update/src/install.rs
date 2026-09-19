@@ -5,10 +5,11 @@
 
 //! Locating the installed application and replacing it in place.
 //!
-//! Replacement is a sequence of renames inside the installation directory, so
-//! a failure at any point can be rolled back and the running program keeps the
-//! files it already opened. The caller offers an explicit restart afterwards;
-//! installation never starts a process or closes the running application.
+//! macOS bundles are atomically exchanged with the staged bundle, keeping the
+//! installed path present even if the process exits during publication. Other
+//! packages use a sequence of renames with rollback on error. The caller offers
+//! an explicit restart afterwards; installation never starts a process or
+//! closes the running application.
 
 use crate::UpdateError;
 use std::fs;
@@ -191,17 +192,25 @@ impl Installation {
     }
 
     fn apply_bundle(&self, staged: &Path) -> Result<(), UpdateError> {
+        self.apply_bundle_with_exchange(staged, exchange_directories)
+    }
+
+    fn apply_bundle_with_exchange(
+        &self,
+        staged: &Path,
+        exchange: impl FnOnce(&Path, &Path) -> std::io::Result<()>,
+    ) -> Result<(), UpdateError> {
         let source = staged.join(BUNDLE_NAME);
         if !source.join(MAC_EXECUTABLE).is_file() {
             return Err(UpdateError::Package("package has no application bundle"));
         }
-        let retired = unique(&self.root, "bundle");
-        fs::rename(&self.target, &retired)?;
-        if let Err(error) = fs::rename(&source, &self.target) {
-            let _ = fs::rename(&retired, &self.target);
-            return Err(UpdateError::Io(error.to_string()));
-        }
-        let _ = fs::remove_dir_all(&retired);
+        // Never fall back to moving the installed bundle aside: a process exit
+        // between two renames would leave no application to launch for recovery.
+        // After exchange the old bundle stays in staging until Staging::drop,
+        // or startup cleanup if this process exits before dropping the guard.
+        exchange(&source, &self.target)?;
+        stillus_platform::sync_directory(&self.root)?;
+        stillus_platform::sync_directory(staged)?;
         Ok(())
     }
 
@@ -277,6 +286,23 @@ impl Installation {
             }
         }
     }
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn exchange_directories(source: &Path, destination: &Path) -> std::io::Result<()> {
+    use rustix::fs::{CWD, RenameFlags, renameat_with};
+    // rustix maps EXCHANGE to RENAME_SWAP on macOS and RENAME_EXCHANGE on
+    // Linux, where the same bundle-publication tests run in the toolchain.
+    renameat_with(CWD, source, CWD, destination, RenameFlags::EXCHANGE)?;
+    Ok(())
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn exchange_directories(_source: &Path, _destination: &Path) -> std::io::Result<()> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "atomic application bundle exchange is unavailable",
+    ))
 }
 
 fn rollback(
@@ -367,8 +393,9 @@ mod tests {
         bundle
     }
 
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     #[test]
-    fn cleanup_preserves_active_staging_and_rollback() {
+    fn cleanup_preserves_active_staging_and_exchanged_bundle() {
         let directory = tempfile::tempdir().unwrap();
         let bundle = mac_layout(directory.path());
         let installation = Installation::mac_app(bundle.clone()).unwrap();
@@ -377,9 +404,8 @@ mod tests {
             &staged.path().join(BUNDLE_NAME).join(MAC_EXECUTABLE),
             "new binary",
         );
-        let retired = unique(directory.path(), "bundle");
-        // Pause installation between retiring the old bundle and publishing the new one.
-        fs::rename(&bundle, &retired).unwrap();
+        installation.apply(&staged).unwrap();
+        let retired = staged.path().join(BUNDLE_NAME);
         let cleaner = installation.clone();
         let (send, receive) = std::sync::mpsc::channel();
         let worker = std::thread::spawn(move || {
@@ -402,7 +428,6 @@ mod tests {
         // Same-thread cleanup must not bypass the guard either.
         installation.cleanup();
         assert!(retired.exists());
-        fs::rename(staged.path().join(BUNDLE_NAME), &bundle).unwrap();
         drop(staged);
         installation.cleanup();
         assert!(!retired.exists());
@@ -513,8 +538,9 @@ mod tests {
         assert!(Installation::windows(root.join("windows/Stillus.exe")).is_ok());
     }
 
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     #[test]
-    fn bundles_are_replaced_and_restored_on_failure() {
+    fn bundles_are_exchanged_and_invalid_packages_preserve_the_installation() {
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path();
         let bundle = mac_layout(root);
@@ -526,10 +552,26 @@ mod tests {
             &staged.path().join(BUNDLE_NAME).join(MAC_EXECUTABLE),
             "new binary",
         );
+        write(
+            &staged.path().join(BUNDLE_NAME).join(MAC_MANIFEST),
+            "new manifest",
+        );
         installation.apply(&staged).unwrap();
         assert_eq!(
             fs::read_to_string(bundle.join(MAC_EXECUTABLE)).unwrap(),
             "new binary"
+        );
+        assert_eq!(
+            fs::read_to_string(bundle.join(MAC_MANIFEST)).unwrap(),
+            "new manifest"
+        );
+        assert_eq!(
+            fs::read_to_string(staged.path().join(BUNDLE_NAME).join(MAC_EXECUTABLE)).unwrap(),
+            "old binary"
+        );
+        assert_eq!(
+            fs::read_to_string(staged.path().join(BUNDLE_NAME).join(MAC_MANIFEST)).unwrap(),
+            "{}"
         );
         drop(staged);
 
@@ -541,6 +583,95 @@ mod tests {
         assert_eq!(
             fs::read_to_string(bundle.join(MAC_EXECUTABLE)).unwrap(),
             "new binary"
+        );
+    }
+
+    #[test]
+    fn failed_bundle_exchange_never_moves_or_deletes_the_installed_bundle() {
+        for kind in [
+            std::io::ErrorKind::Unsupported,
+            std::io::ErrorKind::PermissionDenied,
+        ] {
+            let directory = tempfile::tempdir().unwrap();
+            let bundle = mac_layout(directory.path());
+            let installation = Installation::mac_app(bundle.clone()).unwrap();
+            let staged = installation.staging().unwrap();
+            let candidate = staged.path().join(BUNDLE_NAME);
+            write(&candidate.join(MAC_EXECUTABLE), "new binary");
+            let result =
+                installation.apply_bundle_with_exchange(staged.path(), |source, target| {
+                    assert_eq!(source, candidate);
+                    assert_eq!(target, bundle);
+                    assert_eq!(
+                        fs::read_to_string(target.join(MAC_EXECUTABLE)).unwrap(),
+                        "old binary"
+                    );
+                    Err(std::io::Error::new(kind, "exchange refused"))
+                });
+            assert_eq!(result, Err(UpdateError::Io("exchange refused".into())));
+            assert_eq!(
+                fs::read_to_string(candidate.join(MAC_EXECUTABLE)).unwrap(),
+                "new binary"
+            );
+            drop(staged);
+            installation.cleanup();
+            assert_eq!(
+                fs::read_to_string(bundle.join(MAC_EXECUTABLE)).unwrap(),
+                "old binary"
+            );
+            assert!(Installation::mac_app(bundle).is_ok());
+        }
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn abandoned_bundle_staging_keeps_a_complete_installation_before_and_after_exchange() {
+        for published in [false, true] {
+            let directory = tempfile::tempdir().unwrap();
+            let bundle = mac_layout(directory.path());
+            let installation = Installation::mac_app(bundle.clone()).unwrap();
+            // No Staging guard: model an exit that skips destructors, on either
+            // side of the atomic publication, leaving startup to clean staging.
+            let staged = unique(directory.path(), "staging");
+            write(&staged.join(BUNDLE_NAME).join(MAC_EXECUTABLE), "new binary");
+            write(&staged.join(BUNDLE_NAME).join(MAC_MANIFEST), "new manifest");
+            if published {
+                installation.apply_bundle(&staged).unwrap();
+            }
+            let reopened = Installation::mac_app(bundle.clone()).unwrap();
+            reopened.cleanup();
+            assert!(!staged.exists());
+            assert_eq!(
+                fs::read_to_string(bundle.join(MAC_EXECUTABLE)).unwrap(),
+                if published {
+                    "new binary"
+                } else {
+                    "old binary"
+                }
+            );
+            assert_eq!(
+                fs::read_to_string(bundle.join(MAC_MANIFEST)).unwrap(),
+                if published { "new manifest" } else { "{}" }
+            );
+        }
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    #[test]
+    fn unsupported_bundle_exchange_keeps_the_installed_bundle() {
+        let directory = tempfile::tempdir().unwrap();
+        let bundle = mac_layout(directory.path());
+        let installation = Installation::mac_app(bundle.clone()).unwrap();
+        let staged = installation.staging().unwrap();
+        write(
+            &staged.path().join(BUNDLE_NAME).join(MAC_EXECUTABLE),
+            "new binary",
+        );
+        assert!(installation.apply(&staged).is_err());
+        drop(staged);
+        assert_eq!(
+            fs::read_to_string(bundle.join(MAC_EXECUTABLE)).unwrap(),
+            "old binary"
         );
     }
 

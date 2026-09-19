@@ -35,9 +35,12 @@ turn the startup check on or off.
    right platform, the right source revision and the recorded SHA-256 of every
    file. On macOS the bundle must also carry the offered version and the
    `org.stillus.Stillus` identifier.
-4. The installed application is replaced by renaming: the previous bundle or
-   files move aside, the new ones take their place, and a failure at any step
-   restores what was there before.
+4. On macOS, the installed bundle and the staged bundle are exchanged atomically.
+   The launch path always contains the old or the new application, even if the
+   process exits during replacement. The old bundle is then removed from staging.
+   If the filesystem does not support atomic exchange, installation fails without
+   moving the existing application. Windows and Linux packages use individual file
+   renames with rollback on error.
 5. A notice offers **Restart** or **Later**, including after a manual update.
    Restart waits for saves and background operations to finish, preserves the
    current workspace and open-file selection, and launches the updated Stillus
