@@ -10014,40 +10014,6 @@ fn editor_panel(
     );
     let metadata_visibility_model = model.clone();
     let title_model = model.clone();
-    let title_click_model = model.clone();
-    let title_save_model = model.clone();
-    let title_target_model = model.clone();
-    let title_edit = ToolbarEditBar {
-        open: create_rw_signal(false),
-        value: create_rw_signal(String::new()),
-        label: i18n::Key::NewTitle,
-        placeholder: i18n::Key::NewTitle,
-    };
-    create_effect(move |previous: Option<Option<DocumentTarget>>| {
-        revision.get();
-        let target = title_target_model
-            .borrow()
-            .workspace
-            .as_ref()
-            .and_then(WorkspaceSession::selected_target);
-        if previous.is_some_and(|previous| previous != target) {
-            title_edit.open.set(false);
-        }
-        target
-    });
-    let rename_form = toolbar_edit_bar(title_edit, palette, move || {
-        let accepted = {
-            let mut model = title_save_model.borrow_mut();
-            model.edit_note_title(&title_edit.value.get_untracked())
-                || model.title_edit_pending(&title_edit.value.get_untracked())
-        };
-        if accepted {
-            title_edit.open.set(false);
-            editor_focus_request.update(|value| *value += 1);
-        }
-        revision.update(|value| *value += 1);
-        schedule_autosave(title_save_model.clone(), revision);
-    });
     let dismiss_error_model = model.clone();
     let error_visibility_model = model.clone();
     let error_icon_model = model.clone();
@@ -10174,23 +10140,9 @@ fn editor_panel(
                     .gap(TOOLBAR_ACTION_GAP_PX)
                     .flex_shrink(0.0)
             }),
-            Some(Rc::new(move || {
-                let title = title_click_model
-                    .borrow()
-                    .workspace
-                    .as_ref()
-                    .and_then(WorkspaceSession::document)
-                    .filter(|document| !document.is_external())
-                    .map(|document| document.title().to_owned());
-                if let Some(title) = title {
-                    title_edit.value.set(title);
-                    close_note_find(note_find);
-                    title_edit.open.set(true);
-                }
-            })),
+            None,
             palette,
         ),
-        rename_form,
         find_bar,
         editor_body,
         h_stack((

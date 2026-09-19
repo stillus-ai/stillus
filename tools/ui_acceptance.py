@@ -4672,7 +4672,7 @@ def caret_scenario(driver: WindowDriver, workspace: Path) -> None:
 
 
 def note_header_scenario(driver: WindowDriver) -> None:
-    """Rename the authoritative title from the fixed header, including Undo."""
+    """Keep the fixed header passive and rename through the first body heading."""
     workspace = create_workspace(driver.temporary_root, "header-workspace")
     notes = workspace / "notes"
     title = ("Длинное название заметки " * 5)[:90]
@@ -4686,33 +4686,35 @@ def note_header_scenario(driver: WindowDriver) -> None:
     driver.xdotool("mousemove", "--window", driver.window_id, "430", "28")
     driver.wait_for_visual_change("full title tooltip in the note header", initial,
         crop=(300, 48, 700, 170), minimum_pixels=50, timeout=3)
+    driver.xdotool("mousemove", "--window", driver.window_id, "1100", "700")
+    body_crop = (300, 60, 700, 170)
+    before_click = driver.wait_for_stable_frame("editor before header click", crop=body_crop,
+                                               stable_for=0.3)
     driver.click_point(430, 28)
-    wait_until("note title input receives keyboard focus", lambda:
-        driver.window_color_pixel_count((54, 94, 130), crop=(415, 63, 100, 3)) >= 40)
-    driver.wait_for_stable_frame("note title input finishes opening", crop=(420, 66, 580, 28),
-                                 stable_for=0.3)
-    # Establish the modifier state after the new field receives focus. The
-    # first XTEST Control chord can otherwise arrive as an ordinary letter.
+    driver.xdotool("mousemove", "--window", driver.window_id, "1100", "700")
+    after_click = driver.wait_for_stable_frame("editor after header click", crop=body_crop,
+                                              stable_for=0.3)
+    if image_difference(before_click, after_click, crop=body_crop) != 0:
+        raise AcceptanceFailure("clicking the note header opened a form or moved the editor")
+    if source.read_text() != f"---\nfuture: retained\n---\n# {title}{tail}":
+        raise AcceptanceFailure("clicking the note header changed the note")
+
+    driver.click("editor")
     driver.key("Control_L")
-    wait_for_field_text(driver, title, "note title field receives focus and its original value")
-    before_paste = driver.wait_for_stable_frame("original title selection", crop=(420, 66, 580, 28),
-                                               stable_for=0.2)
-    set_clipboard_text(driver.environment, "Переименованная заметка")
+    driver.key("ctrl+Home")
+    driver.key("shift+End")
+    set_clipboard_text(driver.environment, "# Переименованная заметка")
     driver.key("ctrl+v")
-    driver.wait_for_visual_change("pasted title replaces its original selection", before_paste,
-                                  crop=(430, 68, 180, 22), minimum_pixels=20)
-    wait_for_field_text(driver, "Переименованная заметка", "note title paste reaches the field")
-    driver.key("Return")
     renamed = notes / "Переименованная заметка.md"
-    wait_until("header rename persisted through the body editor", lambda: renamed.exists()
+    wait_until("first heading rename persists through the body editor", lambda: renamed.exists()
         and renamed.read_text().endswith("# Переименованная заметка" + tail), timeout=10)
     if "future: retained" not in renamed.read_text():
-        raise AcceptanceFailure("header rename lost unknown front matter")
+        raise AcceptanceFailure("first heading rename lost unknown front matter")
     saved = driver.wait_for_stable_frame("renamed note header", crop=(256, 0, 984, 56), stable_for=0.3)
     if image_difference(initial, saved, crop=(256, 55, 984, 1)) != 0:
         raise AcceptanceFailure("renaming changed the fixed header divider")
     driver.key("ctrl+z")
-    wait_until("header rename is undoable", lambda: any(
+    wait_until("first heading rename is undoable", lambda: any(
         path.read_text().endswith("# " + title + tail) for path in notes.glob("*.md")), timeout=10)
     driver.close_app()
 
