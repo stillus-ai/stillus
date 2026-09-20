@@ -13,6 +13,23 @@ import subprocess
 
 APP_ID = "org.stillus.Stillus"
 
+TEXT_MIME_TYPES = (
+    'text/plain text/markdown text/x-log application/json application/json5 '
+    'application/x-ndjson text/csv text/tab-separated-values application/yaml text/yaml '
+    'text/x-yaml application/toml text/x-toml text/x-ini text/x-config '
+    'text/x-java-properties application/xml text/xml application/xslt+xml image/svg+xml '
+    'text/html application/xhtml+xml text/css text/x-scss text/x-sass '
+    'text/x-less text/javascript application/javascript application/typescript text/x-typescript '
+    'application/x-php text/x-php text/x-python application/x-python text/x-python3 '
+    'application/x-ruby text/x-ruby text/x-rust text/x-go text/x-c '
+    'text/x-chdr text/x-c++ text/x-c++hdr text/x-csharp text/x-java '
+    'text/x-kotlin text/x-swift application/x-shellscript text/x-shellscript application/x-powershell '
+    'application/x-bat application/sql text/x-sql text/x-lua application/x-perl '
+    'text/x-perl text/x-r text/x-vue text/x-svelte text/x-astro '
+    'application/graphql text/x-protobuf text/x-tex text/x-bibtex text/x-rst '
+    'text/x-asciidoc text/org text/x-diff text/x-patch '
+).split()
+
 
 def exec_argument(value: str) -> str:
     # Exec quoting and Desktop Entry string escaping are two separate layers.
@@ -30,7 +47,7 @@ def desktop_entry(executable: Path) -> str:
         "Comment=Local Markdown editor and RSS reader\n"
         f"Exec=/usr/bin/env -- {exec_argument(str(executable))} -- %F\n"
         f"Icon={APP_ID}\nTerminal=false\nCategories=Office;TextEditor;\n"
-        "MimeType=text/markdown;text/plain;\n"
+        f"MimeType={';'.join(TEXT_MIME_TYPES)};\n"
         f"X-Stillus-Executable={exec_argument(str(executable))}\n"
     )
 

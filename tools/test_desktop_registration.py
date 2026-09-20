@@ -4,14 +4,51 @@
 """Exercise opt-in registration in an isolated user data directory."""
 
 from pathlib import Path
+import platform
+import re
+import runpy
+import shutil
 import tempfile
 import unittest
 from unittest.mock import patch
 
-from register_linux import APP_ID, desktop_entry, exec_argument, register
+from register_linux import APP_ID, TEXT_MIME_TYPES, desktop_entry, exec_argument, register
+from package_macos import TEXT_EXTENSIONS
 
 
 class RegistrationTests(unittest.TestCase):
+    def test_text_extensions_match_windows_registration(self):
+        script = Path(__file__).with_name("register_windows.ps1").read_text()
+        declaration = script.split("$extensions = @(\n", 1)[1].split("\n)", 1)[0]
+        windows_extensions = re.findall(r"'\.([a-z0-9]+)'", declaration)
+        self.assertEqual(windows_extensions, TEXT_EXTENSIONS)
+        self.assertEqual(len(TEXT_EXTENSIONS), len(set(TEXT_EXTENSIONS)))
+        self.assertTrue({"md", "markdown", "txt", "log", "json", "csv", "tsv", "php", "js", "html"}.issubset(TEXT_EXTENSIONS))
+        self.assertEqual(script.count("foreach ($extension in $extensions)"), 2)
+
+    def test_linux_package_and_registration_declare_the_same_text_types(self):
+        self.assertEqual(len(TEXT_MIME_TYPES), len(set(TEXT_MIME_TYPES)))
+        self.assertTrue({"text/plain", "application/json", "text/csv", "text/tab-separated-values", "application/x-php", "text/javascript", "text/html"}.issubset(TEXT_MIME_TYPES))
+        source = Path(__file__).resolve().parent
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "tools").mkdir()
+            for name in ("package_linux.py", "register_linux.py"):
+                shutil.copyfile(source / name, root / "tools" / name)
+            assets = root / "app/stillus/assets"
+            assets.mkdir(parents=True)
+            (assets / "stillus-app-icon.svg").write_text("<svg/>")
+            (root / "LICENSE").write_text("test license")
+            destination = root / "dist/linux" / platform.machine()
+            destination.mkdir(parents=True)
+            runpy.run_path(str(root / "tools/package_linux.py"), run_name="__main__")
+            packaged = (destination / f"{APP_ID}.desktop").read_text()
+            registered = desktop_entry(destination / "stillus")
+            expected = "MimeType=" + ";".join(TEXT_MIME_TYPES) + ";"
+            self.assertIn(expected, packaged.splitlines())
+            self.assertIn(expected, registered.splitlines())
+            self.assertEqual((destination / "Register.py").read_bytes(), (source / "register_linux.py").read_bytes())
+
     def test_install_repeat_remove_preserves_defaults_and_other_apps(self):
         with tempfile.TemporaryDirectory(prefix="stillus desktop 日本語 ") as temporary:
             root = Path(temporary)

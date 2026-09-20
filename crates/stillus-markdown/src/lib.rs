@@ -58,6 +58,10 @@ impl FileEngineFactory for MarkdownEngineFactory {
             .collect()
     }
 
+    fn external_file_fallback(&self) -> bool {
+        true
+    }
+
     fn settings_schema(&self) -> SettingsSchema {
         SettingsSchema::default()
     }
@@ -175,7 +179,6 @@ impl FileEngine for MarkdownEngine {
     }
 
     fn open_external_file(&mut self, path: &Path) -> Result<ExternalFileSummary, EngineError> {
-        validate_external_extension(path)?;
         if !path.is_absolute() {
             return Err(EngineError::Io(
                 "external file path must be absolute".to_owned(),
@@ -212,6 +215,11 @@ impl FileEngine for MarkdownEngine {
                 Err(ExternalUtf8Error::Invalid { offset }) => {
                     return Err(EngineError::Io(format!(
                         "external file is not valid UTF-8 at byte {offset}"
+                    )));
+                }
+                Err(ExternalUtf8Error::Binary { offset }) => {
+                    return Err(EngineError::Io(format!(
+                        "external file contains binary data (NUL) at byte {offset}"
                     )));
                 }
                 Err(ExternalUtf8Error::Io(error)) => {
@@ -298,6 +306,7 @@ impl FileEngine for MarkdownEngine {
 enum ExternalUtf8Error {
     Io(io::Error),
     Invalid { offset: u64 },
+    Binary { offset: u64 },
 }
 
 /// Validate the entire file without retaining its contents. A UTF-8 character
@@ -320,6 +329,11 @@ fn validate_external_utf8(mut reader: impl Read) -> Result<(), ExternalUtf8Error
             };
         }
         let length = carry + read;
+        if let Some(index) = buffer[..length].iter().position(|byte| *byte == 0) {
+            return Err(ExternalUtf8Error::Binary {
+                offset: offset + index as u64,
+            });
+        }
         match std::str::from_utf8(&buffer[..length]) {
             Ok(_) => {
                 offset += length as u64;
@@ -358,20 +372,6 @@ fn normalize_absolute_path(path: &Path) -> Result<PathBuf, EngineError> {
         }
     }
     Ok(normalized)
-}
-
-fn validate_external_extension(path: &Path) -> Result<(), EngineError> {
-    let extension = path
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .map(str::to_ascii_lowercase);
-    if matches!(extension.as_deref(), Some("md" | "markdown" | "txt")) {
-        Ok(())
-    } else {
-        Err(EngineError::Unsupported(
-            "markdown supports only .md, .markdown and .txt external files".to_owned(),
-        ))
-    }
 }
 
 fn external_item_id(path: &Path) -> Result<ItemId, EngineError> {
@@ -480,6 +480,7 @@ mod tests {
         assert!(factory.capabilities().global_search);
         assert!(factory.capabilities().local_search);
         assert!(factory.capabilities().external_files);
+        assert!(factory.external_file_fallback());
         assert_eq!(
             factory.external_file_extensions(),
             ["md", "markdown", "txt"]
@@ -561,6 +562,75 @@ mod tests {
         assert!(engine.open_external_file(&invalid).is_err());
         assert!(engine.open_external_file(&directory).is_err());
         assert!(engine.external_files().is_empty());
+    }
+
+    #[test]
+    fn external_text_accepts_any_name_without_changing_bytes() {
+        let workspace = TempDir::new().unwrap();
+        fs::create_dir(workspace.path().join("notes")).unwrap();
+        let mut engine = MarkdownEngine::open(workspace.path()).unwrap();
+        let names = [
+            "app.LOG",
+            "data.json",
+            "data.csv",
+            "data.tsv",
+            "index.php",
+            "app.js",
+            "index.html",
+            "README",
+            "Dockerfile",
+            ".env",
+            "custom.unknown",
+            "file.",
+        ];
+        for (index, name) in names.iter().enumerate() {
+            let path = workspace.path().join(name);
+            let original = "\u{feff}Привет 日本語\tvalue\r\n\x1b[31mred\x1b[0m\n";
+            fs::write(&path, original).unwrap();
+            let summary = engine.open_external_file(&path).unwrap();
+            assert_eq!(summary.availability, ItemAvailability::Ready);
+            assert_eq!(
+                engine.open_external_file(&path).unwrap().item_id,
+                summary.item_id
+            );
+            assert_eq!(engine.external_files().len(), index + 1);
+            assert_eq!(fs::read(&path).unwrap(), original.as_bytes());
+        }
+        let empty = workspace.path().join("empty");
+        fs::write(&empty, []).unwrap();
+        assert_eq!(
+            engine.open_external_file(&empty).unwrap().availability,
+            ItemAvailability::Ready
+        );
+    }
+
+    #[test]
+    fn external_binary_data_is_rejected_at_any_offset_without_registration() {
+        let workspace = TempDir::new().unwrap();
+        fs::create_dir(workspace.path().join("notes")).unwrap();
+        let mut engine = MarkdownEngine::open(workspace.path()).unwrap();
+        for name in ["binary", "binary.log", "binary.unknown"] {
+            let path = workspace.path().join(name);
+            for offset in [
+                0,
+                UTF8_READ_BYTES - 1,
+                UTF8_READ_BYTES,
+                UTF8_READ_BYTES * 3 + 5,
+            ] {
+                for byte in [0, 0xff] {
+                    let mut data = vec![b'a'; offset];
+                    data.push(byte);
+                    fs::write(&path, &data).unwrap();
+                    assert!(engine.open_external_file(&path).is_err());
+                    assert!(engine.external_files().is_empty());
+                    assert_eq!(fs::read(&path).unwrap(), data);
+                }
+            }
+        }
+        let mut data = vec![b'a'; UTF8_READ_BYTES - 1];
+        data.extend_from_slice("я\0".as_bytes());
+        assert!(matches!(validate_external_utf8(data.as_slice()),
+            Err(ExternalUtf8Error::Binary { offset }) if offset == UTF8_READ_BYTES as u64 + 1));
     }
 
     #[test]
@@ -665,11 +735,15 @@ mod tests {
     fn external_large_file_attachment_is_streamed() {
         let workspace = TempDir::new().unwrap();
         fs::create_dir(workspace.path().join("notes")).unwrap();
-        let path = workspace.path().join("large.txt");
-        // Sparse zeros are valid UTF-8. This also runs under a 192 MiB container
-        // limit to catch accidental whole-file allocations in the attachment path.
+        let path = workspace.path().join("large.log");
+        // Write real text in bounded chunks: sparse NUL-filled files are binary.
+        // This also runs under a 192 MiB container limit to catch whole-file allocations.
         let size = 1024 * 1024 * 1024;
-        fs::File::create(&path).unwrap().set_len(size).unwrap();
+        io::copy(
+            &mut io::repeat(b'a').take(size),
+            &mut fs::File::create(&path).unwrap(),
+        )
+        .unwrap();
         let mut engine = MarkdownEngine::open(workspace.path()).unwrap();
         assert_eq!(
             engine.open_external_file(&path).unwrap().availability,

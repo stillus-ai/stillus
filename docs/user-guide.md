@@ -103,15 +103,23 @@ follow note symlinks.
 
 ## External files and desktop opening
 
-External `.md`, `.markdown`, and `.txt` files open as complete UTF-8 text without
-parsing YAML front matter. They remain at their original locations and are not
+External files with any extension, or no extension, open as complete UTF-8 text
+without parsing YAML front matter. This includes Markdown, `.txt`, `.log`, `.json`,
+`.csv`, `.tsv`, `.php`, `.js`, `.html`, `README`, `Dockerfile`, and `.env`.
+The file picker shows all files; their contents are checked before attachment.
+Empty files and UTF-8 with a BOM are accepted. Invalid UTF-8 and binary data
+containing NUL bytes are rejected; UTF-16 and Windows-1251 are not converted.
+Source code is edited as text, never executed.
+
+Files remain at their original locations and are not
 copied into `notes/` or added to the workspace search index. Their ordered list
 is saved separately for each workspace.
 
 The close control in External removes only the sidebar reference;
 it never deletes the external file.
 
-The macOS bundle declares support for these extensions, but does not replace
+The macOS bundle declares common text, data, configuration, and source-code
+extensions, but does not replace
 your existing default editor automatically. In Finder, select a file, open
 Get Info (`⌘I`), choose Stillus under Open with, and select Change All if you
 want it to become the default. Double-clicking a file or choosing Open with
@@ -123,8 +131,12 @@ On Linux, run the package's `python3 Register.py` to add Stillus to Open With;
 for registration. On Windows, run `powershell -NoProfile -File .\Register.ps1`;
 add `-Remove` to unregister. Neither registration changes your default editor.
 Register again after moving the portable package.
+The Open With registrations include common text formats on all three platforms.
+Whether the OS suggests Stillus for an unknown extension or an extensionless file
+depends on its file-type detection; these files can always be selected in Stillus
+or passed explicitly with `--open`.
 
-You can also pass files directly: `stillus --open first.md second.txt`, optionally
+You can also pass files directly: `stillus --open app.log data.json Dockerfile`, optionally
 with `--workspace /path/to/workspace`. A directory argument alone keeps its
 workspace-selection meaning. Requests wait for workspace selection on first
 launch. Linux and Windows can open a new window; Finder normally reuses the

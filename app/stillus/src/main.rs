@@ -51,7 +51,7 @@ use application::workspace::Workspace as WorkspaceSession;
 use editor_geometry::{EditorTextGeometry, GeometryConfig, GeometryLine, MAX_GEOMETRY_ROWS};
 use floem::action::exec_after;
 use floem::event::{Event, EventListener, EventPropagation};
-use floem::file::{FileDialogOptions, FileSpec};
+use floem::file::FileDialogOptions;
 use floem::file_action::open_file;
 use floem::keyboard::{Key, KeyCode, Modifiers, NamedKey, PhysicalKey};
 use floem::kurbo::{Point, Size};
@@ -5635,31 +5635,13 @@ fn activate_sidebar_group(
     schedule_autosave(model.clone(), revision);
 }
 
-fn external_file_picker_spec(extensions: Vec<String>) -> Option<FileSpec> {
-    if extensions.is_empty() {
-        return None;
-    }
-
-    // Floem's native dialog contract requires static filter descriptors. The
-    // registry belongs to the application session and this view is built once,
-    // so promoting this small, bounded extension list matches that lifetime.
-    let extensions = extensions
-        .into_iter()
-        .map(|extension| Box::leak(extension.into_boxed_str()) as &'static str)
-        .collect::<Vec<_>>();
-    Some(FileSpec {
-        name: i18n::static_filter_name(),
-        extensions: Box::leak(extensions.into_boxed_slice()),
-    })
-}
-
 fn creation_popover(
     model: Rc<RefCell<AppModel>>,
     revision: RwSignal<u64>,
     sidebar_state: RwSignal<SidebarState>,
     open: RwSignal<bool>,
     picker_active: RwSignal<bool>,
-    file_spec: Option<FileSpec>,
+    file_enabled: bool,
     palette: Palette,
 ) -> impl IntoView {
     let rss_mode = create_rw_signal(false);
@@ -5687,7 +5669,7 @@ fn creation_popover(
                     sidebar_state,
                     open,
                     picker_active,
-                    file_spec,
+                    file_enabled,
                     rss_mode,
                     rss_error,
                     palette,
@@ -5718,7 +5700,7 @@ fn creation_choices(
     sidebar_state: RwSignal<SidebarState>,
     open: RwSignal<bool>,
     picker_active: RwSignal<bool>,
-    file_spec: Option<FileSpec>,
+    file_enabled: bool,
     rss_mode: RwSignal<bool>,
     rss_error: RwSignal<Option<UiText>>,
     palette: Palette,
@@ -5726,7 +5708,6 @@ fn creation_choices(
     let note_model = model.clone();
     let chat_model = model.clone();
     let file_model = model;
-    let file_enabled = file_spec.is_some();
     menu(
         vec![
             MenuEntry::action(
@@ -5747,18 +5728,13 @@ fn creation_choices(
                 move || file_enabled,
                 move || {
                     open.set(false);
-                    let Some(mut file_spec) = file_spec else {
-                        return;
-                    };
                     if picker_active.get_untracked() {
                         return;
                     }
                     picker_active.set(true);
-                    file_spec.name = i18n::static_filter_name();
                     let options = FileDialogOptions::new()
                         .title(tr!(ChooseExternal))
-                        .multi_selection()
-                        .allowed_types(vec![file_spec]);
+                        .multi_selection();
                     let selected_model = file_model.clone();
                     open_file(options, move |selection| {
                         picker_active.set(false);
@@ -7587,11 +7563,11 @@ fn sidebar_panel(
 
     let create_menu_open = create_rw_signal(false);
     let external_picker_active = create_rw_signal(false);
-    let external_file_spec = model
+    let external_file_enabled = model
         .borrow()
         .workspace
         .as_ref()
-        .and_then(|workspace| external_file_picker_spec(workspace.external_file_extensions()));
+        .is_some_and(|workspace| workspace.supports_external_files());
     let create_trigger = icon_button(
         ButtonAction::Add.icon(),
         || tr!(CreateOrOpen),
@@ -7613,7 +7589,7 @@ fn sidebar_panel(
                 sidebar_state,
                 create_menu_open,
                 external_picker_active,
-                external_file_spec,
+                external_file_enabled,
                 palette,
             )
         },
@@ -11811,13 +11787,13 @@ mod tests {
         editor_drag_command_for_point, editor_horizontal_metrics, editor_layout,
         editor_line_command_for_point, editor_line_number_width, editor_menu_state,
         editor_selection_is_fully_visible, editor_selection_rects, editor_wheel_line_delta,
-        editor_word_command_for_point, external_file_picker_spec, go_to_line,
-        is_current_search_generation, is_primary_pointer_down, is_toggle_task_done_shortcut,
-        matching_tag_indices, move_tag_suggestion_highlight, note_drop_target, note_matches_filter,
-        parse_go_to_line, password_change_busy, password_change_progress_text,
-        password_change_success_text, prepare_workspace_switch, probe_editor_font,
-        protection_action_state, protection_password_dialog, recovery_password_outcome,
-        render_editor, render_editor_line_numbers, reordered_catalog_items, resized_sidebar_width,
+        editor_word_command_for_point, go_to_line, is_current_search_generation,
+        is_primary_pointer_down, is_toggle_task_done_shortcut, matching_tag_indices,
+        move_tag_suggestion_highlight, note_drop_target, note_matches_filter, parse_go_to_line,
+        password_change_busy, password_change_progress_text, password_change_success_text,
+        prepare_workspace_switch, probe_editor_font, protection_action_state,
+        protection_password_dialog, recovery_password_outcome, render_editor,
+        render_editor_line_numbers, reordered_catalog_items, resized_sidebar_width,
         resolve_startup_workspace, search_worker, sidebar_category_tree,
         sidebar_note_indicator_icons, sidebar_rows, sidebar_tree_indent, startup_candidate_state,
         tag_submission, tag_suggestions, toolbar_action_icon, toolbar_action_is_toggle,
@@ -11907,14 +11883,11 @@ mod tests {
     }
 
     #[test]
-    fn external_file_picker_uses_registered_extensions() {
+    fn external_file_picker_is_enabled_for_external_capability() {
         let root = test_workspace("stillus-app-file-picker");
         fs::create_dir_all(root.join("notes")).expect("create picker workspace");
         let workspace = WorkspaceSession::open(&root).unwrap();
-        let spec = external_file_picker_spec(workspace.external_file_extensions()).unwrap();
-
-        assert_eq!(spec.name, tr!(SupportedFiles));
-        assert_eq!(spec.extensions, ["markdown", "md", "txt"]);
+        assert!(workspace.supports_external_files());
         drop(workspace);
         fs::remove_dir_all(root).expect("remove picker workspace");
     }
@@ -12026,6 +11999,37 @@ mod tests {
     }
 
     #[test]
+    fn launch_external_text_paths_do_not_require_known_extensions() {
+        let root = test_workspace("stillus-launch-text-paths");
+        fs::create_dir_all(&root).unwrap();
+        let paths = [
+            "README",
+            "Dockerfile",
+            ".env",
+            "file.unknown",
+            "app.log",
+            "data.json",
+        ]
+        .map(|name| root.join(name));
+        for path in &paths {
+            fs::write(path, "text\n").unwrap();
+        }
+        let parsed = LaunchOptions::parse_from(paths.iter().map(|path| path.as_os_str())).unwrap();
+        assert_eq!(parsed.external_paths, paths);
+        assert!(parsed.workspace.is_none());
+        let parsed = LaunchOptions::parse_from(["--open", "missing", "missing.unknown"]).unwrap();
+        assert_eq!(
+            parsed.external_paths,
+            [
+                std::path::PathBuf::from("missing"),
+                "missing.unknown".into()
+            ]
+        );
+        assert!(parsed.workspace.is_none());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn launch_accepts_file_batches_and_explicit_workspace() {
         assert_eq!(
             LaunchOptions::parse_from(["--open", "--", "--literal.txt"])
@@ -12119,14 +12123,14 @@ mod tests {
     fn external_batches_keep_order_duplicates_and_errors() {
         let root = test_workspace("stillus-open-batch");
         fs::create_dir_all(root.join("notes")).unwrap();
-        let first = root.join("日本語 one.MD");
-        let second = root.join("second.txt");
+        let first = root.join("日本語 one.LOG");
+        let second = root.join("Dockerfile");
         fs::write(&first, "First\n").unwrap();
         fs::write(&second, "Second\n").unwrap();
         let mut model = AppModel::load(&root);
         assert!(model.accept_external_paths(&[
             first.clone(),
-            root.join("missing.md"),
+            root.join("missing.unknown"),
             second.clone(),
             first.clone()
         ]));
@@ -15348,8 +15352,8 @@ mod tests {
         let notes = root.join("notes");
         fs::create_dir_all(&notes).expect("create external selection workspace");
         fs::write(notes.join("Fallback.md"), "# Fallback\n").expect("write fallback note");
-        let external = root.join("External.txt");
-        let missing = root.join("Missing.md");
+        let external = root.join(".env");
+        let missing = root.join("Missing.unknown");
         fs::write(&external, "external\n").expect("write external file");
         let persisted = [
             PersistedExternalFile {

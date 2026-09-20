@@ -762,6 +762,10 @@ impl WorkspaceSession {
             .collect()
     }
 
+    pub fn supports_external_files(&self) -> bool {
+        self.engine_registry.supports_external_files()
+    }
+
     pub fn engine_catalog(&self) -> Result<Vec<ItemSummary>, CoreError> {
         let mut items = Vec::new();
         for engine in &self.engines {
@@ -6035,79 +6039,94 @@ mod tests {
 
     #[test]
     fn external_markdown_is_whole_text_stable_deduplicated_and_saved_in_place() {
-        let workspace = TestWorkspace::new();
-        workspace.write_note("inside.md", "# Inside\n");
-        let external = workspace.path().join("External.TXT");
-        let original = "---\ntitle: literal\ntags: [not, metadata]\n---\n# External\n";
-        fs::write(&external, original).unwrap();
-        let mut session = WorkspaceSession::open(workspace.path()).unwrap();
-        assert_eq!(
-            session.external_file_extensions(),
-            ["markdown", "md", "txt"]
-        );
-        session.open_note(0).unwrap();
-        assert!(session.selected_document_supports_local_search());
-        let workspace_matches = session.search_selected_document("inside", 10).unwrap();
-        assert_eq!(workspace_matches.len(), 1);
-        assert_eq!(workspace_matches[0].start().get(), 2);
-        assert_eq!(workspace_matches[0].end().get(), 8);
-
-        let target = session.attach_external_file(&external).unwrap();
-        assert!(matches!(target, DocumentTarget::ExternalFile { .. }));
-        assert_eq!(session.attach_external_file(&external).unwrap(), target);
-        assert_eq!(session.external_files().len(), 1);
-        let DocumentTarget::ExternalFile { engine_id, item_id } = target else {
-            unreachable!()
-        };
-        session.open_external_item(&engine_id, &item_id).unwrap();
-        assert_eq!(session.selected_note(), None);
-        assert_eq!(session.document().unwrap().title(), "External.TXT");
-        assert_eq!(document_text(session.document().unwrap()), original);
-        assert!(session.selected_document_supports_local_search());
-        let external_matches = session.search_selected_document("external", 10).unwrap();
-        let external_start = original.find("External").unwrap();
-        assert_eq!(external_matches.len(), 1);
-        assert_eq!(external_matches[0].start().get(), external_start);
-        assert_eq!(
-            external_matches[0].end().get(),
-            external_start + "External".len()
-        );
-
-        session
-            .apply_selected_at(EditorCommand::SelectAll, 1)
-            .unwrap();
-        let replacement = "---\nstill: literal\n---\nchanged\n";
-        session
-            .apply_selected_at(EditorCommand::Insert(replacement.to_owned()), 2)
-            .unwrap();
-        assert_eq!(session.document().unwrap().title(), "External.TXT");
-        let save = session
-            .begin_autosave(2 + AUTOSAVE_DEBOUNCE_MS, "ignored".to_owned())
-            .unwrap()
-            .unwrap();
-        session.finish_autosave(save.execute()).unwrap();
-        assert_eq!(fs::read_to_string(&external).unwrap(), replacement);
-
-        let inside = workspace.note_path("inside.md");
-        let canonical = inside.canonicalize().unwrap();
-        stillus_platform::diagnostics::path_comparison(
-            stillus_platform::diagnostics::PathOperation::WorkspaceNote,
-            &canonical,
-            &session.notes()[0].path,
-        );
-        for path in [&inside, &canonical] {
+        for name in [
+            "External.TXT",
+            "app.LOG",
+            "data.json",
+            "data.csv",
+            "data.tsv",
+            "index.php",
+            "app.js",
+            "index.html",
+            "README",
+            "Dockerfile",
+            ".env",
+            "file.unknown",
+        ] {
+            let workspace = TestWorkspace::new();
+            workspace.write_note("inside.md", "# Inside\n");
+            let external = workspace.path().join(name);
+            let original = "---\ntitle: literal\ntags: [not, metadata]\n---\n# External\n";
+            fs::write(&external, original).unwrap();
+            let mut session = WorkspaceSession::open(workspace.path()).unwrap();
             assert_eq!(
-                session.attach_external_file(path).unwrap(),
-                DocumentTarget::WorkspaceNote(0)
+                session.external_file_extensions(),
+                ["markdown", "md", "txt"]
             );
+            session.open_note(0).unwrap();
+            assert!(session.selected_document_supports_local_search());
+            let workspace_matches = session.search_selected_document("inside", 10).unwrap();
+            assert_eq!(workspace_matches.len(), 1);
+            assert_eq!(workspace_matches[0].start().get(), 2);
+            assert_eq!(workspace_matches[0].end().get(), 8);
+
+            let target = session.attach_external_file(&external).unwrap();
+            assert!(matches!(target, DocumentTarget::ExternalFile { .. }));
+            assert_eq!(session.attach_external_file(&external).unwrap(), target);
+            assert_eq!(session.external_files().len(), 1);
+            let DocumentTarget::ExternalFile { engine_id, item_id } = target else {
+                unreachable!()
+            };
+            session.open_external_item(&engine_id, &item_id).unwrap();
+            assert_eq!(session.selected_note(), None);
+            assert_eq!(session.document().unwrap().title(), name);
+            assert_eq!(document_text(session.document().unwrap()), original);
+            assert!(session.selected_document_supports_local_search());
+            let external_matches = session.search_selected_document("external", 10).unwrap();
+            let external_start = original.find("External").unwrap();
+            assert_eq!(external_matches.len(), 1);
+            assert_eq!(external_matches[0].start().get(), external_start);
+            assert_eq!(
+                external_matches[0].end().get(),
+                external_start + "External".len()
+            );
+
+            session
+                .apply_selected_at(EditorCommand::SelectAll, 1)
+                .unwrap();
+            let replacement = "---\nstill: literal\n---\nchanged\n";
+            session
+                .apply_selected_at(EditorCommand::Insert(replacement.to_owned()), 2)
+                .unwrap();
+            assert_eq!(session.document().unwrap().title(), name);
+            let save = session
+                .begin_autosave(2 + AUTOSAVE_DEBOUNCE_MS, "ignored".to_owned())
+                .unwrap()
+                .unwrap();
+            session.finish_autosave(save.execute()).unwrap();
+            assert_eq!(fs::read_to_string(&external).unwrap(), replacement);
+
+            let inside = workspace.note_path("inside.md");
+            let canonical = inside.canonicalize().unwrap();
+            stillus_platform::diagnostics::path_comparison(
+                stillus_platform::diagnostics::PathOperation::WorkspaceNote,
+                &canonical,
+                &session.notes()[0].path,
+            );
+            for path in [&inside, &canonical] {
+                assert_eq!(
+                    session.attach_external_file(path).unwrap(),
+                    DocumentTarget::WorkspaceNote(0)
+                );
+            }
+            assert_eq!(session.external_files().len(), 1);
         }
-        assert_eq!(session.external_files().len(), 1);
     }
 
     #[test]
     fn external_recovery_survives_workspace_restart() {
         let workspace = TestWorkspace::new();
-        let external = workspace.path().join("recover.md");
+        let external = workspace.path().join("recover");
         fs::write(&external, "disk\n").unwrap();
         let (engine_id, item_id) = {
             let mut session = WorkspaceSession::open(workspace.path()).unwrap();

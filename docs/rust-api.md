@@ -43,7 +43,10 @@ click. `security/disable` returns `RequiresUserInteraction`.
 Note and external-file IDs are opaque handles within the workspace session.
 An application rename retains the handle without adding IDs to YAML or changing
 storage formats. `external/open` requires an absolute path and preserves the
-existing engine type, symlink and duplicate-file rules.
+existing engine type, symlink and duplicate-file rules. The built-in text handler
+accepts any extension, including no extension, after a streamed UTF-8 check that
+rejects NUL bytes. Specific registered extension handlers take precedence over
+the text fallback.
 
 Read before changing an object. `notes/read` returns a bounded UTF-8 body slice
 and an opaque version; it includes the open editor's unsaved buffer. It also

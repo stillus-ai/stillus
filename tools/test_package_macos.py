@@ -147,6 +147,12 @@ class PackageMacosTests(unittest.TestCase):
                         "CFBundleTypeName": "Markdown and Text",
                         "CFBundleTypeRole": "Editor",
                         "LSHandlerRank": "Owner",
+                    },
+                    {
+                        "CFBundleTypeExtensions": package_macos.TEXT_EXTENSIONS[3:],
+                        "CFBundleTypeName": "Text and Source Code",
+                        "CFBundleTypeRole": "Editor",
+                        "LSHandlerRank": "Alternate",
                     }
                 ],
             )

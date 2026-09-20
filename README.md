@@ -51,8 +51,9 @@ Write notes, develop ideas, and keep the context behind your work. Organize
 with tags, favorites, and pins; find notes with local search. Your assistant
 can draw on this knowledge when writing text or preparing a reply.
 
-Notes use Markdown with YAML front matter. Open external `.md`, `.markdown`,
-and `.txt` files and edit them in place. Autosave, crash recovery, and external
+Notes use Markdown with YAML front matter. Open any UTF-8 text file and edit it
+in place, including logs, JSON, CSV, source code, and files without extensions
+such as `Dockerfile`. Autosave, crash recovery, and external
 change detection help preserve your work.
 
 ### Read and reply to email

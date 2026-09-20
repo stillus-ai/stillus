@@ -143,7 +143,9 @@ Windows home/profile path use native path handling.
 
 Run `powershell -NoProfile -File .\Register.ps1` from the portable package.
 Use `-Remove` to unregister that copy. The script changes only current-user
-Stillus registration and OpenWithProgids for `.md`, `.markdown`, and `.txt`.
+Stillus registration and OpenWithProgids for common text, data, configuration,
+and source-code extensions, including `.md`, `.txt`, `.log`, `.json`, `.csv`,
+`.tsv`, `.php`, `.js`, and `.html`.
 It never writes UserChoice or replaces the default application. Re-register
 after moving the package. Explorer launches the executable with the requested
 file; a new process/window is allowed.

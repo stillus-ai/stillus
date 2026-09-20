@@ -7,6 +7,8 @@ import platform
 from pathlib import Path
 import shutil
 
+from register_linux import TEXT_MIME_TYPES
+
 ROOT = Path(__file__).resolve().parent.parent
 destination = ROOT / "dist/linux" / platform.machine()
 shutil.copyfile(ROOT / "tools/register_linux.py", destination / "Register.py")
@@ -15,6 +17,6 @@ shutil.copyfile(ROOT / "LICENSE", destination / "LICENSE.txt")
 (destination / "org.stillus.Stillus.desktop").write_text(
     "[Desktop Entry]\nType=Application\nName=Stillus\nExec=stillus -- %F\n"
     "Icon=org.stillus.Stillus\nTerminal=false\nCategories=Office;TextEditor;\n"
-    "MimeType=text/markdown;text/plain;\n",
+    f"MimeType={';'.join(TEXT_MIME_TYPES)};\n",
     encoding="utf-8",
 )

@@ -43,7 +43,7 @@ def run_scenario(*, cold_start: bool) -> None:
         workspace = root / "workspace"
         shutil.copytree(source_workspace, workspace)
         external = root / "External Smoke.MD"
-        second = root / "Заметка #2.markdown"
+        second = root / "Dockerfile"
         contents = "# External smoke\n\nBefore.\n"
         for path in (external, second):
             path.write_text(contents, encoding="utf-8")

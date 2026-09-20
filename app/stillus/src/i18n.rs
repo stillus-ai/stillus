@@ -111,24 +111,6 @@ impl fmt::Display for Key {
     }
 }
 
-// Native file filters require static strings. Cache at most one per language.
-pub(crate) fn static_filter_name() -> &'static str {
-    static NAMES: std::sync::OnceLock<Vec<&'static str>> = std::sync::OnceLock::new();
-    let names = NAMES.get_or_init(|| {
-        Locale::ALL
-            .iter()
-            .map(|locale| {
-                let name = Key::SupportedFiles.message().render_for(*locale);
-                &*Box::leak(name.into_boxed_str())
-            })
-            .collect()
-    });
-    names[Locale::ALL
-        .iter()
-        .position(|locale| *locale == current())
-        .unwrap_or(0)]
-}
-
 thread_local! {
     static LANGUAGE: RwSignal<Locale> = floem::reactive::Scope::new().create_rw_signal(Locale::English);
     static BUNDLES: RefCell<Vec<(Locale, FluentBundle<FluentResource>)>> = const { RefCell::new(Vec::new()) };

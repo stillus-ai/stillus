@@ -585,8 +585,8 @@ impl Workspace {
         self.core.engine_ids()
     }
 
-    pub fn external_file_extensions(&self) -> Vec<String> {
-        self.core.external_file_extensions()
+    pub fn supports_external_files(&self) -> bool {
+        self.core.supports_external_files()
     }
 
     pub fn engine_catalog(&self) -> Result<Vec<ItemSummary>, CoreError> {

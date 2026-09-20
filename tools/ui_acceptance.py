@@ -6921,7 +6921,7 @@ def search_scenario(driver: WindowDriver, workspace: Path) -> None:
 def external_sidebar_scenario(driver: WindowDriver, workspace: Path) -> None:
     driver.start_app(workspace, "external-sidebar-settings")
     driver.close_app()
-    files = [driver.temporary_root / name for name in ("first.txt", "second.txt")]
+    files = [driver.temporary_root / name for name in ("first.log", "Dockerfile")]
     for file in files:
         file.write_text("External file must remain unchanged.\n", encoding="utf-8")
     original = [file.read_bytes() for file in files]

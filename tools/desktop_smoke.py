@@ -110,8 +110,8 @@ def persistence_smoke(root, env, scenario):
 def external(root, env):
     workspace = root / "workspace"
     generate_demo_workspace(workspace)
-    first = root / "Заметка #1.MD"
-    second = root / "two space.txt"
+    first = root / "Заметка #1.LOG"
+    second = root / "Dockerfile"
     for path in (first, second):
         path.write_text("External unchanged\n", encoding="utf-8")
     subprocess.run([str(BINARY), "--workspace", str(workspace), "--open", first.name, second.name,

@@ -470,6 +470,11 @@ pub trait FileEngineFactory: Send + Sync {
     fn external_file_extensions(&self) -> Vec<String> {
         Vec::new()
     }
+    /// Handle paths not claimed by a specific extension, including extensionless files.
+    /// The engine must validate the file contents before attaching the document.
+    fn external_file_fallback(&self) -> bool {
+        false
+    }
     fn validate_settings(&self, candidate: &SettingsCandidate) -> Result<(), EngineError> {
         self.settings_schema()
             .validate_candidate(candidate, &BTreeSet::new())
@@ -529,12 +534,23 @@ pub trait EngineUi: Send + Sync {
 pub struct EngineRegistry {
     factories: BTreeMap<EngineId, Arc<dyn FileEngineFactory>>,
     external_extensions: BTreeMap<String, EngineId>,
+    external_fallback: Option<EngineId>,
 }
 
 impl EngineRegistry {
     pub fn register(&mut self, factory: Arc<dyn FileEngineFactory>) -> Result<(), EngineError> {
         let id = factory.id();
+        if self.factories.contains_key(&id) {
+            return Err(EngineError::DuplicateEngine(id));
+        }
         factory.settings_schema().validate()?;
+        let fallback = factory.external_file_fallback();
+        if fallback && let Some(existing) = &self.external_fallback {
+            return Err(EngineError::ExternalFallbackConflict {
+                first: existing.clone(),
+                second: id,
+            });
+        }
         let extensions = factory
             .external_file_extensions()
             .into_iter()
@@ -549,8 +565,9 @@ impl EngineRegistry {
                 });
             }
         }
-        if self.factories.insert(id.clone(), factory).is_some() {
-            return Err(EngineError::DuplicateEngine(id));
+        self.factories.insert(id.clone(), factory);
+        if fallback {
+            self.external_fallback = Some(id.clone());
         }
         for extension in extensions {
             self.external_extensions.insert(extension, id.clone());
@@ -567,8 +584,20 @@ impl EngineRegistry {
     }
 
     pub fn external_engine_for_path(&self, path: &Path) -> Option<EngineId> {
-        let extension = path.extension()?.to_str()?.to_ascii_lowercase();
-        self.external_extensions.get(&extension).cloned()
+        path.extension()
+            .and_then(|extension| extension.to_str())
+            .and_then(|extension| {
+                self.external_extensions
+                    .get(&extension.to_ascii_lowercase())
+            })
+            .or(self.external_fallback.as_ref())
+            .cloned()
+    }
+
+    pub fn supports_external_files(&self) -> bool {
+        self.factories
+            .values()
+            .any(|factory| factory.capabilities().external_files)
     }
 
     pub fn external_file_extensions(&self) -> impl Iterator<Item = &str> {
@@ -824,6 +853,10 @@ pub enum EngineError {
         first: EngineId,
         second: EngineId,
     },
+    ExternalFallbackConflict {
+        first: EngineId,
+        second: EngineId,
+    },
     TaskAlreadyRunning,
     TaskCapacity,
     TaskBackoff,
@@ -857,6 +890,10 @@ impl fmt::Display for EngineError {
                 "external extension {extension} is claimed by both {first} and {second}"
             ),
             Self::TaskAlreadyRunning => formatter.write_str("task is already running"),
+            Self::ExternalFallbackConflict { first, second } => write!(
+                formatter,
+                "external file fallback is claimed by both {first} and {second}"
+            ),
             Self::TaskCapacity => formatter.write_str("task scheduler capacity is exhausted"),
             Self::TaskBackoff => formatter.write_str("task is waiting for its retry deadline"),
             Self::TaskMissing => formatter.write_str("task is not scheduled"),
@@ -944,6 +981,7 @@ mod tests {
     struct ExternalFactory {
         id: &'static str,
         extensions: &'static [&'static str],
+        fallback: bool,
     }
 
     impl FileEngineFactory for ExternalFactory {
@@ -967,6 +1005,10 @@ mod tests {
                 .iter()
                 .map(|value| (*value).to_owned())
                 .collect()
+        }
+
+        fn external_file_fallback(&self) -> bool {
+            self.fallback
         }
 
         fn settings_schema(&self) -> SettingsSchema {
@@ -1152,6 +1194,7 @@ mod tests {
             .register(Arc::new(ExternalFactory {
                 id: "first",
                 extensions: &[".MD", "txt"],
+                fallback: false,
             }))
             .unwrap();
         assert_eq!(
@@ -1169,9 +1212,121 @@ mod tests {
             registry.register(Arc::new(ExternalFactory {
                 id: "second",
                 extensions: &["md"],
+                fallback: false,
             })),
             Err(EngineError::ExternalTypeConflict { extension, .. }) if extension == "md"
         ));
+    }
+
+    #[test]
+    fn registry_external_fallback_preserves_specific_handlers_and_failed_registration() {
+        let mut registry = EngineRegistry::default();
+        assert!(!registry.supports_external_files());
+        assert!(
+            registry
+                .external_engine_for_path(Path::new("README"))
+                .is_none()
+        );
+        registry
+            .register(Arc::new(ExternalFactory {
+                id: "text",
+                extensions: &[],
+                fallback: true,
+            }))
+            .unwrap();
+        assert!(registry.supports_external_files());
+        assert!(registry.external_file_extensions().next().is_none());
+        registry
+            .register(Arc::new(ExternalFactory {
+                id: "json",
+                extensions: &["json"],
+                fallback: false,
+            }))
+            .unwrap();
+        for name in [
+            "README",
+            "Dockerfile",
+            ".env",
+            "file.unknown",
+            "file.log",
+            "file.",
+        ] {
+            assert_eq!(
+                registry
+                    .external_engine_for_path(Path::new(name))
+                    .unwrap()
+                    .as_str(),
+                "text"
+            );
+        }
+        assert_eq!(
+            registry
+                .external_engine_for_path(Path::new("file.JSON"))
+                .unwrap()
+                .as_str(),
+            "json"
+        );
+        assert!(matches!(
+            registry.register(Arc::new(ExternalFactory {
+                id: "second",
+                extensions: &["csv"],
+                fallback: true,
+            })),
+            Err(EngineError::ExternalFallbackConflict { .. })
+        ));
+        assert!(matches!(
+            registry.register(Arc::new(ExternalFactory {
+                id: "text",
+                extensions: &["csv"],
+                fallback: false,
+            })),
+            Err(EngineError::DuplicateEngine(_))
+        ));
+        assert_eq!(registry.len(), 2);
+        assert_eq!(
+            registry.external_file_extensions().collect::<Vec<_>>(),
+            ["json"]
+        );
+        assert!(
+            registry
+                .get(&EngineId::new("text").unwrap())
+                .unwrap()
+                .external_file_fallback()
+        );
+        assert!(registry.get(&EngineId::new("second").unwrap()).is_none());
+        assert_eq!(
+            registry
+                .external_engine_for_path(Path::new("file.csv"))
+                .unwrap()
+                .as_str(),
+            "text"
+        );
+    }
+
+    #[test]
+    fn registry_external_failed_extension_claim_does_not_install_fallback() {
+        let mut registry = EngineRegistry::default();
+        registry
+            .register(Arc::new(ExternalFactory {
+                id: "json",
+                extensions: &["json"],
+                fallback: false,
+            }))
+            .unwrap();
+        assert!(matches!(
+            registry.register(Arc::new(ExternalFactory {
+                id: "text",
+                extensions: &["JSON"],
+                fallback: true,
+            })),
+            Err(EngineError::ExternalTypeConflict { .. })
+        ));
+        assert_eq!(registry.len(), 1);
+        assert!(
+            registry
+                .external_engine_for_path(Path::new("README"))
+                .is_none()
+        );
     }
 
     #[test]

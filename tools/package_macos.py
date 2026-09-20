@@ -17,6 +17,15 @@ from pathlib import Path
 
 from app_version import read_version
 
+TEXT_EXTENSIONS = (
+    'md markdown txt text log json jsonc jsonl ndjson csv tsv yaml yml toml ini cfg '
+    'conf config env properties xml xsd xsl xslt svg html htm xhtml css scss sass less '
+    'js mjs cjs jsx ts mts cts tsx php phtml py pyw rb rs go c '
+    'h cc cpp cxx hpp cs java kt kts swift sh bash zsh fish ps1 bat '
+    'cmd sql lua pl pm r vue svelte astro graphql gql proto tex bib rst adoc '
+    'org diff patch '
+).split()
+
 APP_NAME = "Stillus"
 APP_VERSION = read_version()
 BUNDLE_IDENTIFIER = "org.stillus.Stillus"
@@ -319,6 +328,12 @@ def build_bundle(
                     "CFBundleTypeName": "Markdown and Text",
                     "CFBundleTypeRole": "Editor",
                     "LSHandlerRank": "Owner",
+                },
+                {
+                    "CFBundleTypeExtensions": TEXT_EXTENSIONS[3:],
+                    "CFBundleTypeName": "Text and Source Code",
+                    "CFBundleTypeRole": "Editor",
+                    "LSHandlerRank": "Alternate",
                 }
             ],
             "CFBundleExecutable": APP_NAME,

@@ -111,8 +111,8 @@ try {
     }
     Save-WindowsReport
     $report.phase = 'external file launch'
-    $external = Join-Path $root 'External 日本語 #1.MD'
-    $second = Join-Path $root 'External two.txt'
+    $external = Join-Path $root 'External 日本語 #1.LOG'
+    $second = Join-Path $root 'Dockerfile'
     [IO.File]::WriteAllText($external, "External unchanged`n", [Text.UTF8Encoding]::new($false))
     [IO.File]::WriteAllText($second, "Second unchanged`n", [Text.UTF8Encoding]::new($false))
     $arguments = @('--workspace', ('"' + $workspace + '"'), '--open', ('"' + $external + '"'), ('"' + $second + '"'))
@@ -137,11 +137,27 @@ try {
         $key.Dispose()
         & $registration -RegistryRoot $testRegistry
         & $registration -RegistryRoot $testRegistry
+        $textExtensions = @('.md', '.log', '.json', '.csv', '.tsv', '.php', '.js', '.html', '.rs', '.yaml')
+        foreach ($extension in $textExtensions) {
+            $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($testRegistry + '\' + $extension + '\OpenWithProgids')
+            if (-not $key) { throw "Missing Open With key for $extension" }
+            try {
+                if ($key.GetValueNames() -notcontains 'Stillus.Document') { throw "Missing text registration for $extension" }
+            } finally { $key.Dispose() }
+        }
         $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($testRegistry + '\Stillus.Document\shell\open\command')
         if ($key.GetValue('') -ne ('"' + $application + '" --open "%1"')) { throw 'Invalid Open With command.' }
         $key.Dispose()
         & $registration -RegistryRoot $testRegistry -Remove
         & $registration -RegistryRoot $testRegistry -Remove
+        foreach ($extension in $textExtensions) {
+            $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($testRegistry + '\' + $extension + '\OpenWithProgids')
+            if ($key) {
+                try {
+                    if ($key.GetValueNames() -contains 'Stillus.Document') { throw "Text registration remains for $extension" }
+                } finally { $key.Dispose() }
+            }
+        }
         $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($testRegistry + '\.txt')
         if ($key.GetValue('') -ne 'Other.TextEditor') { throw 'Registration changed a default association.' }
         $key.Dispose()

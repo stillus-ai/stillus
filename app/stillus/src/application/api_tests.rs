@@ -234,8 +234,19 @@ fn addressed_external_edit_preserves_selection_and_deduplicates_absolute_paths()
         Err(ActionError::InvalidArguments)
     );
     let wrong = f.root.join("unknown.bin");
-    fs::write(&wrong, "body").unwrap();
+    fs::write(&wrong, b"body\0binary").unwrap();
     assert!(f.call("external/open", json!({"path":wrong})).is_err());
+    assert_eq!(fs::read(&wrong).unwrap(), b"body\0binary");
+    assert_eq!(
+        f.call("external/list", json!({})).unwrap()["files"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    fs::write(&wrong, "body").unwrap();
+    f.call("external/open", json!({"path":wrong})).unwrap();
+    assert_eq!(fs::read_to_string(&wrong).unwrap(), "body");
     #[cfg(unix)]
     {
         let link = f.root.join("link.txt");
