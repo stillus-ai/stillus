@@ -8245,6 +8245,34 @@ def wait_for_ai_key_control(driver: WindowDriver, *, editing: bool,
     return previous, control_y
 
 
+def click_ai_primary(driver: WindowDriver, within: tuple[int, int] | None = None,
+                     *, timeout: float = DEFAULT_TIMEOUT_SECONDS) -> None:
+    """Wait for the enabled primary action to finish painting, then click once."""
+    top, bottom = within or (0, SCREEN_HEIGHT)
+    action_y: int | None = None
+
+    def enabled(frame: Path) -> bool:
+        nonlocal action_y
+        runs = shaded_row_runs(frame, x=AI_PRIMARY_PROBE_X, y=top,
+                               height=bottom - top, max_luminance=AI_ACCENT_LUMINANCE)
+        runs = [(start, end) for start, end in runs if end - start >= 20]
+        if not runs:
+            action_y = None
+            return False
+        start, end = max(runs, key=lambda run: run[1] - run[0])
+        action_y = (start + end) // 2
+        return True
+
+    # A stable disabled form can precede validation of the latest input. Require
+    # the accent-filled action throughout the same stable interval, not once on
+    # an arbitrary later frame. Probe its edge so text carets cannot reset it.
+    driver.wait_for_stable_frame("enabled AI primary action",
+        crop=(AI_PRIMARY_PROBE_X, top, 1, bottom - top), stable_for=0.15,
+        timeout=timeout, frame_ready=enabled)
+    assert action_y is not None
+    driver.click_point(AI_PRIMARY_PROBE_X, action_y)
+
+
 def ai_settings_scenario(driver: WindowDriver, workspace: Path) -> None:
     """Real native controls with test-only catalog and credential adapters."""
     original = {path: path.read_bytes() for path in (workspace / "notes").glob("*.md")}
@@ -8264,22 +8292,6 @@ def ai_settings_scenario(driver: WindowDriver, workspace: Path) -> None:
         driver.click_point(*AI_SIDEBAR_ITEM)
         driver.wait_for_visual_change("AI section", before, crop=(260, 30, 740, 550), timeout=10)
         settle()
-
-    def primary(within: tuple[int, int] | None = None) -> None:
-        """Click the accent-filled primary action, proving it is enabled."""
-        top, bottom = within or (0, SCREEN_HEIGHT)
-        runs = shaded_row_runs(
-            driver.capture("ai-primary"),
-            x=AI_PRIMARY_PROBE_X,
-            y=top,
-            height=bottom - top,
-            max_luminance=AI_ACCENT_LUMINANCE,
-        )
-        runs = [(start, end) for start, end in runs if end - start >= 20]
-        if not runs:
-            raise AcceptanceFailure("AI primary action is not enabled")
-        start, end = max(runs, key=lambda run: run[1] - run[0])
-        driver.click_point(AI_PRIMARY_PROBE_X, (start + end) // 2)
 
     def cards() -> list[tuple[int, int]]:
         """Every settings card of the page, read from its left border."""
@@ -8350,7 +8362,7 @@ def ai_settings_scenario(driver: WindowDriver, workspace: Path) -> None:
         settle()
 
     def save_alias(name: str) -> None:
-        primary(within=bounds())
+        click_ai_primary(driver, within=bounds())
         wait_until("saved alias", lambda: name in state()["aliases"])
         settle()
 
@@ -8391,7 +8403,7 @@ def ai_settings_scenario(driver: WindowDriver, workspace: Path) -> None:
     driver.click_point(957, key_field()[1])
     settle()
     wait_until("valid key paste clears format feedback", lambda: danger_pixels() <= 5)
-    primary()
+    click_ai_primary(driver)
     settle()
     wait_until("rejected key feedback", lambda: danger_pixels() >= 20)
     if state().get("connection"):
@@ -8433,7 +8445,7 @@ def ai_settings_scenario(driver: WindowDriver, workspace: Path) -> None:
     if danger_pixels() > 5:
         raise AcceptanceFailure("default has a delete action or an invalid initial configuration")
     choose("Sol", default=True)
-    primary(within=bounds())
+    click_ai_primary(driver, within=bounds())
     wait_until("edited default", lambda: state()["aliases"]["default"]["model"] == "gpt-5.6-sol")
     settle()
     default = state()["aliases"]["default"]
@@ -8468,7 +8480,7 @@ def ai_settings_scenario(driver: WindowDriver, workspace: Path) -> None:
     driver.key("ctrl+a")
     driver.type_text("quick")
     settle()
-    primary(within=bounds())
+    click_ai_primary(driver, within=bounds())
     wait_until("renamed alias", lambda: "quick" in state()["aliases"] and "mini" not in state()["aliases"])
     settle()
     edit(1)  # quick sorts before research
@@ -8499,7 +8511,7 @@ def ai_settings_scenario(driver: WindowDriver, workspace: Path) -> None:
     driver.wait_for_visual_change("replacement key pasted", empty_key,
                                   crop=(310, key_y - 15, 540, 30), timeout=10)
     settle()
-    primary(within=cards()[0])
+    click_ai_primary(driver, within=cards()[0])
     wait_until("replacement key", lambda: state()["connection"] != saved["connection"])
     settle()
     if state()["aliases"] != saved["aliases"]:
@@ -8523,7 +8535,7 @@ def ai_settings_scenario(driver: WindowDriver, workspace: Path) -> None:
     changed = json.loads(config.read_text())
     changed["ai"]["connection"]["checked_at"] += 1
     config.write_text(json.dumps(changed))
-    primary(within=bounds())
+    click_ai_primary(driver, within=bounds())
     settle()
     wait_until("save conflict feedback is painted", lambda:
         danger_pixels((280, 150, 710, 630)) >= 20)

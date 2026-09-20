@@ -469,6 +469,43 @@ class CITests(unittest.TestCase):
                             driver.wait_for_stable_frame("editor", **kwargs)
                         self.assertGreaterEqual(clock[0], 10)
 
+    def test_ai_primary_waits_for_enabled_stable_paint_and_clicks_once(self):
+        for state in ("delayed", "disabled", "flicker", "moving", "short"):
+            with self.subTest(state=state):
+                clock = [0.0]
+                frames = [0]
+                driver = object.__new__(ui_acceptance.WindowDriver)
+                driver.click_point = Mock()
+
+                def capture(_name):
+                    frames[0] += 1
+                    enabled = frames[0] > 8 and state != "disabled"
+                    if state == "flicker" and frames[0] == 11:
+                        enabled = False
+                    top = 300 + (frames[0] % 2 if state == "moving" else 0)
+                    height = 19 if state == "short" else 30
+                    return Mock(runs=[(top, top + height)] if enabled else [])
+
+                def advance(seconds):
+                    clock[0] += seconds
+
+                driver.capture = Mock(side_effect=capture)
+                with patch.object(ui_acceptance.time, "monotonic", side_effect=lambda: clock[0]), \
+                        patch.object(ui_acceptance.time, "sleep", side_effect=advance), \
+                        patch.object(ui_acceptance, "shaded_row_runs", side_effect=lambda frame, **_: frame.runs), \
+                        patch.object(ui_acceptance, "dark_pixel_count", return_value=100), \
+                        patch.object(ui_acceptance, "mean_luminance", return_value=0.9), \
+                        patch.object(ui_acceptance, "image_difference", side_effect=lambda a, b, **_: int(a.runs != b.runs)):
+                    if state in ("delayed", "flicker"):
+                        ui_acceptance.click_ai_primary(driver, (100, 500), timeout=1)
+                        driver.click_point.assert_called_once_with(ui_acceptance.AI_PRIMARY_PROBE_X, 315)
+                        self.assertGreaterEqual(frames[0], 15 if state == "flicker" else 12)
+                    else:
+                        with self.assertRaises(ui_acceptance.AcceptanceFailure):
+                            ui_acceptance.click_ai_primary(driver, (100, 500), timeout=1)
+                        driver.click_point.assert_not_called()
+                        self.assertGreaterEqual(clock[0], 1)
+
     def test_stable_frame_requires_readiness_throughout_the_same_interval(self):
         for readiness in ([False, False, True, True, True],
                           [True, False, True, True, True], [False] * 12):
