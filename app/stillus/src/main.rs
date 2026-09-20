@@ -8486,6 +8486,12 @@ fn rss_panel(
                 revision.update(|value| *value = value.saturating_add(1));
                 selected
             });
+            let select_text: Rc<dyn Fn()> = {
+                let select_entry = select_entry.clone();
+                Rc::new(move || {
+                    select_entry();
+                })
+            };
             let title = if card.hidden {
                 let select_title = select_entry.clone();
                 rss_article_link(
@@ -8514,7 +8520,12 @@ fn rss_panel(
                 )
                 .into_any()
             } else {
-                rss_title(card.entry.title.clone(), ink, palette, None)
+                rss_title(
+                    card.entry.title.clone(),
+                    ink,
+                    palette,
+                    Some(select_text.clone()),
+                )
             };
             let select_pointer = select_entry.clone();
             let view = v_stack((
@@ -8550,7 +8561,7 @@ fn rss_panel(
                         (text, layout)
                     },
                     palette,
-                    None,
+                    Some(select_text.clone()),
                 )
                 .style(move |style| {
                     style
@@ -8565,7 +8576,7 @@ fn rss_panel(
                 ui::selectable_rich_text(
                     move || (excerpt.text.clone(), summary_layout.clone()),
                     palette,
-                    None,
+                    Some(select_text),
                 )
                 .style(move |style| {
                     style

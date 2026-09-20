@@ -7767,8 +7767,8 @@ def rss_cards_scenario(driver: WindowDriver, workspace: Path) -> None:
     def read_ids() -> list[str]:
         return json.loads(state_path.read_text(encoding="utf-8"))["read_entry_ids"]
 
-    # start_app waits for first paint. The only click is inside the single-line
-    # title's full-width hit area; it is never repeated to make a failed step pass.
+    # start_app waits for first paint. Dragging must not activate the card;
+    # the subsequent title click is never repeated to make a failed step pass.
     driver.start_app(workspace, "cards", environment_overrides={
         "BROWSER": str(browser), "PATH": str(browser_dir),
     })
@@ -7791,7 +7791,8 @@ def rss_cards_scenario(driver: WindowDriver, workspace: Path) -> None:
         raise AcceptanceFailure("RSS body did not retain its two formatted paragraphs")
     first_y, second_y = [(start + end) // 2 for start, end in text_rows]
     body_text = "A native RSS article.\nПривет 🌍 — second paragraph."
-    driver.click_point(350, first_y)
+    drag_text((305, first_y), (350, first_y))
+    driver.key("Escape")
     unselected = driver.capture("rss-before-selection")
     driver.key("ctrl+a")
     driver.wait_for_visual_change("RSS body paints its selection", unselected,
@@ -7835,6 +7836,65 @@ def rss_cards_scenario(driver: WindowDriver, workspace: Path) -> None:
     driver.close_app()
     if opened() != [[article_url]] or read_ids() != ["entry/0"]:
         raise AcceptanceFailure("RSS title open/read result changed before shutdown")
+
+    # Use fresh unread entries for every surface. Click the second card so
+    # selecting it must also scroll; enough trailing cards avoid scroll clamping.
+    for surface in ("body", "metadata", "title", "padding"):
+        workspace, config_path, cache = cached_rss_workspace(driver, f"rss-click-{surface}", [{
+            "id": f"entry/{index}", "title": f"RSS entry {index}",
+            "author": "Ada Lovelace", "published": None, "updated": None,
+            "summary": f"Body of entry {index}.",
+            "link": None if surface == "title" else article_url,
+        } for index in range(12)])
+        state_path = cache / "state.json"
+        state_path.write_text(json.dumps({"read_entry_ids": [], "last_read_at": None}),
+                              encoding="utf-8")
+        feed_id = json.loads(config_path.read_text(encoding="utf-8"))["subscriptions"][0]["id"]
+        (workspace / ".stillus/settings.json").write_text(json.dumps({
+            "version": 1, "window": {"width": SCREEN_WIDTH, "height": SCREEN_HEIGHT},
+            "sidebar": {"width": SIDEBAR_WIDTH, "expanded": [],
+                        "creation_group": {"kind": "all"}},
+            "selected_rss": feed_id,
+        }), encoding="utf-8")
+        driver.start_app(workspace, f"click-{surface}", environment_overrides={
+            "BROWSER": str(browser), "PATH": str(browser_dir),
+        })
+        frame = driver.capture(f"rss-click-{surface}-before")
+        rows = column_runs({y for (_, y), value in
+            crop_luminances(frame, (305, 100, 300, 440)).items() if value < 150}, merge_gap=4)
+        if len(rows) < 6:
+            raise AcceptanceFailure(f"RSS {surface} fixture must show two complete cards: {rows}")
+        title_y, metadata_y, body_y = [(start + end) // 2 for start, end in rows[3:6]]
+        if surface == "metadata":
+            drag_text((301, metadata_y), (600, metadata_y))
+            wait_until("RSS metadata drag copies without activating the card", lambda:
+                       clipboard_text(driver.environment) == "Ada Lovelace")
+            if read_ids() or opened() != [[article_url]]:
+                raise AcceptanceFailure("RSS metadata selection activated the card")
+        x, y = {
+            "body": (350, body_y), "metadata": (350, metadata_y),
+            "title": (350, title_y), "padding": (285, title_y),
+        }[surface]
+        driver.click_point(x, y)
+        wait_until(f"RSS {surface} click marks only its card read", lambda: read_ids() == ["entry/1"])
+        wait_for_rss_card_at_top(driver, stable_for=0.3)
+        driver.key("j")
+        wait_until(f"RSS J navigation survives {surface} click", lambda:
+                   set(read_ids()) == {"entry/1", "entry/2"})
+        wait_for_rss_card_at_top(driver, stable_for=0.3)
+        driver.key("k")
+        wait_for_rss_card_at_top(driver, stable_for=0.3)
+        driver.key("j")
+        wait_for_rss_card_at_top(driver, stable_for=0.3)
+        driver.close_app()
+        driver.start_app(workspace, f"click-{surface}-reopened", environment_overrides={
+            "BROWSER": str(browser), "PATH": str(browser_dir),
+        })
+        if set(read_ids()) != {"entry/1", "entry/2"}:
+            raise AcceptanceFailure(f"RSS {surface} read state did not survive reopening")
+        driver.close_app()
+        if opened() != [[article_url]]:
+            raise AcceptanceFailure(f"RSS {surface} click unexpectedly opened the browser")
 
 
 def localization_scenario(driver: WindowDriver, workspace: Path) -> None:
