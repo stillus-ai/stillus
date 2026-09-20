@@ -469,6 +469,37 @@ class CITests(unittest.TestCase):
                             driver.wait_for_stable_frame("editor", **kwargs)
                         self.assertGreaterEqual(clock[0], 10)
 
+    def test_stable_frame_requires_readiness_throughout_the_same_interval(self):
+        for readiness in ([False, False, True, True, True],
+                          [True, False, True, True, True], [False] * 12):
+            with self.subTest(readiness=readiness):
+                clock = [0.0]
+                checked = []
+                driver = object.__new__(ui_acceptance.WindowDriver)
+                driver.capture = Mock(side_effect=lambda _name: Mock())
+
+                def ready(frame):
+                    checked.append(frame)
+                    return readiness[min(len(checked) - 1, len(readiness) - 1)]
+
+                def advance(seconds):
+                    clock[0] += seconds
+
+                with patch.object(ui_acceptance.time, "monotonic", side_effect=lambda: clock[0]), \
+                        patch.object(ui_acceptance.time, "sleep", side_effect=advance), \
+                        patch.object(ui_acceptance, "dark_pixel_count", return_value=100), \
+                        patch.object(ui_acceptance, "mean_luminance", return_value=0.9), \
+                        patch.object(ui_acceptance, "image_difference", return_value=0):
+                    if any(readiness):
+                        result = driver.wait_for_stable_frame("ready", stable_for=0.1,
+                                                              timeout=0.5, frame_ready=ready)
+                        self.assertIs(result, checked[-1])
+                        self.assertGreaterEqual(len(checked), 5)
+                    else:
+                        with self.assertRaises(ui_acceptance.AcceptanceFailure):
+                            driver.wait_for_stable_frame("ready", stable_for=0.1,
+                                                        timeout=0.5, frame_ready=ready)
+
     def test_rss_toolbar_wait_requires_continuous_closed_card_alignment(self):
         for state in ("closed", "delayed", "reopened", "open", "unstable"):
             with self.subTest(state=state):

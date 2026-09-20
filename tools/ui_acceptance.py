@@ -1617,6 +1617,7 @@ class WindowDriver:
         timeout: float = DEFAULT_TIMEOUT_SECONDS,
         ignore_editor_caret: bool = False,
         ignore_control_caret: bool = False,
+        frame_ready: Callable[[Path], bool] | None = None,
     ) -> Path:
         if ignore_editor_caret and crop != EDITOR_CROP:
             raise AcceptanceFailure("caret-aware comparison requires the editor crop")
@@ -1641,6 +1642,7 @@ class WindowDriver:
                 equal
                 and dark_pixel_count(current, crop=crop) >= minimum_dark_pixels
                 and mean_luminance(current, crop=crop) >= minimum_luminance
+                and (frame_ready is None or frame_ready(current))
             )
             if not frame_is_unchanged:
                 stable_since = None
@@ -8952,14 +8954,11 @@ def journal_page_states_scenario(driver: WindowDriver) -> None:
         driver.click_point(*AI_SIDEBAR_ITEM)
         wait_for_ai_controls(driver)
         driver.click_point(925, 54)
-        if count:
-            wait_until(f"journal loads {min(count, 5)} visible rows", lambda: all(
-                dark_pixel_count(driver.capture("journal-page-readiness"),
-                    crop=(470, 190 + row * 36, 210, 26)) >= 50
-                for row in range(min(count, 5))))
         # Include the paging controls: the list can settle before they are painted.
         page = driver.wait_for_stable_frame(f"journal page with {count} records",
-            crop=(276, 184, 874, 226), stable_for=0.3)
+            crop=(276, 184, 874, 226), stable_for=0.3,
+            frame_ready=lambda frame: all(dark_pixel_count(frame,
+                crop=(470, 190 + row * 36, 210, 26)) >= 50 for row in range(min(count, 5))))
         pagination = dark_pixel_count(page, crop=(300, 374, 450, 36))
         if count <= 40 and pagination > 15:
             raise AcceptanceFailure(f"journal shows pagination for only {count} records")
@@ -9596,10 +9595,12 @@ def chat_paging_layout_scenario(driver: WindowDriver, workspace: Path, chat: Pat
         wait_until("adjacent Copy copies the complete message", lambda:
                    clipboard_text(driver.environment) == expected)
     driver.click("sidebar_blank")
-    wait_until("Copy actions hidden before history comparison", lambda: all(
-        dark_pixel_count(driver.capture("chat-copy-before-anchor"), crop=crop) == 0
-        for crop in ((557, 96, 16, 16), (343, 210, 16, 16))))
-    oldest = driver.wait_for_stable_frame("oldest message stays anchored", crop=history_crop, stable_for=0.3)
+    # Require hidden actions on the actual comparison frame for the entire
+    # stable interval; a separate probe can observe a transient repaint.
+    oldest = driver.wait_for_stable_frame("oldest message stays anchored with Copy hidden",
+        crop=history_crop, stable_for=0.3, frame_ready=lambda frame: all(
+            dark_pixel_count(frame, crop=crop) == 0
+            for crop in ((557, 96, 16, 16), (343, 210, 16, 16))))
     driver.xdotool("mousemove", "--window", driver.window_id, "700", "250",
                    "click", "--repeat", "4", "--delay", "30", "4")
     unchanged = driver.wait_for_stable_frame("scrolling past the oldest message is harmless", crop=history_crop, stable_for=0.3)
