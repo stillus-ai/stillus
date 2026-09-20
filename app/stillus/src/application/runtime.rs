@@ -1341,15 +1341,7 @@ impl Application {
         });
         match result {
             Ok(_) => {
-                let hidden = self
-                    .workspace
-                    .as_ref()
-                    .and_then(|w| {
-                        w.selected_rss()
-                            .and_then(|id| w.rss_feed(id).ok().map(|(_, s)| s.hidden(entry_id)))
-                    })
-                    .unwrap_or(false);
-                self.expanded_rss_entry = hidden.then(|| entry_id.to_owned());
+                self.expanded_rss_entry = Some(entry_id.to_owned());
                 self.selected_rss_entry = Some(entry_id.to_owned());
                 self.error = None;
                 true

@@ -7453,6 +7453,92 @@ def wait_for_rss_card_at_top(driver: WindowDriver, *, stable_for: float = 0.0) -
     wait_until("selected RSS card is top-aligned below the closed toolbar", aligned)
 
 
+def expect_rss_title_at_top(driver: WindowDriver, title: str, *, title_y: int = 116) -> None:
+    driver.wait_for_stable_frame("RSS initial positioning settled", crop=EDITOR_CROP, stable_for=0.3)
+    set_clipboard_text(driver.environment, "RSS title sentinel")
+    driver.xdotool("mousemove", "--window", driver.window_id, "301", str(title_y))
+    driver.xdotool("mousedown", "1")
+    driver.xdotool("mousemove", "--sync", "--window", driver.window_id, "900", str(title_y))
+    driver.release()
+    driver.key("ctrl+c")
+    wait_until(f"RSS top article is {title}", lambda: clipboard_text(driver.environment) == title)
+    driver.key("Escape")
+
+
+def rss_resume_scenario(driver: WindowDriver) -> None:
+    workspace, config, cache = cached_rss_workspace(driver, "rss-resume", [{
+        "id": f"entry/{index}", "title": f"Resume article {index}",
+        "author": "Ada Lovelace", "published": None, "updated": None,
+        "summary": "\n\n".join([f"Body of article {index}."] * (8 if index == 12 else 1)), "link": None,
+    } for index in range(14)])
+    state_path = cache / "state.json"
+    initial_read = [f"entry/{index}" for index in range(10)]
+    state_path.write_text(json.dumps({"read_entry_ids": initial_read, "last_read_at": None,
+        "entries": {"entry/10": {"decision": "hide"}}}), encoding="utf-8")
+
+    def read_ids() -> set[str]:
+        return set(json.loads(state_path.read_text())["read_entry_ids"])
+
+    # Opening through the sidebar and restoring the same feed both skip the
+    # ten recent read cards and the hidden unread card without selecting it.
+    driver.start_app(workspace, "resume-sidebar")
+    counts = {"favorites": 0, "all": 1, "trash": 1}
+    driver.click_point(*group_row_center("trash", categories=(), counts=counts))
+    driver.click_note(0, expanded_groups=("all", "trash"), expanded="trash",
+                      categories=(), counts=counts)
+    expect_rss_title_at_top(driver, "Resume article 11")
+    if read_ids() != set(initial_read):
+        raise AcceptanceFailure("opening RSS changed read marks")
+    driver.close_app()
+    driver.start_app(workspace, "resume-restored")
+    expect_rss_title_at_top(driver, "Resume article 11")
+    if read_ids() != set(initial_read):
+        raise AcceptanceFailure("restoring RSS changed read marks")
+    driver.key("j")
+    wait_until("first J selects the initially revealed article", lambda:
+               read_ids() == set(initial_read + ["entry/11"]))
+    wait_for_rss_card_at_top(driver, stable_for=0.3)
+    for index in (12, 13):
+        driver.key("j")
+        wait_until("navigation reads the next article", lambda:
+                   f"entry/{index}" in read_ids())
+        wait_for_rss_card_at_top(driver, stable_for=0.3)
+        expect_rss_title_at_top(driver, f"Resume article {index}")
+    driver.close_app()
+
+    # With no unread articles, opening stays at the beginning. Read cards and
+    # filtered cards have exactly the same compact height, with no body gaps.
+    state_path.write_text(json.dumps({"read_entry_ids": [f"entry/{i}" for i in range(14)],
+        "entries": {"entry/1": {"decision": "hide"}}, "last_read_at": None}), encoding="utf-8")
+    driver.start_app(workspace, "resume-all-read")
+    expect_rss_title_at_top(driver, "Resume article 0")
+    frame = driver.capture("rss-compact-read-cards")
+    # Fractional row heights antialias some borders. Sample a blank column,
+    # where only borders are darker than the surrounding canvas (247).
+    borders = column_runs({y for (_, y), value in
+        crop_luminances(frame, (1000, 75, 1, 325)).items() if value < 245}, merge_gap=1)
+    if len(borders) < 4:
+        raise AcceptanceFailure(f"read RSS cards have no compact outlines: {borders}")
+    first_height = borders[1][0] - borders[0][0]
+    second_height = borders[3][0] - borders[2][0]
+    if abs(first_height - second_height) > 1 or not 50 <= first_height <= 90:
+        raise AcceptanceFailure(f"read and filtered RSS heights differ: {first_height}, {second_height}")
+    if dark_pixel_count(frame, crop=(305, 135, 500, max(1, borders[1][0] - 140))) > 0:
+        raise AcceptanceFailure("collapsed read RSS card still displays metadata or body")
+    driver.click_point(285, 116)
+    wait_for_rss_card_at_top(driver, stable_for=0.3)
+    expanded = driver.capture("rss-read-card-expanded")
+    if dark_pixel_count(expanded, crop=(305, 145, 500, 65)) < 100:
+        raise AcceptanceFailure("selecting a read RSS card did not reveal its metadata and body")
+    driver.key("j")  # Skip the filtered card and collapse the previous card.
+    wait_for_rss_card_at_top(driver, stable_for=0.3)
+    expect_rss_title_at_top(driver, "Resume article 2")
+    driver.key("k")
+    wait_for_rss_card_at_top(driver, stable_for=0.3)
+    expect_rss_title_at_top(driver, "Resume article 0")
+    driver.close_app()
+
+
 def rss_keyboard_scenario(driver: WindowDriver, workspace: Path) -> None:
     del workspace
     workspace, config_path, cache = cached_rss_workspace(driver, "rss-keyboard", [
@@ -7490,10 +7576,13 @@ def rss_keyboard_scenario(driver: WindowDriver, workspace: Path) -> None:
     expect_card_at_top()
     # Clicking a card rebuilds its projection. Focus must survive this update.
     driver.key("k")
-    driver.click_point(450, 315)
+    expect_rss_title_at_top(driver, "Article 0")
+    # The second, already read card now has only its title and padding.
+    driver.click_point(285, 255)
     expect_read([0, 1])
     expect_card_at_top()
     driver.key("k")
+    expect_rss_title_at_top(driver, "Article 0")
     driver.click_point(450, 155)
     driver.key("j")
     expect_read([0, 1])
@@ -7553,6 +7642,7 @@ def rss_keyboard_scenario(driver: WindowDriver, workspace: Path) -> None:
     driver.key("j")
     expect_read([0, 1, 2])
     driver.close_app()
+    rss_resume_scenario(driver)
 
 
 def wait_for_field_text(driver: WindowDriver, expected: str, description: str) -> None:
@@ -7670,8 +7760,18 @@ def rss_filters_scenario(driver: WindowDriver, workspace: Path) -> None:
     driver.capture("rss-filter-applied")
     driver.key("j")
     wait_until("J skips hidden promotion", lambda: "entry/1" in state()["read_entry_ids"])
-    driver.click_point(440, 116)
-    driver.wait_for_stable_frame("hidden title expands", crop=EDITOR_CROP, stable_for=0.2)
+    driver.xdotool("mousemove", "--window", driver.window_id, "700", "250",
+                   "click", "--repeat", "8", "4")
+    frame = driver.wait_for_stable_frame("first filtered card visible", crop=EDITOR_CROP, stable_for=0.3)
+    # This active fixture can show a refresh error above its cached cards.
+    card_top = min(y for (_, y), value in
+        crop_luminances(frame, (1000, 75, 1, 160)).items() if value < 245)
+    title_y = card_top + 40
+    expect_rss_title_at_top(driver, "Promotion", title_y=title_y)
+    driver.click_point(440, title_y)
+    expanded = driver.wait_for_stable_frame("hidden title expands", crop=EDITOR_CROP, stable_for=0.2)
+    if dark_pixel_count(expanded, crop=(305, title_y + 35, 500, 65)) < 50:
+        raise AcceptanceFailure("selecting a filtered read article did not reveal its body")
     if state()["entries"]["entry/0"]["decision"] != "hide":
         raise AcceptanceFailure("expanding a hidden article changed its filter decision")
     driver.key("j")
@@ -8882,6 +8982,61 @@ RSS_EMPTY_RESPONSE = ('<?xml version="1.0"?><rss version="2.0"><channel>'
     '<description>Empty fixture</description></channel></rss>')
 
 
+def rss_delayed_scroll_scenario(driver: WindowDriver, server: ControlledRssServer) -> None:
+    items = "".join(f'<item><guid isPermaLink="false">urn:article:{i}</guid>'
+        f'<title>Late article {i}</title><description>Body of article {i}.</description></item>'
+        for i in range(14))
+    response = RSS_EMPTY_RESPONSE.replace("</channel>", items + "</channel>")
+    read = [hashlib.sha256(f"urn:article:{i}".encode()).hexdigest() for i in range(10)]
+    for cancel in (False, True):
+        path = f"/late-{cancel}"
+        released = server.plan(path, 200, response)
+        refreshed = server.plan(path, 200, response.replace("Late article 13", "Updated article 13"))
+        workspace, config, old_cache = cached_rss_workspace(driver, f"rss-late-{cancel}", [])
+        url = server.url(path)
+        digest = hashlib.sha256(url.encode()).hexdigest()
+        cache = old_cache.with_name(digest)
+        old_cache.rename(cache)
+        # Keep the fetched empty cache: brand-new subscriptions deliberately
+        # mark articles after the first ten read on their first download.
+        state_path = cache / "state.json"
+        state_path.write_text(json.dumps({"read_entry_ids": read, "last_read_at": None}))
+        data = json.loads(config.read_text())
+        data["subscriptions"][0].update(id=f"feeds/{digest}", url=url, deleted=False)
+        config.write_text(json.dumps(data))
+        (workspace / ".stillus/settings.json").write_text(json.dumps({"version": 1,
+            "window": {"width": SCREEN_WIDTH, "height": SCREEN_HEIGHT},
+            "sidebar": {"width": SIDEBAR_WIDTH, "expanded": []}, "selected_rss": f"feeds/{digest}"}))
+        driver.start_app(workspace, f"rss-late-{cancel}")
+        wait_until("initial RSS request is held", lambda: server.requested(path, 1))
+        driver.click_point(100, 172)
+        if cancel:
+            driver.xdotool("mousemove", "--window", driver.window_id, "700", "250", "click", "5")
+        released.set()
+
+        def entries() -> list[dict]:
+            feed = cache / "feed.json"
+            return json.loads(feed.read_text())["entries"] if feed.exists() else []
+
+        wait_until("delayed RSS response is cached", lambda: len(entries()) == 14, timeout=10)
+        expect_rss_title_at_top(driver, f"Late article {0 if cancel else 10}")
+        if set(json.loads(state_path.read_text())["read_entry_ids"]) != set(read):
+            raise AcceptanceFailure("delayed initial scroll changed read marks")
+        # Manual scrolling wins over later refreshes, including a changed card.
+        driver.xdotool("mousemove", "--window", driver.window_id, "700", "250",
+                       "click", "--repeat", "20", "4")
+        expect_rss_title_at_top(driver, "Late article 0")
+        driver.click_point(976, 28)
+        wait_until("second RSS request is held", lambda: server.requested(path, 2))
+        refreshed.set()
+        wait_until("refreshed RSS card is cached", lambda:
+                   any(entry["title"] == "Updated article 13" for entry in entries()), timeout=10)
+        expect_rss_title_at_top(driver, "Late article 0")
+        if set(json.loads(state_path.read_text())["read_entry_ids"]) != set(read):
+            raise AcceptanceFailure("refresh after manual scroll changed read marks")
+        driver.close_app()
+
+
 def rss_states_scenario(driver: WindowDriver, workspace: Path) -> None:
     """Validate create/retry completion and cached loading/error/empty rendering."""
     del workspace
@@ -8979,6 +9134,7 @@ def rss_states_scenario(driver: WindowDriver, workspace: Path) -> None:
             json.loads((cache / "feed.json").read_text())["entries"] == [], timeout=10)
         driver.wait_for_stable_frame("empty state after retry", crop=(280, 76, 940, 160), stable_for=0.3)
         driver.close_app()
+        rss_delayed_scroll_scenario(driver, server)
     finally:
         server.close()
 

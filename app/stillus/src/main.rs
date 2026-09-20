@@ -8304,6 +8304,8 @@ fn rss_panel(
 ) -> AnyView {
     let feed_focus_request = create_rw_signal(0_u64);
     let scroll_target = create_rw_signal(None::<Point>);
+    let reveal_generation = create_rw_signal(0_u64);
+    let reveal_pending = create_rw_signal(false);
     let viewport_height = create_rw_signal(0.0_f64);
     let signals = RssToolbarSignals {
         filters_open: create_rw_signal(false),
@@ -8406,7 +8408,9 @@ fn rss_panel(
     let entries_model = model.clone();
     let entries_id = item_id.clone();
     let card_model = model.clone();
-    let last_revealed = Rc::new(RefCell::new(None::<String>));
+    let feed_scroll = Rc::new(RefCell::new(rss_card::FeedScroll::default()));
+    let entries_scroll = feed_scroll.clone();
+    let cards_scroll = feed_scroll.clone();
     let cards = dyn_stack(
         move || {
             revision.get();
@@ -8417,6 +8421,12 @@ fn rss_panel(
                 .as_ref()
                 .and_then(|workspace| workspace.rss_feed(&entries_id).ok())
                 .map(|(feed, state)| {
+                    entries_scroll.borrow_mut().update(
+                        &feed,
+                        &state,
+                        selected,
+                        model.rss_refreshing.contains(entries_id.as_str()),
+                    );
                     feed.entries
                         .into_iter()
                         .map(|entry| RssCardData {
@@ -8442,6 +8452,8 @@ fn rss_panel(
         },
         move |card| {
             let card_top = create_rw_signal(0.0_f64);
+            let collapsed = rss_card::collapsed(card.unread, card.hidden, card.expanded);
+            let select_scroll = cards_scroll.clone();
             let entry_id = card.entry.id.clone();
             let select_model = card_model.clone();
             let open_model = card_model.clone();
@@ -8481,7 +8493,14 @@ fn rss_panel(
             let summary_layout = excerpt.layout(body_ink);
             let select_entry = Rc::new(move || {
                 let selected = select_model.borrow_mut().select_rss_entry(&entry_id);
-                scroll_target.set(Some(Point::new(0.0, card_top.get_untracked())));
+                if selected {
+                    select_scroll.borrow_mut().select(&entry_id);
+                    // A new selection can collapse an earlier card. Wait for
+                    // its new bounds; only an already selected card is stable.
+                    if card.selected {
+                        scroll_target.set(Some(Point::new(0.0, card_top.get_untracked())));
+                    }
+                }
                 feed_focus_request.update(|value| *value = value.saturating_add(1));
                 revision.update(|value| *value = value.saturating_add(1));
                 selected
@@ -8571,7 +8590,7 @@ fn rss_panel(
                         .line_height(1.4)
                         .font_family(ui::UI_FONT_FAMILY.to_owned())
                         .color(palette.ink2)
-                        .apply_if(card.hidden && !card.expanded, |s| s.hide())
+                        .apply_if(collapsed, |s| s.hide())
                 }),
                 ui::selectable_rich_text(
                     move || (excerpt.text.clone(), summary_layout.clone()),
@@ -8582,7 +8601,7 @@ fn rss_panel(
                     style
                         .width_full()
                         .min_width(0.0)
-                        .apply_if(card.hidden && !card.expanded, |s| s.hide())
+                        .apply_if(collapsed, |s| s.hide())
                 }),
             ))
             .keyboard_navigable()
@@ -8616,17 +8635,33 @@ fn rss_panel(
                     })
                     .border_radius(8.0)
             });
-            let last_revealed = last_revealed.clone();
+            let reveal_scroll = cards_scroll.clone();
             let reveal_entry_id = card.entry.id.clone();
             view.on_resize(move |rect| {
                 card_top.set(rect.y0);
                 // Selected cards are remounted by the list's key. Their bounds
                 // are only available after layout, not during construction.
-                if card.selected && last_revealed.borrow().as_ref() != Some(&reveal_entry_id) {
-                    *last_revealed.borrow_mut() = Some(reveal_entry_id.clone());
-                    // Coordinates are relative to the card stack, keeping the
-                    // content's 20px inset above the selected card.
-                    scroll_target.set(Some(Point::new(0.0, rect.y0)));
+                if reveal_scroll.borrow().should_reveal(&reveal_entry_id) {
+                    reveal_generation.update(|value| *value = value.saturating_add(1));
+                    let generation = reveal_generation.get_untracked();
+                    reveal_pending.set(true);
+                    let reveal_scroll = reveal_scroll.clone();
+                    let reveal_entry_id = reveal_entry_id.clone();
+                    // Finish layout, including viewport-sized bottom padding,
+                    // before scrolling. Otherwise Floem clamps the initial
+                    // request against the list's previous content height.
+                    exec_after(Duration::from_millis(10), move |_| {
+                        if reveal_generation.try_get_untracked() != Some(generation) {
+                            return;
+                        }
+                        reveal_pending.set(false);
+                        if let Some(top) = card_top.try_get_untracked()
+                            && reveal_scroll.borrow_mut().reveal(&reveal_entry_id)
+                        {
+                            // Keep the content's 20px inset above the card.
+                            scroll_target.set(Some(Point::new(0.0, top)));
+                        }
+                    });
                 }
             })
         },
@@ -8698,24 +8733,52 @@ fn rss_panel(
     });
     let scrollbar_visible = create_rw_signal(false);
     let scrollbar_generation = create_rw_signal(0_u64);
-    let list = scroll(v_stack((data_state, cards)).style(move |style| {
-        style
-            .width_full()
-            .padding(20.0)
-            // Retain keyboard top-alignment for the final article without
-            // adding scrollable padding to loading, error or empty feeds.
-            .padding_bottom(if feed_state.get().2 {
-                20.0
-            } else {
-                viewport_height.get().max(20.0)
-            })
-            .gap(16.0)
-    }))
-    .scroll_to(move || scroll_target.get())
-    .on_scroll(move |_| show_scrollbar_temporarily(scrollbar_visible, scrollbar_generation))
-    .style(move |style| style.width_full().min_height(0.0).flex_grow(1.0))
-    .scroll_style(move |style| style.hide_bars(!scrollbar_visible.get()))
-    .on_resize(move |rect| viewport_height.set(rect.height()));
+    let wheel_scroll = feed_scroll.clone();
+    let content_height = create_rw_signal(0.0_f64);
+    let content = v_stack((data_state, cards))
+        .style(move |style| {
+            style
+                .width_full()
+                .padding(20.0)
+                // Retain keyboard top-alignment for the final article without
+                // adding scrollable padding to loading, error or empty feeds.
+                .padding_bottom(if feed_state.get().2 {
+                    20.0
+                } else {
+                    viewport_height.get().max(20.0)
+                })
+                .gap(16.0)
+        })
+        .on_resize(move |rect| content_height.set(rect.height()));
+    let content_id = content.id();
+    let list = scroll(content)
+        .scroll_to(move || scroll_target.get())
+        .on_event_cont(EventListener::PointerWheel, move |_| {
+            wheel_scroll.borrow_mut().manual_scroll();
+            scroll_target.set(None);
+        })
+        .on_scroll(move |viewport| {
+            // Scrollbar dragging also overrides selection anchoring. Programmatic
+            // positioning reports the requested origin and keeps the anchor alive
+            // through later layout passes (including delayed read-state updates).
+            // A shrinking list can clamp the viewport before the new card bounds
+            // arrive. That is layout, not a manual scrollbar action.
+            let unchanged_height = content_id
+                .get_size()
+                .is_some_and(|size| (size.height - content_height.get_untracked()).abs() < 1.0);
+            if unchanged_height
+                && !reveal_pending.get_untracked()
+                && scroll_target
+                    .get_untracked()
+                    .is_some_and(|target| (target.y - viewport.y0).abs() > 1.0)
+            {
+                feed_scroll.borrow_mut().manual_scroll();
+            }
+            show_scrollbar_temporarily(scrollbar_visible, scrollbar_generation);
+        })
+        .style(move |style| style.width_full().min_height(0.0).flex_grow(1.0))
+        .scroll_style(move |style| style.hide_bars(!scrollbar_visible.get()))
+        .on_resize(move |rect| viewport_height.set(rect.height()));
     let status_model = model.clone();
     let status_style_model = model.clone();
     let status = label(move || {
@@ -14753,8 +14816,10 @@ mod tests {
         )));
         assert!(model.move_rss_selection(1));
         assert_eq!(model.selected_rss_entry.as_deref(), Some("first"));
+        assert_eq!(model.expanded_rss_entry.as_deref(), Some("first"));
         assert!(model.move_rss_selection(1));
         assert_eq!(model.selected_rss_entry.as_deref(), Some("second"));
+        assert_eq!(model.expanded_rss_entry.as_deref(), Some("second"));
         assert!(!model.move_rss_selection(1));
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         while model.workspace.as_ref().unwrap().rss_subscriptions()[0].unread != 0

@@ -16,6 +16,74 @@ use url::Url;
 
 const MAX_EXCERPT_CHARS: usize = 700;
 
+pub fn collapsed(unread: bool, hidden: bool, expanded: bool) -> bool {
+    (!unread || hidden) && !expanded
+}
+
+/// Ephemeral positioning for one mounted feed; never changes read marks.
+#[derive(Default)]
+pub struct FeedScroll {
+    initialized: bool,
+    initial_target: Option<String>,
+    selected: Option<String>,
+    follow_selection: bool,
+}
+
+impl FeedScroll {
+    pub fn update(
+        &mut self,
+        feed: &stillus_core::RssFeedCache,
+        state: &stillus_core::RssReadState,
+        selected: Option<&str>,
+        loading: bool,
+    ) {
+        if self.selected.as_deref() != selected {
+            self.selected = selected.map(str::to_owned);
+            self.follow_selection = selected.is_some();
+            if selected.is_some() {
+                self.initialized = true;
+                self.initial_target = None;
+            }
+        }
+        if !self.initialized
+            && (!feed.entries.is_empty() || (!loading && feed.fetched_at.is_some()))
+        {
+            self.initialized = true;
+            self.initial_target = feed
+                .entries
+                .iter()
+                .find(|entry| !state.hidden(&entry.id) && !state.read_entry_ids.contains(&entry.id))
+                .map(|entry| entry.id.clone());
+        }
+    }
+
+    pub fn manual_scroll(&mut self) {
+        self.initialized = true;
+        self.initial_target = None;
+        self.follow_selection = false;
+    }
+
+    pub fn select(&mut self, id: &str) {
+        self.initialized = true;
+        self.initial_target = None;
+        self.selected = Some(id.to_owned());
+        self.follow_selection = true;
+    }
+
+    pub fn reveal(&mut self, id: &str) -> bool {
+        let reveal = self.should_reveal(id);
+        if self.initial_target.as_deref() == Some(id) {
+            self.initial_target = None;
+        }
+        reveal
+    }
+
+    pub fn should_reveal(&self, id: &str) -> bool {
+        self.initial_target.as_deref() == Some(id)
+            || (self.follow_selection && self.selected.as_deref() == Some(id))
+    }
+}
+
 // Vger's glyph rendering does not reliably preserve color alpha. Preblend
 // text against the card surface so read-state contrast is renderer-independent.
 pub fn faded_ink(ink: Color, paper: Color, opacity: f32) -> Color {
@@ -239,6 +307,107 @@ impl Excerpt {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rss_read_and_filtered_cards_collapse_until_expanded() {
+        for hidden in [false, true] {
+            for unread in [false, true] {
+                assert!(!collapsed(unread, hidden, true));
+            }
+            assert!(collapsed(false, hidden, false));
+        }
+        assert!(collapsed(true, true, false));
+        assert!(!collapsed(true, false, false));
+    }
+
+    fn feed_fixture() -> (stillus_core::RssFeedCache, stillus_core::RssReadState) {
+        (
+            stillus_core::RssFeedCache {
+                entries: (0..14)
+                    .map(|index| stillus_core::RssEntry {
+                        id: index.to_string(),
+                        title: format!("Article {index}"),
+                        author: None,
+                        published: None,
+                        updated: None,
+                        summary: "Body".into(),
+                        link: None,
+                    })
+                    .collect(),
+                fetched_at: Some("2026-09-20T12:00:00Z".into()),
+                ..Default::default()
+            },
+            stillus_core::RssReadState::default(),
+        )
+    }
+
+    #[test]
+    fn rss_initial_scroll_skips_read_and_filtered_entries_without_marking_read() {
+        let (feed, mut state) = feed_fixture();
+        state.read_entry_ids = (0..10).chain([12]).map(|index| index.to_string()).collect();
+        state.entries.entry("10".into()).or_default().decision =
+            Some(stillus_core::RssDecision::Hide);
+        let before = state.clone();
+        let mut scroll = FeedScroll::default();
+        scroll.update(&feed, &state, None, false);
+        for entry in &feed.entries {
+            assert_eq!(scroll.reveal(&entry.id), entry.id == "11");
+        }
+        assert_eq!(state, before);
+        // Refreshing or remounting the target must not repeat the initial jump.
+        scroll.update(&feed, &state, None, false);
+        assert!(!scroll.reveal("11"));
+    }
+
+    #[test]
+    fn rss_initial_scroll_handles_all_read_empty_and_delayed_feeds() {
+        let (feed, mut state) = feed_fixture();
+        let mut scroll = FeedScroll::default();
+        scroll.update(&Default::default(), &state, None, true);
+        scroll.update(&feed, &state, None, false);
+        assert!(scroll.reveal("0"));
+
+        state.read_entry_ids = feed.entries.iter().map(|entry| entry.id.clone()).collect();
+        let mut scroll = FeedScroll::default();
+        scroll.update(&feed, &state, None, false);
+        assert!(feed.entries.iter().all(|entry| !scroll.reveal(&entry.id)));
+        state.read_entry_ids.clear();
+        scroll.update(&feed, &state, None, false);
+        assert!(!scroll.reveal("0"));
+
+        let mut empty = feed.clone();
+        empty.entries.clear();
+        let mut scroll = FeedScroll::default();
+        scroll.update(&empty, &state, None, false);
+        scroll.update(&feed, &state, None, false);
+        assert!(!scroll.reveal("0"));
+    }
+
+    #[test]
+    fn rss_manual_navigation_cancels_initial_scroll_and_selection_anchoring() {
+        let (feed, state) = feed_fixture();
+        for loaded in [false, true] {
+            let mut scroll = FeedScroll::default();
+            if loaded {
+                scroll.update(&feed, &state, None, false);
+            }
+            scroll.manual_scroll();
+            scroll.update(&feed, &state, None, false);
+            assert!(!scroll.reveal("0"));
+            scroll.select("4");
+            scroll.update(&feed, &state, Some("4"), false);
+            assert!(scroll.reveal("4"));
+            // Keep the selected card aligned as preceding cards collapse.
+            assert!(scroll.reveal("4"));
+            scroll.manual_scroll();
+            scroll.update(&feed, &state, Some("4"), false);
+            assert!(!scroll.reveal("4"));
+            // Keyboard navigation establishes a new anchor.
+            scroll.update(&feed, &state, Some("5"), false);
+            assert!(!scroll.reveal("4"));
+            assert!(scroll.reveal("5"));
+        }
+    }
 
     #[test]
     fn emphasis_keeps_the_bundled_sans_family_with_cyrillic() {
