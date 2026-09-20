@@ -37,7 +37,7 @@ all: check build native-external-smoke
 
 .PHONY: publish test-publish
 publish:
-	/usr/bin/arch -arm64 /usr/bin/python3 -B tools/publish.py
+	/usr/bin/arch -arm64 /usr/bin/python3 -B tools/publish.py $(PUBLISH_ARGS)
 
 test-publish:
 	$(RUN) python3 -B tools/test_publish.py

@@ -142,7 +142,16 @@ asset hashes and pushes the original release commit and tags; the repair commits
 remain local for the next release. It does not rebuild, change the saved source
 SHA or regenerate release notes. Uncommitted changes, unrelated history and
 changes to any other files remain errors. Before assets are prepared, HEAD must
-still match the pending release exactly.
+still match the pending release exactly by default.
+
+If a failed check needs a source or test repair, commit the repair on top of the
+pending release and run `make publish PUBLISH_ARGS=--resume-with-fixes`. This
+explicit mode is available only before assets are prepared and before the
+versioned tag or GitHub Release exists. It requires a clean descendant checkout
+with unchanged version files. It retains the pending version, regenerates its
+release notes, saves the repaired source SHA and reruns the full aggregate.
+Existing commits and saved state are preserved; no history is rewritten.
+The next publication uses the repaired release tag as its changelog boundary.
 
 Other independent changes to HEAD, the version files, prepared assets,
 existing release notes or remote tags cause an error rather than being

@@ -278,6 +278,101 @@ class RepositoryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "HEAD changed"):
             publish.commit_version(state)
 
+    def test_explicit_repair_retargets_unbuilt_release_without_bumping_version(self):
+        state = self.state()
+        publish.commit_version(state)
+        original = dict(state)
+        head = self.repair_publisher()
+        github = Mock()
+        github.remote_tag.return_value = None
+        github.release.return_value = None
+        with patch.object(publish, "release_notes", return_value="Repaired notes") as notes:
+            publish.resume_with_fixes(state, github)
+        notes.assert_called_once_with(state["base"], head)
+        self.assertEqual(state, {**original, "sha": head, "notes": "Repaired notes"})
+        self.assertEqual(json.loads(self.state_path.read_text()), state)
+        publish.commit_version(state)
+        self.assertEqual(self.git("rev-parse", "HEAD").strip(), head)
+
+    def test_next_release_starts_after_repaired_release_tag(self):
+        state = self.state()
+        publish.commit_version(state)
+        repaired = self.repair_publisher()
+        with self.assertRaisesRegex(ValueError, "no commits"):
+            publish.new_state("stillus-ai/stillus", "master", repaired, released_current_sha=repaired)
+        (self.root / "feature.txt").write_text("next feature")
+        self.git("add", "feature.txt")
+        self.git("commit", "-qm", "Next feature")
+        head = self.git("rev-parse", "HEAD").strip()
+        with patch.object(publish, "release_notes", return_value="Next notes") as notes:
+            next_state = publish.new_state("stillus-ai/stillus", "master", head,
+                                           released_current_sha=repaired)
+        self.assertEqual(next_state["version"], "0.1.2")
+        self.assertEqual(next_state["base"], repaired)
+        notes.assert_called_once_with(repaired, head)
+        with self.assertRaisesRegex(ValueError, "does not match"):
+            publish.new_state("stillus-ai/stillus", "master", head, released_current_sha=self.initial)
+
+    def test_explicit_repair_rejects_prepared_or_published_state(self):
+        state = self.state()
+        publish.commit_version(state)
+        self.repair_publisher()
+        for fields in ({"assets": {"fixture.zip": "digest"}}, {"published": True},
+                       {"release_published": True}, {"sha": None}):
+            with self.subTest(fields=fields), self.assertRaisesRegex(ValueError, "unbuilt pending"):
+                publish.resume_with_fixes({**state, **fields}, Mock())
+
+    def test_explicit_repair_rejects_existing_tags_and_releases(self):
+        state = self.state()
+        publish.commit_version(state)
+        self.repair_publisher()
+        for remote_tag, release, local_tag in ((SHA, None, False), (None, {}, False),
+                                               (None, None, True)):
+            github = Mock()
+            github.remote_tag.return_value = remote_tag
+            github.release.return_value = release
+            if local_tag:
+                self.git("tag", state["tag"])
+            with self.subTest(remote_tag=remote_tag, release=release, local_tag=local_tag), \
+                    self.assertRaisesRegex(ValueError, "already has a tag"), \
+                    patch.object(publish, "release_notes") as notes:
+                publish.resume_with_fixes(state, github)
+            notes.assert_not_called()
+
+    def test_explicit_repair_preserves_state_when_notes_fail(self):
+        state = self.state()
+        publish.commit_version(state)
+        saved = self.state_path.read_bytes()
+        self.repair_publisher()
+        github = Mock()
+        github.remote_tag.return_value = None
+        github.release.return_value = None
+        with patch.object(publish, "release_notes", side_effect=ValueError("notes failed")), \
+                self.assertRaisesRegex(ValueError, "notes failed"):
+            publish.resume_with_fixes(state, github)
+        self.assertEqual(self.state_path.read_bytes(), saved)
+        self.assertEqual(state, json.loads(saved))
+
+    def test_explicit_repair_rejects_changed_versions_and_dirty_checkout(self):
+        state = self.state()
+        publish.commit_version(state)
+        manifest = self.root / app_version.MANIFEST
+        manifest.write_text(manifest.read_text().replace('"0.1.1"', '"0.1.2"'))
+        with self.assertRaisesRegex(ValueError, "working tree changes"):
+            publish.resume_with_fixes(state, Mock())
+        self.git("add", app_version.MANIFEST)
+        self.git("commit", "-qm", "Independent version change")
+        with self.assertRaisesRegex(ValueError, "version files changed"):
+            publish.resume_with_fixes(state, Mock())
+
+    def test_explicit_repair_rejects_unrelated_history(self):
+        state = self.state()
+        publish.commit_version(state)
+        self.git("checkout", "-q", "--detach", self.initial)
+        self.repair_publisher()
+        with self.assertRaises(subprocess.CalledProcessError):
+            publish.resume_with_fixes(state, Mock())
+
     def test_prepared_release_rejects_source_changes(self):
         state = self.state()
         publish.commit_version(state)
@@ -603,7 +698,7 @@ class LatestTests(unittest.TestCase):
                 patch.object(publish, "new_state") as new_state, \
                 patch.object(publish, "build_assets") as build, \
                 patch.object(publish, "upload_release") as upload:
-            publish.main()
+            publish.main([])
         self.assertEqual(self.remote, SHA)
         self.assertTrue(self.saved[-1]["published"])
         new_state.assert_not_called()

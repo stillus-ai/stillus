@@ -4,6 +4,7 @@
 """Publish a resumable local release using host Git and Docker Rust builds."""
 
 from contextlib import contextmanager
+import argparse
 import fcntl
 import hashlib
 import json
@@ -119,6 +120,28 @@ def require_release_checkout(state):
     # A committed publisher repair may upload already-built bytes from the saved
     # release SHA. It must never rebuild them from a different checkout.
     require_clean(state["sha"], allowed_paths=PUBLISHER_PATHS if state.get("assets") else ())
+
+
+def resume_with_fixes(state, github):
+    """Explicitly retarget an unbuilt, untagged release to committed repairs."""
+    if (not state or not state.get("sha") or state.get("assets")
+            or state.get("published") or state.get("release_published")):
+        raise ValueError("resuming with fixes requires an unbuilt pending release")
+    head = git("rev-parse", "HEAD").strip()
+    require_clean(head)
+    if head == state["sha"]:
+        return
+    git("merge-base", "--is-ancestor", state["sha"], head)
+    if git("diff", "--name-only", state["sha"], head, "--", *VERSION_FILES).strip():
+        raise ValueError("release version files changed; refusing to resume with fixes")
+    if (git("tag", "--list", state["tag"]).strip()
+            or github.remote_tag(state["tag"]) or github.release(state["tag"]) is not None):
+        raise ValueError("release already has a tag or GitHub release; refusing to change its sources")
+    notes = release_notes(state["base"], head)
+    require_clean(head)
+    updated = {**state, "sha": head, "notes": notes}
+    save_state(updated)
+    state.update(updated)
 
 
 def repository_from_remote(url):
@@ -335,8 +358,11 @@ def release_notes(base, head):
 def new_state(repository, branch, head, released_current_sha=None):
     base = previous_version_commit(head)
     if base is not None and released_current_sha and base != released_current_sha:
-        raise ValueError("the current release tag does not match its version commit")
-    if base is None:
+        # A release repaired before its build can include commits after the bump.
+        git("merge-base", "--is-ancestor", released_current_sha, head)
+        if previous_version_commit(released_current_sha) != base:
+            raise ValueError("the current release tag does not match its version commit")
+    if released_current_sha:
         base = released_current_sha
     initial = base is None
     if not initial and base == head:
@@ -588,7 +614,11 @@ def upload_release(state, github, directory):
     finish_publication(state, github)
 
 
-def main():
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--resume-with-fixes", action="store_true",
+                        help="include committed repairs in an unbuilt, untagged pending release")
+    arguments = parser.parse_args(argv)
     if platform.system() != "Darwin" or platform.machine() != "arm64":
         raise ValueError("make publish requires an Apple Silicon Mac for all three local builds")
     for executable in ("docker", "xcrun", "git"):
@@ -613,6 +643,8 @@ def main():
         state = json.loads(STATE.read_text(encoding="utf-8")) if STATE.exists() else None
         if state and (state["format"] != 1 or state["repository"] != repository or state["branch"] != branch):
             raise ValueError("saved publication belongs to another repository or branch")
+        if arguments.resume_with_fixes:
+            resume_with_fixes(state, github)
         if state and (state.get("release_published") and not state["published"]
                       or state["published"] and head == state["sha"]):
             finish_publication(state, github)
